@@ -3,6 +3,7 @@ from telegram.ext import ContextTypes
 
 from bot.confirmation import on_edit_reply, send_confirmation_cards
 from bot.onboarding import on_employee_message
+from bot.status_cycle import on_employee_reply
 from config.projects import PROJECTS
 from config.settings import ROMAN_TELEGRAM_ID
 from prompts.extraction import extract_tasks
@@ -11,6 +12,7 @@ from sheets.tasks import get_all_tasks
 
 def _is_roman(update: Update) -> bool:
     return str(update.effective_user.id) == str(ROMAN_TELEGRAM_ID)
+
 
 # telegram_user_id -> очередь задач, ожидающих выбора проекта Романом
 _awaiting_project: dict[int, list[dict]] = {}
@@ -38,8 +40,11 @@ def _find_project_by_assignee(name: str) -> str | None:
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Раздел 2.2 PROJECT_SPEC.md: личное сообщение Романа — разовая задача
     или протокол встречи, Claude сам решает по содержанию. Сообщения от
-    кого-либо ещё — это сотрудники, для них действует логика онбординга."""
+    кого-либо ещё — это сотрудники: сначала проверяем, не ответ ли это на
+    открытый вопрос о статусе (раздел 4), и только потом — онбординг."""
     if not _is_roman(update):
+        if await on_employee_reply(update, context):
+            return
         await on_employee_message(update, context)
         return
 

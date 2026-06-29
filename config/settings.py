@@ -12,6 +12,9 @@ DAILY_REPORT_TIME = os.getenv("DAILY_REPORT_TIME", "20:00")
 WEEKLY_REPORT_DAY = os.getenv("WEEKLY_REPORT_DAY", "fri")
 WEEKLY_REPORT_TIME = os.getenv("WEEKLY_REPORT_TIME", "22:00")
 
+# Когда раз в день проверять задачи с подошедшим/просроченным deadline_current (раздел 4)
+STATUS_CHECK_TIME = os.getenv("STATUS_CHECK_TIME", "10:00")
+
 # Сколько часов сообщений хранить в скользящем буфере группового чата
 MESSAGE_BUFFER_HOURS = int(os.getenv("MESSAGE_BUFFER_HOURS", "3"))
 # Сколько часов контекста брать для экстракции задач при срабатывании триггера
