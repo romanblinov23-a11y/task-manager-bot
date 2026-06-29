@@ -5,7 +5,7 @@ from telegram import Bot, Update
 from telegram.ext import ContextTypes
 
 from config.projects import PROJECTS
-from config.settings import ROMAN_TELEGRAM_ID
+from config.settings import MAX_CLARIFYING_ROUNDS, ROMAN_TELEGRAM_ID
 from prompts.status_reply import parse_status_reply
 from sheets.comments import append_comment
 from sheets.log import append_log_entry
@@ -72,7 +72,7 @@ async def run_status_check(bot: Bot) -> None:
 
 async def _enqueue_question(bot: Bot, telegram_id: int, project: str, task: dict) -> None:
     question = f"Привет! Как дела с задачей «{task['task_text']}»? Срок: {task.get('deadline_current') or '—'}."
-    entry = {"project": project, "task": task, "bot_question": question}
+    entry = {"project": project, "task": task, "bot_question": question, "unclear_count": 0}
     queue = _pending.setdefault(telegram_id, [])
     queue.append(entry)
     if len(queue) == 1:
@@ -110,12 +110,17 @@ async def on_employee_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if not result["status_clear"]:
         _log_help_request_if_new(project, task, result)
-        entry["bot_question"] = result["clarifying_question"]
-        await update.effective_message.reply_text(result["clarifying_question"])
-        await _maybe_signal_roman(context.bot, project, task, result)
-        return True
+        entry["unclear_count"] = entry.get("unclear_count", 0) + 1
 
-    await _apply_status_update(context.bot, project, task, result)
+        if entry["unclear_count"] >= MAX_CLARIFYING_ROUNDS:
+            await _escalate_to_roman(context.bot, project, task, result)
+        else:
+            entry["bot_question"] = result["clarifying_question"]
+            await update.effective_message.reply_text(result["clarifying_question"])
+            await _maybe_signal_roman(context.bot, project, task, result)
+            return True
+    else:
+        await _apply_status_update(context.bot, project, task, result)
 
     queue.pop(0)
     if queue:
@@ -124,6 +129,20 @@ async def on_employee_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         del _pending[user_id]
 
     return True
+
+
+async def _escalate_to_roman(bot: Bot, project: str, task: dict, result: dict) -> None:
+    """Раздел 10: после MAX_CLARIFYING_ROUNDS неясных ответов подряд бот
+    перестаёт уточнять у сотрудника и передаёт решение Роману."""
+    assignee = task.get("assignee") or "—"
+    await bot.send_message(
+        chat_id=ROMAN_TELEGRAM_ID,
+        text=(
+            f"⚠️ Не получилось прояснить статус задачи «{task['task_text']}» ({project}, "
+            f"исполнитель: {assignee}) после {MAX_CLARIFYING_ROUNDS} уточнений.\n"
+            f"Последний ответ: {result.get('comment_summary') or '—'}"
+        ),
+    )
 
 
 def _log_help_request_if_new(project: str, task: dict, result: dict) -> None:

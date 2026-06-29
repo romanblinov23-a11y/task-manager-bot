@@ -86,7 +86,10 @@ def extract_tasks(text: str, project_name: str | None = None, current_date: date
         _PROMPT_TEMPLATE
         .replace("{project_name}", project_name if project_name else "null")
         .replace("{current_date}", current_date.isoformat())
-        + f"\n\nТЕКСТ ДЛЯ АНАЛИЗА:\n{text}"
+        + "\n\nТЕКСТ ДЛЯ АНАЛИЗА (формат строк — \"[время] Имя: сообщение\"; "
+        "если автор сообщения говорит о себе в первом лице — \"я возьму\", "
+        "\"беру на себя\", \"взял, делаю\" — без явного имени, assignee — это "
+        "имя автора этой строки):\n" + text
     )
 
     data = parse_json_response(ask_claude(prompt))

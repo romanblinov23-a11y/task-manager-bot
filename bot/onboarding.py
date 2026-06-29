@@ -41,6 +41,9 @@ def _save() -> None:
 _load()
 
 
+_ROMAN_NAME_VARIANTS = {"роман", "рома"}
+
+
 def _normalize(name: str) -> str:
     return name.strip().lower()
 
@@ -89,7 +92,10 @@ def _try_match_and_backfill(user_id: int) -> list[tuple[str, str]]:
 
 def find_telegram_id_for_assignee(project: str, assignee_name: str) -> int | None:
     """Используется при создании новой задачи, чтобы сразу проставить
-    assignee_telegram_id, если сотрудник уже онбордился ранее."""
+    assignee_telegram_id, если сотрудник уже онбордился ранее. Роман — это
+    отдельный, заранее известный случай: его ID не требует онбординга."""
+    if _normalize(assignee_name) in _ROMAN_NAME_VARIANTS:
+        return int(ROMAN_TELEGRAM_ID)
     return _resolved.get(f"{project}|{_normalize(assignee_name)}")
 
 

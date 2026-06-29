@@ -16,6 +16,8 @@ STALE_DAYS = int(os.getenv("STALE_DAYS", "5"))
 
 # Когда раз в день проверять задачи с подошедшим/просроченным deadline_current (раздел 4)
 STATUS_CHECK_TIME = os.getenv("STATUS_CHECK_TIME", "10:00")
+# После скольких неясных ответов сотрудника подряд эскалировать Роману, а не уточнять дальше
+MAX_CLARIFYING_ROUNDS = int(os.getenv("MAX_CLARIFYING_ROUNDS", "2"))
 
 # Сколько часов сообщений хранить в скользящем буфере группового чата
 MESSAGE_BUFFER_HOURS = int(os.getenv("MESSAGE_BUFFER_HOURS", "3"))

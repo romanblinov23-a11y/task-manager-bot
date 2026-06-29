@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
@@ -40,11 +42,15 @@ def _find_project_by_assignee(name: str) -> str | None:
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Раздел 2.2 PROJECT_SPEC.md: личное сообщение Романа — разовая задача
     или протокол встречи, Claude сам решает по содержанию. Сообщения от
-    кого-либо ещё — это сотрудники: сначала проверяем, не ответ ли это на
-    открытый вопрос о статусе (раздел 4), и только потом — онбординг."""
+    кого-либо ещё — это сотрудники.
+
+    Открытый вопрос о статусе (раздел 4) проверяется первым для ВСЕХ,
+    включая Романа — он тоже может быть исполнителем задачи, и его ответ
+    на статус-вопрос не должен попасть в обработку как новая задача."""
+    if await on_employee_reply(update, context):
+        return
+
     if not _is_roman(update):
-        if await on_employee_reply(update, context):
-            return
         await on_employee_message(update, context)
         return
 
@@ -52,7 +58,8 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     message = update.effective_message
-    tasks = extract_tasks(message.text, project_name=None)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    tasks = extract_tasks(f"[{now}] Роман: {message.text}", project_name=None)
     if not tasks:
         await message.reply_text("Не нашёл в этом сообщении задач для фиксации.")
         return

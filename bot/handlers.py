@@ -7,7 +7,7 @@ from bot.buffer import BufferedMessage, MessageBuffer, format_context
 from bot.confirmation import send_confirmation_cards
 from bot.onboarding import record_group_member
 from config.chats import get_project_for_chat
-from config.settings import EXTRACTION_CONTEXT_HOURS
+from config.settings import EXTRACTION_CONTEXT_HOURS, ROMAN_TELEGRAM_ID
 from prompts.extraction import extract_tasks
 
 _buffer = MessageBuffer()
@@ -43,7 +43,10 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     chat = update.effective_chat
     logging.debug("Сообщение из группы %r (chat_id=%s): %r", chat.title, chat.id, message.text)
     sender = update.effective_user
-    sender_name = sender.full_name if sender else "Неизвестный"
+    if sender and str(sender.id) == str(ROMAN_TELEGRAM_ID):
+        sender_name = "Роман"  # нормализуем имя независимо от того, как оно записано в Telegram-профиле
+    else:
+        sender_name = sender.full_name if sender else "Неизвестный"
     record_group_member(chat.id, sender)
 
     buffered = BufferedMessage(
