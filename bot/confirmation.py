@@ -150,6 +150,21 @@ async def _confirm_task(query, confirmation_id: str, entry: dict) -> None:
     await query.edit_message_text(_build_card_text(entry) + f"\n\n✅ Добавлено как {task_id}.")
     await query.message.reply_text(f"✅ Задача {task_id} добавлена в таблицу «{project}».")
 
+    if telegram_id:
+        await _notify_assignee(query.get_bot(), telegram_id, project, task)
+
+
+async def _notify_assignee(bot: Bot, telegram_id: int, project: str, task: dict) -> None:
+    deadline = task.get("deadline") or "—"
+    text = (
+        f"📌 Тебе назначена новая задача\n\n"
+        f"Проект: {project}\n"
+        f"Категория: {task.get('category', '—')}\n"
+        f"Задача: {task['task_text']}\n"
+        f"Срок: {deadline}"
+    )
+    await bot.send_message(chat_id=telegram_id, text=text)
+
 
 async def on_employee_disambiguation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Роман выбрал, кому из нескольких одноимённых сотрудников принадлежит
