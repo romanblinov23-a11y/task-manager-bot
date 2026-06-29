@@ -5,6 +5,7 @@ from telegram.ext import ContextTypes
 
 from bot.buffer import BufferedMessage, MessageBuffer, format_context
 from bot.confirmation import send_confirmation_cards
+from bot.onboarding import record_group_member
 from config.chats import get_project_for_chat
 from config.settings import EXTRACTION_CONTEXT_HOURS
 from prompts.extraction import extract_tasks
@@ -43,6 +44,7 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     logging.debug("Сообщение из группы %r (chat_id=%s): %r", chat.title, chat.id, message.text)
     sender = update.effective_user
     sender_name = sender.full_name if sender else "Неизвестный"
+    record_group_member(chat.id, sender)
 
     buffered = BufferedMessage(
         message_id=message.message_id,

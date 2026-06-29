@@ -3,6 +3,7 @@ import uuid
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from bot.onboarding import find_telegram_id_for_assignee
 from config.settings import ROMAN_TELEGRAM_ID
 from sheets.comments import append_comment
 from sheets.tasks import create_task
@@ -102,13 +103,16 @@ async def on_confirmation_callback(update: Update, context: ContextTypes.DEFAULT
 async def _confirm_task(query, confirmation_id: str, entry: dict) -> None:
     task = entry["task"]
     project = entry["project"] or task.get("project")
+    assignee = task.get("assignee") or ""
+    telegram_id = find_telegram_id_for_assignee(project, assignee) if assignee else None
 
     task_id = create_task(
         project,
         source=entry["source"],
         task_text=task["task_text"],
         category=task["category"],
-        assignee=task.get("assignee") or "",
+        assignee=assignee,
+        assignee_telegram_id=str(telegram_id) if telegram_id else "",
         source_chat=entry.get("source_chat", ""),
         source_link=entry.get("source_link", ""),
         deadline_original=task.get("deadline") or "",
