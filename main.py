@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, time as dt_time
+from datetime import time as dt_time
 
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
@@ -15,6 +15,7 @@ from config.settings import (
     DAILY_REPORT_TIME,
     STATUS_CHECK_TIME,
     TELEGRAM_BOT_TOKEN,
+    TZ,
     WEEKLY_REPORT_DAY,
     WEEKLY_REPORT_TIME,
 )
@@ -55,12 +56,11 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_project_selected, pattern=r"^project:"))
     app.add_handler(CallbackQueryHandler(on_employee_disambiguation, pattern=r"^employee:"))
 
-    local_tzinfo = datetime.now().astimezone().tzinfo
-    app.job_queue.run_daily(_status_check_job, time=_parse_time(STATUS_CHECK_TIME, local_tzinfo))
-    app.job_queue.run_daily(_daily_report_job, time=_parse_time(DAILY_REPORT_TIME, local_tzinfo))
+    app.job_queue.run_daily(_status_check_job, time=_parse_time(STATUS_CHECK_TIME, TZ))
+    app.job_queue.run_daily(_daily_report_job, time=_parse_time(DAILY_REPORT_TIME, TZ))
     app.job_queue.run_daily(
         _weekly_report_job,
-        time=_parse_time(WEEKLY_REPORT_TIME, local_tzinfo),
+        time=_parse_time(WEEKLY_REPORT_TIME, TZ),
         days=(_WEEKDAYS[WEEKLY_REPORT_DAY.lower()],),
     )
 

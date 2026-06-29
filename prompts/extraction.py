@@ -1,6 +1,7 @@
 from datetime import date
 
 from config.projects import CATEGORIES, PROJECTS
+from config.timeutil import today as tz_today
 from prompts.client import ask_claude
 from prompts.utils import parse_json_response
 
@@ -80,7 +81,7 @@ def extract_tasks(text: str, project_name: str | None = None, current_date: date
     """Промпт 1: находит все задачи/договорённости в переданном тексте
     (буфер чата / личка Романа / протокол встречи)."""
     if current_date is None:
-        current_date = date.today()
+        current_date = tz_today()
 
     prompt = (
         _PROMPT_TEMPLATE

@@ -1,5 +1,6 @@
 from datetime import date
 
+from config.timeutil import today as tz_today
 from prompts.client import ask_claude
 from prompts.utils import parse_json_response
 
@@ -90,7 +91,7 @@ def parse_status_reply(
 ) -> dict:
     """Промпт 2: разбирает ответ сотрудника на вопрос бота о статусе задачи."""
     if current_date is None:
-        current_date = date.today()
+        current_date = tz_today()
 
     prompt = (
         _PROMPT_TEMPLATE

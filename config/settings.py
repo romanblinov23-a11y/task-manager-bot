@@ -1,4 +1,11 @@
 import os
+from zoneinfo import ZoneInfo
+
+# Часовой пояс, в котором бот считает "сегодня", расписание отчётов и
+# таймстемпы в таблицах — не зависит от часового пояса хоста (важно для
+# деплоя на Railway, где система обычно в UTC, а Роман и сотрудники — в MSK).
+TIMEZONE = os.getenv("TIMEZONE", "Europe/Moscow")
+TZ = ZoneInfo(TIMEZONE)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")

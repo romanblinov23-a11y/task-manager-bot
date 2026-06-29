@@ -6,6 +6,8 @@ from telegram.ext import ContextTypes
 
 from config.projects import PROJECTS
 from config.settings import ROMAN_TELEGRAM_ID, STALE_DAYS
+from config.timeutil import now_naive as tz_now_naive
+from config.timeutil import today as tz_today
 from prompts.weekly_analytics import generate_weekly_report
 from sheets.client import open_project_spreadsheet
 from sheets.schema import LOG_SHEET
@@ -93,12 +95,12 @@ def _build_project_stats(project: str, stale_days: int, today: date, week_ago: d
             )
 
         last_check = _parse_dt(task.get("last_status_check")) or _parse_dt(task.get("created_at"))
-        if status != "выполнена" and last_check and (datetime.now() - last_check).days >= stale_days:
+        if status != "выполнена" and last_check and (tz_now_naive() - last_check).days >= stale_days:
             stale_tasks.append(
                 {
                     "task_id": task["task_id"],
                     "task_text": task["task_text"],
-                    "дней_без_обновления": (datetime.now() - last_check).days,
+                    "дней_без_обновления": (tz_now_naive() - last_check).days,
                 }
             )
 
@@ -128,8 +130,8 @@ def _build_multi_project_employees(projects_stats: list[dict]) -> list[dict]:
 
 
 def build_weekly_report(stale_days: int = STALE_DAYS) -> str:
-    today = date.today()
-    week_ago = datetime.now() - timedelta(days=7)
+    today = tz_today()
+    week_ago = tz_now_naive() - timedelta(days=7)
 
     projects_stats = [_build_project_stats(p, stale_days, today, week_ago) for p in PROJECTS]
     multi_project_employees = _build_multi_project_employees(projects_stats)

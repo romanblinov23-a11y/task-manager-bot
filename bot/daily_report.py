@@ -1,9 +1,8 @@
-from datetime import date
-
 from telegram import Bot
 
 from config.projects import PROJECTS
 from config.settings import ROMAN_TELEGRAM_ID
+from config.timeutil import today as tz_today
 from sheets.tasks import get_all_tasks
 
 
@@ -13,7 +12,8 @@ def _task_label(task: dict) -> str:
 
 def build_daily_report() -> str:
     """Раздел 6 PROJECT_SPEC.md: прямой подсчёт по Листу 1, без Claude."""
-    today_str = date.today().isoformat()
+    today = tz_today()
+    today_str = today.isoformat()
     sections = []
 
     for project in PROJECTS:
@@ -44,7 +44,7 @@ def build_daily_report() -> str:
                 lines.append("🆘 Нужна помощь: " + "; ".join(_task_label(t) for t in needs_help))
         sections.append("\n".join(lines))
 
-    header = f"📋 Ежедневный отчёт ({date.today().strftime('%d.%m.%Y')})"
+    header = f"📋 Ежедневный отчёт ({today.strftime('%d.%m.%Y')})"
     return header + "\n\n" + "\n\n".join(sections)
 
 

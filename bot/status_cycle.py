@@ -1,11 +1,13 @@
 import logging
-from datetime import date, datetime
+from datetime import date
 
 from telegram import Bot, Update
 from telegram.ext import ContextTypes
 
 from config.projects import PROJECTS
 from config.settings import MAX_CLARIFYING_ROUNDS, ROMAN_TELEGRAM_ID
+from config.timeutil import now as tz_now
+from config.timeutil import today as tz_today
 from prompts.status_reply import parse_status_reply
 from sheets.comments import append_comment
 from sheets.log import append_log_entry
@@ -16,7 +18,7 @@ _pending: dict[int, list[dict]] = {}
 
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return tz_now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _is_due(task: dict, today: date) -> bool:
@@ -42,7 +44,7 @@ async def run_status_check(bot: Bot) -> None:
     таблицы на задачи с подошедшим/просроченным deadline_current и
     запускает опрос исполнителя в личке."""
     logging.info("Запуск ежедневной проверки статусов задач")
-    today = date.today()
+    today = tz_today()
     skipped_no_telegram_id: list[tuple[str, dict]] = []
 
     for project in PROJECTS:

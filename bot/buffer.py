@@ -2,7 +2,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from config.settings import MESSAGE_BUFFER_HOURS
+from config.settings import MESSAGE_BUFFER_HOURS, TZ
 
 
 @dataclass
@@ -45,6 +45,6 @@ def format_context(messages: list[BufferedMessage]) -> str:
     """Сериализует сообщения буфера в текст для передачи в Промпт 1."""
     lines = []
     for m in messages:
-        ts = m.timestamp.astimezone().strftime("%Y-%m-%d %H:%M")
+        ts = m.timestamp.astimezone(TZ).strftime("%Y-%m-%d %H:%M")
         lines.append(f"[{ts}] {m.sender_name}: {m.text}")
     return "\n".join(lines)

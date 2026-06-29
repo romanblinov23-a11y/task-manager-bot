@@ -1,12 +1,11 @@
-from datetime import datetime
-
 from config.projects import COMMENT_AUTHORS
+from config.timeutil import now as tz_now
 from sheets.client import open_project_spreadsheet
 from sheets.schema import COMMENTS_COLUMNS, COMMENTS_SHEET
 
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return tz_now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def append_comment(

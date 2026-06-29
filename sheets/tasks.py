@@ -1,14 +1,13 @@
-from datetime import datetime
-
 import gspread
 
 from config.projects import CATEGORIES, PROJECTS, STATUSES
+from config.timeutil import now as tz_now
 from sheets.client import open_project_spreadsheet
 from sheets.schema import TASKS_COLUMNS, TASKS_SHEET
 
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return tz_now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _worksheet(project: str) -> gspread.Worksheet:

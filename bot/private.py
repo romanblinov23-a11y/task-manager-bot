@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
@@ -8,6 +6,7 @@ from bot.onboarding import on_employee_message
 from bot.status_cycle import on_employee_reply
 from config.projects import PROJECTS
 from config.settings import ROMAN_TELEGRAM_ID
+from config.timeutil import now as tz_now
 from prompts.extraction import extract_tasks
 from sheets.tasks import get_all_tasks
 
@@ -58,7 +57,7 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     message = update.effective_message
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now = tz_now().strftime("%Y-%m-%d %H:%M")
     tasks = extract_tasks(f"[{now}] Роман: {message.text}", project_name=None)
     if not tasks:
         await message.reply_text("Не нашёл в этом сообщении задач для фиксации.")
