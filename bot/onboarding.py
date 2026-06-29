@@ -139,6 +139,24 @@ def find_telegram_id_for_assignee(project: str, assignee_name: str) -> int | Non
     return _resolved.get(f"{project}|{_normalize(assignee_name)}")
 
 
+def get_onboarded_employees() -> list[dict]:
+    """Все сотрудники, прошедшие онбординг, с их данными — для команды /onboarded."""
+    result = []
+    for user_id, info in _known_users.items():
+        if not info.get("onboarded"):
+            continue
+        result.append(
+            {
+                "user_id": int(user_id),
+                "real_name": info.get("real_name") or "",
+                "full_name": info.get("full_name") or "",
+                "username": info.get("username") or "",
+                "chats": _seen_in_chats.get(user_id, []),
+            }
+        )
+    return result
+
+
 def record_group_member(chat_id: int, user: User | None) -> None:
     """Пассивно запоминает, кто писал в группе — нужно для последующего
     сопоставления Telegram-аккаунта с именем в таблице при онбординге."""
@@ -268,6 +286,7 @@ _COMMANDS_TEXT = (
     "/employee <имя> — задачи сотрудника по всем проектам\n"
     "/stuck — задачи с 2+ переносами или давно без обновления\n"
     "/needhelp — задачи, где просили помощи\n"
+    "/onboarded — кто прошёл онбординг и какие чаты привязаны к проектам\n"
     "/weekly — еженедельная аналитика по запросу\n"
     "/register_project <проект> — привязать текущую группу к проекту (вызывать внутри группы)\n"
     "/onboard <username> — принудительно онбордить сотрудника"

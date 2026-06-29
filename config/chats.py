@@ -45,3 +45,12 @@ def register_chat(chat_id: int, project: str) -> None:
     """Привязывает чат к проекту немедленно, без перезапуска бота (команда /register_project)."""
     _runtime_map[chat_id] = project
     _save_runtime()
+
+
+def get_all_bindings() -> list[tuple[int, str, str]]:
+    """Все привязки chat_id -> project, с указанием источника, для /onboarded."""
+    bindings = [(chat_id, project, "env") for chat_id, project in _ENV_MAP.items()]
+    bindings += [
+        (chat_id, project, "runtime") for chat_id, project in _runtime_map.items() if chat_id not in _ENV_MAP
+    ]
+    return bindings

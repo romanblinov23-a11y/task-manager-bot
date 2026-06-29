@@ -10,7 +10,13 @@ from bot.daily_report import send_daily_report
 from bot.handlers import on_group_message
 from bot.onboarding import on_force_onboard, on_help, on_start
 from bot.private import on_private_document, on_private_text, on_project_selected
-from bot.queries import on_employee_command, on_needhelp_command, on_status_command, on_stuck_command
+from bot.queries import (
+    on_employee_command,
+    on_needhelp_command,
+    on_onboarded_command,
+    on_status_command,
+    on_stuck_command,
+)
 from bot.status_cycle import run_status_check
 from bot.weekly_report import on_weekly_command, send_weekly_report
 from config.settings import (
@@ -51,6 +57,7 @@ async def _set_bot_commands(app) -> None:
             BotCommand("employee", "Задачи сотрудника по всем проектам"),
             BotCommand("stuck", "Подвисшие задачи"),
             BotCommand("needhelp", "Задачи, где нужна помощь"),
+            BotCommand("onboarded", "Кто онбордился и привязки чатов"),
             BotCommand("weekly", "Еженедельная аналитика по запросу"),
             BotCommand("help", "Список команд"),
         ]
@@ -67,6 +74,7 @@ def main() -> None:
     app.add_handler(CommandHandler("employee", on_employee_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("stuck", on_stuck_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("needhelp", on_needhelp_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("onboarded", on_onboarded_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("register_project", on_register_project, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("onboard", on_force_onboard, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, on_group_message))
