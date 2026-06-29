@@ -10,12 +10,14 @@ from sheets.tasks import get_all_tasks, update_task
 
 _STORE_PATH = Path(__file__).resolve().parent.parent / "data" / "known_users.json"
 
-# user_id (str) -> {"username": str|None, "full_name": str, "onboarded": bool}
+# user_id (str) -> {"username": str|None, "full_name": str, "real_name": str|None, "onboarded": bool}
 _known_users: dict[str, dict] = {}
 # user_id (str) -> [chat_id, ...] — группы, где этот человек писал сообщения
 _seen_in_chats: dict[str, list[int]] = {}
 # "{project}|{normalized_assignee}" -> telegram_id — уже разрешённые сопоставления
 _resolved: dict[str, int] = {}
+# user_id (str), которым сейчас задан вопрос "как тебя зовут в рабочих чатах?"
+_awaiting_name: set[str] = set()
 
 
 def _load() -> None:
@@ -48,16 +50,25 @@ def _normalize(name: str) -> str:
     return name.strip().lower()
 
 
-def _name_matches(candidate: str, full_name: str, username: str | None) -> bool:
+def _name_matches(candidate: str, user: dict) -> bool:
+    """Сравнивает имя assignee с известными данными о сотруднике. real_name
+    (то, как сотрудник сам назвался при онбординге) приоритетнее
+    full_name из Telegram-профиля — у многих там не настоящее имя."""
     candidate_norm = _normalize(candidate)
     if not candidate_norm:
         return False
-    full_name_norm = _normalize(full_name)
-    if candidate_norm == full_name_norm:
-        return True
-    first_name = full_name_norm.split()[0] if full_name_norm else ""
-    if candidate_norm == first_name:
-        return True
+
+    for field in ("real_name", "full_name"):
+        value_norm = _normalize(user.get(field) or "")
+        if not value_norm:
+            continue
+        if candidate_norm == value_norm:
+            return True
+        first_word = value_norm.split()[0] if value_norm else ""
+        if candidate_norm == first_word:
+            return True
+
+    username = user.get("username")
     if username and candidate_norm == _normalize(username):
         return True
     return False
@@ -76,11 +87,11 @@ def find_homonyms(project: str, assignee_name: str) -> list[dict]:
         user = _known_users.get(user_id, {})
         if not user.get("onboarded"):
             continue
-        if _name_matches(assignee_name, user.get("full_name", ""), user.get("username")):
+        if _name_matches(assignee_name, user):
             candidates.append(
                 {
                     "user_id": int(user_id),
-                    "full_name": user.get("full_name") or "",
+                    "full_name": user.get("real_name") or user.get("full_name") or "",
                     "username": user.get("username") or "",
                 }
             )
@@ -107,7 +118,7 @@ def _try_match_and_backfill(user_id: int) -> list[tuple[str, str]]:
             assignee = task.get("assignee", "")
             if not assignee or task.get("assignee_telegram_id"):
                 continue
-            if not _name_matches(assignee, user.get("full_name", ""), user.get("username")):
+            if not _name_matches(assignee, user):
                 continue
             if len(find_homonyms(project, assignee)) > 1:
                 continue
@@ -155,6 +166,11 @@ async def on_employee_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     ему в личку (раздел 4: "/start или любое сообщение")."""
     user = update.effective_user
     user_id = str(user.id)
+
+    if user_id in _awaiting_name:
+        await _save_real_name_and_continue(update)
+        return
+
     already_onboarded = _known_users.get(user_id, {}).get("onboarded", False)
 
     _known_users.setdefault(user_id, {})
@@ -163,19 +179,44 @@ async def on_employee_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     _known_users[user_id]["onboarded"] = True
     _save()
 
+    if not _known_users[user_id].get("real_name"):
+        _awaiting_name.add(user_id)
+        await update.effective_message.reply_text(
+            "Привет! Я Енисей — бот-менеджер задач. Как тебя зовут в рабочих чатах "
+            "(имя, по которому к тебе обращаются коллеги)? Напиши его следующим сообщением — "
+            "это поможет находить твои задачи, даже если в Telegram у тебя другое имя или ник."
+        )
+        return
+
     if already_onboarded:
         return
 
-    matched = _try_match_and_backfill(user.id)
+    await _greet_after_onboarding(update, user.id)
+
+
+async def _save_real_name_and_continue(update: Update) -> None:
+    user_id = str(update.effective_user.id)
+    real_name = update.effective_message.text.strip()
+
+    _awaiting_name.discard(user_id)
+    _known_users.setdefault(user_id, {})
+    _known_users[user_id]["real_name"] = real_name
+    _save()
+
+    await update.effective_message.reply_text(f"Спасибо! Записал тебя как «{real_name}».")
+    await _greet_after_onboarding(update, int(user_id))
+
+
+async def _greet_after_onboarding(update: Update, user_id: int) -> None:
+    matched = _try_match_and_backfill(user_id)
     if matched:
         await update.effective_message.reply_text(
-            "Привет! Я Енисей — бот-менеджер задач. Вижу, что на тебя уже есть задача "
-            "в таблице — буду писать сюда, если понадобится спросить про статус или сроки."
+            "Вижу, что на тебя уже есть задача в таблице — буду писать сюда, если "
+            "понадобится спросить про статус или сроки."
         )
     else:
         await update.effective_message.reply_text(
-            "Привет! Я Енисей — бот-менеджер задач. Записал тебя: как только появится "
-            "задача на твоё имя, напишу сюда, чтобы спросить про статус."
+            "Как только появится задача на твоё имя, напишу сюда, чтобы спросить про статус."
         )
 
 
@@ -209,7 +250,7 @@ async def on_force_onboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     _known_users[user_id]["onboarded"] = True
     _save()
 
-    full_name = _known_users[user_id].get("full_name") or username
+    full_name = _known_users[user_id].get("real_name") or _known_users[user_id].get("full_name") or username
     matched = _try_match_and_backfill(int(user_id))
     if matched:
         details = "; ".join(f"{project}: {name}" for project, name in matched)
