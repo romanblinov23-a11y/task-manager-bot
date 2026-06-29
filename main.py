@@ -7,7 +7,7 @@ from bot.chat_registration import on_register_project
 from bot.confirmation import on_confirmation_callback, on_employee_disambiguation
 from bot.daily_report import send_daily_report
 from bot.handlers import on_group_message
-from bot.onboarding import on_start
+from bot.onboarding import on_force_onboard, on_start
 from bot.private import on_private_document, on_private_text, on_project_selected
 from bot.status_cycle import run_status_check
 from bot.weekly_report import on_weekly_command, send_weekly_report
@@ -47,6 +47,7 @@ def main() -> None:
     app.add_handler(CommandHandler("start", on_start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("weekly", on_weekly_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("register_project", on_register_project, filters=filters.ChatType.GROUPS))
+    app.add_handler(CommandHandler("onboard", on_force_onboard, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT, on_group_message))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))

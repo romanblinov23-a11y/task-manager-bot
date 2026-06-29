@@ -179,6 +179,48 @@ async def on_employee_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
 
+async def on_force_onboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Команда Романа в личке: /onboard <username> — принудительно онбордит
+    сотрудника без ожидания, что он сам напишет боту. Работает только для
+    тех, кого бот уже где-то видел (хотя бы раз написал в привязанной
+    группе) — Telegram не отдаёт ID по username без этого, обойти нельзя."""
+    if str(update.effective_user.id) != str(ROMAN_TELEGRAM_ID):
+        return
+
+    if not context.args:
+        await update.effective_message.reply_text("Использование: /onboard <username>\nНапример: /onboard ivan_petrov")
+        return
+
+    username = context.args[0].lstrip("@").strip().lower()
+    user_id = next(
+        (uid for uid, info in _known_users.items() if (info.get("username") or "").lower() == username),
+        None,
+    )
+
+    if user_id is None:
+        await update.effective_message.reply_text(
+            f"Не нашёл @{username} среди тех, кто писал в привязанных группах. "
+            "Telegram не даёт ботам искать пользователя по username напрямую — "
+            "попросите сотрудника один раз написать что-нибудь в рабочем чате "
+            "или боту в личку, и повторите команду."
+        )
+        return
+
+    _known_users[user_id]["onboarded"] = True
+    _save()
+
+    full_name = _known_users[user_id].get("full_name") or username
+    matched = _try_match_and_backfill(int(user_id))
+    if matched:
+        details = "; ".join(f"{project}: {name}" for project, name in matched)
+        await update.effective_message.reply_text(f"✅ {full_name} (@{username}) онбордён. Привязаны задачи — {details}.")
+    else:
+        await update.effective_message.reply_text(
+            f"✅ {full_name} (@{username}) онбордён. Подходящих задач пока не нашёл — "
+            "привяжутся автоматически, когда появятся."
+        )
+
+
 async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if str(update.effective_user.id) == str(ROMAN_TELEGRAM_ID):
         await update.effective_message.reply_text(
