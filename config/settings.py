@@ -1,0 +1,22 @@
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+
+GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "credentials.json")
+
+ROMAN_TELEGRAM_ID = os.getenv("ROMAN_TELEGRAM_ID")
+
+DAILY_REPORT_TIME = os.getenv("DAILY_REPORT_TIME", "20:00")
+WEEKLY_REPORT_DAY = os.getenv("WEEKLY_REPORT_DAY", "fri")
+WEEKLY_REPORT_TIME = os.getenv("WEEKLY_REPORT_TIME", "22:00")
+
+# Сколько часов сообщений хранить в скользящем буфере группового чата
+MESSAGE_BUFFER_HOURS = int(os.getenv("MESSAGE_BUFFER_HOURS", "3"))
+# Сколько часов контекста брать для экстракции задач при срабатывании триггера
+EXTRACTION_CONTEXT_HOURS = int(os.getenv("EXTRACTION_CONTEXT_HOURS", "2"))
