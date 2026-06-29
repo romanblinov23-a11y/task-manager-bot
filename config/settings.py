@@ -12,6 +12,9 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "credentials.json")
+# Альтернатива GOOGLE_SERVICE_ACCOUNT_FILE для хостов без локальной файловой
+# системы (Railway) — содержимое JSON-ключа целиком, одной строкой
+GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 
 ROMAN_TELEGRAM_ID = os.getenv("ROMAN_TELEGRAM_ID")
 

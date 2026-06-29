@@ -1,8 +1,10 @@
+import json
+
 import gspread
 from google.oauth2.service_account import Credentials
 
 from config.projects import SPREADSHEET_IDS
-from config.settings import GOOGLE_SERVICE_ACCOUNT_FILE
+from config.settings import GOOGLE_SERVICE_ACCOUNT_FILE, GOOGLE_SERVICE_ACCOUNT_JSON
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -13,9 +15,16 @@ _client: gspread.Client | None = None
 
 
 def get_client() -> gspread.Client:
+    """Хосты типа Railway не дают примонтировать локальный файл с ключом —
+    там ключ передаётся целиком через GOOGLE_SERVICE_ACCOUNT_JSON. Локально
+    удобнее обычный файл (GOOGLE_SERVICE_ACCOUNT_FILE)."""
     global _client
     if _client is None:
-        creds = Credentials.from_service_account_file(GOOGLE_SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+        if GOOGLE_SERVICE_ACCOUNT_JSON:
+            info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
+            creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+        else:
+            creds = Credentials.from_service_account_file(GOOGLE_SERVICE_ACCOUNT_FILE, scopes=SCOPES)
         _client = gspread.authorize(creds)
     return _client
 
