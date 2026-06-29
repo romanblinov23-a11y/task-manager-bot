@@ -262,11 +262,30 @@ async def on_force_onboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
 
 
+_COMMANDS_TEXT = (
+    "Доступные команды:\n"
+    "/status <проект> — открытые задачи по проекту\n"
+    "/employee <имя> — задачи сотрудника по всем проектам\n"
+    "/stuck — задачи с 2+ переносами или давно без обновления\n"
+    "/needhelp — задачи, где просили помощи\n"
+    "/weekly — еженедельная аналитика по запросу\n"
+    "/register_project <проект> — привязать текущую группу к проекту (вызывать внутри группы)\n"
+    "/onboard <username> — принудительно онбордить сотрудника"
+)
+
+
 async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if str(update.effective_user.id) == str(ROMAN_TELEGRAM_ID):
         await update.effective_message.reply_text(
             "Привет, Роман! Готов: пишите сюда задачи и протоколы встреч (текстом или "
-            "файлом), либо тегайте меня в рабочих чатах — соберу оттуда договорённости."
+            "файлом), либо тегайте меня в рабочих чатах — соберу оттуда договорённости.\n\n"
+            + _COMMANDS_TEXT
         )
         return
     await on_employee_message(update, context)
+
+
+async def on_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if str(update.effective_user.id) != str(ROMAN_TELEGRAM_ID):
+        return
+    await update.effective_message.reply_text(_COMMANDS_TEXT)
