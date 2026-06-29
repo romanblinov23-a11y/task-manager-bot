@@ -109,6 +109,7 @@ async def on_employee_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
 
     if not result["status_clear"]:
+        _log_help_request_if_new(project, task, result)
         entry["bot_question"] = result["clarifying_question"]
         await update.effective_message.reply_text(result["clarifying_question"])
         await _maybe_signal_roman(context.bot, project, task, result)
@@ -125,9 +126,24 @@ async def on_employee_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return True
 
 
+def _log_help_request_if_new(project: str, task: dict, result: dict) -> None:
+    old_needs_help = task.get("needs_help", "нет")
+    if result.get("needs_help") and old_needs_help != "да":
+        append_log_entry(
+            project,
+            task["task_id"],
+            "запрос_помощи",
+            old_value=old_needs_help,
+            new_value="да",
+            reason_comment=result.get("comment_summary", ""),
+        )
+        task["needs_help"] = "да"
+
+
 async def _apply_status_update(bot: Bot, project: str, task: dict, result: dict) -> None:
     old_status = task.get("status", "")
     old_deadline = task.get("deadline_current") or ""
+    _log_help_request_if_new(project, task, result)
 
     updates = {
         "status": result["new_status"],

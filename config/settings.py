@@ -11,6 +11,8 @@ ROMAN_TELEGRAM_ID = os.getenv("ROMAN_TELEGRAM_ID")
 DAILY_REPORT_TIME = os.getenv("DAILY_REPORT_TIME", "20:00")
 WEEKLY_REPORT_DAY = os.getenv("WEEKLY_REPORT_DAY", "fri")
 WEEKLY_REPORT_TIME = os.getenv("WEEKLY_REPORT_TIME", "22:00")
+# Сколько дней без обновления статуса считается "застрявшей" задачей (раздел 8.3)
+STALE_DAYS = int(os.getenv("STALE_DAYS", "5"))
 
 # Когда раз в день проверять задачи с подошедшим/просроченным deadline_current (раздел 4)
 STATUS_CHECK_TIME = os.getenv("STATUS_CHECK_TIME", "10:00")
