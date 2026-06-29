@@ -3,7 +3,8 @@ from datetime import datetime, time as dt_time
 
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
-from bot.confirmation import on_confirmation_callback
+from bot.chat_registration import on_register_project
+from bot.confirmation import on_confirmation_callback, on_employee_disambiguation
 from bot.daily_report import send_daily_report
 from bot.handlers import on_group_message
 from bot.onboarding import on_start
@@ -45,11 +46,13 @@ def main() -> None:
 
     app.add_handler(CommandHandler("start", on_start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("weekly", on_weekly_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("register_project", on_register_project, filters=filters.ChatType.GROUPS))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT, on_group_message))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))
     app.add_handler(CallbackQueryHandler(on_confirmation_callback, pattern=r"^confirm:"))
     app.add_handler(CallbackQueryHandler(on_project_selected, pattern=r"^project:"))
+    app.add_handler(CallbackQueryHandler(on_employee_disambiguation, pattern=r"^employee:"))
 
     local_tzinfo = datetime.now().astimezone().tzinfo
     app.job_queue.run_daily(_status_check_job, time=_parse_time(STATUS_CHECK_TIME, local_tzinfo))

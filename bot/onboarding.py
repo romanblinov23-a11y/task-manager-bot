@@ -4,7 +4,7 @@ from pathlib import Path
 from telegram import Update, User
 from telegram.ext import ContextTypes
 
-from config.chats import get_project_for_chat
+from config.chats import get_chats_for_project, get_project_for_chat
 from config.settings import ROMAN_TELEGRAM_ID
 from sheets.tasks import get_all_tasks, update_task
 
@@ -63,10 +63,36 @@ def _name_matches(candidate: str, full_name: str, username: str | None) -> bool:
     return False
 
 
+def find_homonyms(project: str, assignee_name: str) -> list[dict]:
+    """Все онбордившиеся сотрудники, видимые в чатах этого проекта, чьё имя
+    совпадает с assignee_name. Если их больше одного — коллизия одинаковых
+    имён, которую нельзя разрешать автоматически (см. обсуждение раздела 9.1
+    в чате с Романом 2026-06-29)."""
+    project_chats = set(get_chats_for_project(project))
+    candidates = []
+    for user_id, chats in _seen_in_chats.items():
+        if not project_chats.intersection(chats):
+            continue
+        user = _known_users.get(user_id, {})
+        if not user.get("onboarded"):
+            continue
+        if _name_matches(assignee_name, user.get("full_name", ""), user.get("username")):
+            candidates.append(
+                {
+                    "user_id": int(user_id),
+                    "full_name": user.get("full_name") or "",
+                    "username": user.get("username") or "",
+                }
+            )
+    return candidates
+
+
 def _try_match_and_backfill(user_id: int) -> list[tuple[str, str]]:
     """Сопоставляет онбордившегося сотрудника с именами assignee в таблицах
     проектов, где его видели в группе, и проставляет assignee_telegram_id
-    на уже существующих задачах (раздел 4, 9.1 PROJECT_SPEC.md)."""
+    на уже существующих задачах (раздел 4, 9.1 PROJECT_SPEC.md). При
+    коллизии одинаковых имён автоматическое назначение пропускается — его
+    разрешит Роман явно при подтверждении следующей задачи на это имя."""
     user = _known_users.get(str(user_id))
     if not user:
         return []
@@ -81,10 +107,13 @@ def _try_match_and_backfill(user_id: int) -> list[tuple[str, str]]:
             assignee = task.get("assignee", "")
             if not assignee or task.get("assignee_telegram_id"):
                 continue
-            if _name_matches(assignee, user.get("full_name", ""), user.get("username")):
-                update_task(project, task["task_id"], assignee_telegram_id=str(user_id))
-                matched.append((project, assignee))
-                _resolved[f"{project}|{_normalize(assignee)}"] = user_id
+            if not _name_matches(assignee, user.get("full_name", ""), user.get("username")):
+                continue
+            if len(find_homonyms(project, assignee)) > 1:
+                continue
+            update_task(project, task["task_id"], assignee_telegram_id=str(user_id))
+            matched.append((project, assignee))
+            _resolved[f"{project}|{_normalize(assignee)}"] = user_id
     if matched:
         _save()
     return matched
@@ -139,16 +168,22 @@ async def on_employee_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     matched = _try_match_and_backfill(user.id)
     if matched:
-        await update.effective_message.reply_text("Готово — теперь буду писать тебе сюда по задачам.")
+        await update.effective_message.reply_text(
+            "Привет! Я Енисей — бот-менеджер задач. Вижу, что на тебя уже есть задача "
+            "в таблице — буду писать сюда, если понадобится спросить про статус или сроки."
+        )
     else:
         await update.effective_message.reply_text(
-            "Привет! Записал тебя — как только появится задача с твоим именем, "
-            "смогу писать сюда о статусе."
+            "Привет! Я Енисей — бот-менеджер задач. Записал тебя: как только появится "
+            "задача на твоё имя, напишу сюда, чтобы спросить про статус."
         )
 
 
 async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if str(update.effective_user.id) == str(ROMAN_TELEGRAM_ID):
-        await update.effective_message.reply_text("Привет! Я готов принимать задачи и протоколы встреч.")
+        await update.effective_message.reply_text(
+            "Привет, Роман! Готов: пишите сюда задачи и протоколы встреч (текстом или "
+            "файлом), либо тегайте меня в рабочих чатах — соберу оттуда договорённости."
+        )
         return
     await on_employee_message(update, context)
