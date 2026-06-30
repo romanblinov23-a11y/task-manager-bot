@@ -123,11 +123,14 @@ def _edit_field_keyboard(confirmation_id: str) -> InlineKeyboardMarkup:
 
 
 def _category_keyboard(confirmation_id: str) -> InlineKeyboardMarkup:
+    # Используем числовой индекс вместо полного названия категории в callback_data:
+    # названия вроде "Управленческая отчётность" занимают >50 байт кириллицей,
+    # и вместе с префиксом и confirmation_id превышают лимит Telegram в 64 байта.
     buttons = []
     for i in range(0, len(CATEGORIES), 2):
-        row = [InlineKeyboardButton(CATEGORIES[i], callback_data=f"set_cat:{CATEGORIES[i]}:{confirmation_id}")]
+        row = [InlineKeyboardButton(CATEGORIES[i], callback_data=f"set_cat:{i}:{confirmation_id}")]
         if i + 1 < len(CATEGORIES):
-            row.append(InlineKeyboardButton(CATEGORIES[i + 1], callback_data=f"set_cat:{CATEGORIES[i + 1]}:{confirmation_id}"))
+            row.append(InlineKeyboardButton(CATEGORIES[i + 1], callback_data=f"set_cat:{i + 1}:{confirmation_id}"))
         buttons.append(row)
     buttons.append([InlineKeyboardButton("↩️ Назад", callback_data=f"confirm:edit:{confirmation_id}")])
     return InlineKeyboardMarkup(buttons)
@@ -319,13 +322,19 @@ async def on_edit_field_selected(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def on_set_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Роман выбрал новую категорию для задачи."""
+    """Роман выбрал новую категорию для задачи (callback_data содержит индекс)."""
     query = update.callback_query
     await query.answer()
-    _, category, confirmation_id = query.data.split(":", 2)
+    _, index_str, confirmation_id = query.data.split(":", 2)
     entry = _pending.get(confirmation_id)
     if entry is None:
         await query.edit_message_text("Карточка уже неактуальна.")
+        return
+
+    try:
+        category = CATEGORIES[int(index_str)]
+    except (IndexError, ValueError):
+        await query.answer("Неизвестная категория.")
         return
 
     entry["task"]["category"] = category
