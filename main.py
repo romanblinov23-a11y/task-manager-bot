@@ -1,7 +1,7 @@
 import logging
 from datetime import time as dt_time
 
-from telegram import BotCommand
+from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from bot.chat_registration import on_register_project
@@ -12,6 +12,7 @@ from bot.onboarding import on_force_onboard, on_help, on_start
 from bot.private import on_private_document, on_private_text, on_project_selected
 from bot.queries import (
     on_employee_command,
+    on_mytasks_command,
     on_needhelp_command,
     on_onboarded_command,
     on_status_command,
@@ -21,6 +22,7 @@ from bot.status_cycle import on_status_button, run_status_check
 from bot.weekly_report import on_weekly_command, send_weekly_report
 from config.settings import (
     DAILY_REPORT_TIME,
+    ROMAN_TELEGRAM_ID,
     STATUS_CHECK_TIME,
     TELEGRAM_BOT_TOKEN,
     TZ,
@@ -50,18 +52,30 @@ def _parse_time(value: str, tzinfo) -> dt_time:
     return dt_time(hour=hour, minute=minute, tzinfo=tzinfo)
 
 
+_ROMAN_COMMANDS = [
+    BotCommand("status", "Открытые задачи по проекту"),
+    BotCommand("employee", "Задачи сотрудника по всем проектам"),
+    BotCommand("stuck", "Подвисшие задачи"),
+    BotCommand("needhelp", "Задачи, где нужна помощь"),
+    BotCommand("onboarded", "Кто онбордился и привязки чатов"),
+    BotCommand("weekly", "Еженедельная аналитика по запросу"),
+    BotCommand("help", "Список команд"),
+]
+
+_EMPLOYEE_COMMANDS = [
+    BotCommand("mytasks", "Мои задачи в работе"),
+]
+
+
 async def _set_bot_commands(app) -> None:
-    await app.bot.set_my_commands(
-        [
-            BotCommand("status", "Открытые задачи по проекту"),
-            BotCommand("employee", "Задачи сотрудника по всем проектам"),
-            BotCommand("stuck", "Подвисшие задачи"),
-            BotCommand("needhelp", "Задачи, где нужна помощь"),
-            BotCommand("onboarded", "Кто онбордился и привязки чатов"),
-            BotCommand("weekly", "Еженедельная аналитика по запросу"),
-            BotCommand("help", "Список команд"),
-        ]
-    )
+    # Для всех по умолчанию — только кнопка «Мои задачи»
+    await app.bot.set_my_commands(_EMPLOYEE_COMMANDS, scope=BotCommandScopeDefault())
+    # Для Романа в личке — полный список
+    if ROMAN_TELEGRAM_ID:
+        await app.bot.set_my_commands(
+            _ROMAN_COMMANDS,
+            scope=BotCommandScopeChat(chat_id=int(ROMAN_TELEGRAM_ID)),
+        )
 
 
 def main() -> None:
@@ -77,6 +91,7 @@ def main() -> None:
     app.add_handler(CommandHandler("onboarded", on_onboarded_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("register_project", on_register_project, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("onboard", on_force_onboard, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("mytasks", on_mytasks_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, on_group_message))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))

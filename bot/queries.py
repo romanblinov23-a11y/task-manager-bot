@@ -171,3 +171,26 @@ async def on_onboarded_command(update: Update, context: ContextTypes.DEFAULT_TYP
             lines.append(f"- {project}: chat_id {chat_id} ({source_label})")
 
     await update.effective_message.reply_text("\n".join(lines))
+
+
+async def on_mytasks_command(update, context):
+    """/mytasks — сотрудник видит свои активные задачи по всем проектам."""
+    from config.projects import PROJECTS
+    from sheets.tasks import get_all_tasks
+    user_id = str(update.effective_user.id)
+    found = []
+    for project in PROJECTS:
+        for task in get_all_tasks(project):
+            if str(task.get("assignee_telegram_id")) == user_id and task.get("status") != "выполнена":
+                found.append((project, task))
+
+    if not found:
+        await update.effective_message.reply_text("У тебя нет активных задач.")
+        return
+
+    lines = ["📋 Твои задачи в работе:"]
+    for project, task in found:
+        deadline = task.get("deadline_current") or "—"
+        status = task.get("status") or "—"
+        lines.append(f"\n• [{project}] {task['task_text']}\n  Срок: {deadline} | Статус: {status}")
+    await update.effective_message.reply_text("\n".join(lines))
