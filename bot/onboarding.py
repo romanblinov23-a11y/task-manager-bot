@@ -5,7 +5,7 @@ from telegram import Update, User
 from telegram.ext import ContextTypes
 
 from config.chats import get_chats_for_project, get_project_for_chat
-from config.settings import ROMAN_TELEGRAM_ID
+from config.settings import ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
 from sheets.tasks import get_all_tasks, update_task
 
 _STORE_PATH = Path(__file__).resolve().parent.parent / "data" / "known_users.json"
@@ -41,9 +41,6 @@ def _save() -> None:
 
 
 _load()
-
-
-_ROMAN_NAME_VARIANTS = {"роман", "рома"}
 
 
 def _normalize(name: str) -> str:
@@ -132,10 +129,7 @@ def _try_match_and_backfill(user_id: int) -> list[tuple[str, str]]:
 
 def find_telegram_id_for_assignee(project: str, assignee_name: str) -> int | None:
     """Используется при создании новой задачи, чтобы сразу проставить
-    assignee_telegram_id, если сотрудник уже онбордился ранее. Роман — это
-    отдельный, заранее известный случай: его ID не требует онбординга."""
-    if _normalize(assignee_name) in _ROMAN_NAME_VARIANTS:
-        return int(ROMAN_TELEGRAM_ID)
+    assignee_telegram_id, если сотрудник уже онбордился ранее."""
     return _resolved.get(f"{project}|{_normalize(assignee_name)}")
 
 
@@ -159,7 +153,10 @@ def get_onboarded_employees() -> list[dict]:
 
 def record_group_member(chat_id: int, user: User | None) -> None:
     """Пассивно запоминает, кто писал в группе — нужно для последующего
-    сопоставления Telegram-аккаунта с именем в таблице при онбординге."""
+    сопоставления Telegram-аккаунта с именем в таблице при онбординге.
+    Для Романа сразу ставим onboarded=True и real_name из ROMAN_CHAT_NAME,
+    чтобы задачи на него резолвились через нормальный механизм сопоставления
+    (а не через хардкод по вариантам имени, который путает однофамильцев)."""
     if user is None or user.is_bot:
         return
 
@@ -169,6 +166,10 @@ def record_group_member(chat_id: int, user: User | None) -> None:
     _known_users.setdefault(user_id, {})
     _known_users[user_id]["username"] = user.username
     _known_users[user_id]["full_name"] = user.full_name
+
+    if str(user.id) == str(ROMAN_TELEGRAM_ID):
+        _known_users[user_id]["real_name"] = ROMAN_CHAT_NAME
+        _known_users[user_id]["onboarded"] = True
 
     chats = _seen_in_chats.setdefault(user_id, [])
     if chat_id not in chats:

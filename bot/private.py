@@ -5,7 +5,7 @@ from bot.confirmation import on_edit_reply, send_confirmation_cards
 from bot.onboarding import on_employee_message
 from bot.status_cycle import on_employee_reply
 from config.projects import PROJECTS
-from config.settings import ROMAN_TELEGRAM_ID
+from config.settings import ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
 from config.timeutil import now as tz_now
 from prompts.extraction import extract_tasks
 from sheets.tasks import get_all_tasks
@@ -58,7 +58,7 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     message = update.effective_message
     now = tz_now().strftime("%Y-%m-%d %H:%M")
-    tasks = extract_tasks(f"[{now}] Роман: {message.text}", project_name=None)
+    tasks = extract_tasks(f"[{now}] {ROMAN_CHAT_NAME}: {message.text}", project_name=None)
     if not tasks:
         await message.reply_text("Не нашёл в этом сообщении задач для фиксации.")
         return

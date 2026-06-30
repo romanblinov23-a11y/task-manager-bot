@@ -17,6 +17,10 @@ GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "credenti
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 
 ROMAN_TELEGRAM_ID = os.getenv("ROMAN_TELEGRAM_ID")
+# Имя, которым Романа называют в рабочих чатах — отображается в буфере сообщений
+# и используется для сопоставления задач, назначенных на него самого.
+# По умолчанию "Роман"; если команда обращается иначе (например "Рома") — задать здесь.
+ROMAN_CHAT_NAME = os.getenv("ROMAN_CHAT_NAME", "Роман")
 
 DAILY_REPORT_TIME = os.getenv("DAILY_REPORT_TIME", "20:00")
 WEEKLY_REPORT_DAY = os.getenv("WEEKLY_REPORT_DAY", "fri")
