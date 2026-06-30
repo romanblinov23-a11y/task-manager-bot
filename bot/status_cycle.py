@@ -1,7 +1,7 @@
 import logging
 from datetime import date
 
-from telegram import Bot, Update
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from bot.onboarding import get_display_name, get_username, is_onboarded
@@ -102,13 +102,20 @@ async def run_status_check(bot: Bot) -> None:
         )
 
 
+def _status_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Сделал", callback_data="status:done"),
+        InlineKeyboardButton("📝 Прокомментировать", callback_data="status:comment"),
+    ]])
+
+
 async def _enqueue_question(bot: Bot, telegram_id: int, project: str, task: dict) -> None:
     question = f"Привет! Как дела с задачей «{task['task_text']}»? Срок: {task.get('deadline_current') or '—'}."
     entry = {"project": project, "task": task, "bot_question": question, "unclear_count": 0}
     queue = _pending.setdefault(telegram_id, [])
     queue.append(entry)
     if len(queue) == 1:
-        await bot.send_message(chat_id=telegram_id, text=question)
+        await bot.send_message(chat_id=telegram_id, text=question, reply_markup=_status_keyboard())
 
 
 async def on_employee_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -262,3 +269,47 @@ async def _maybe_signal_roman(bot: Bot, project: str, task: dict, result: dict) 
     text = messages.get(signal_type)
     if text:
         await bot.send_message(chat_id=ROMAN_TELEGRAM_ID, text=text)
+
+
+async def on_status_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик кнопок «✅ Сделал» и «📝 Прокомментировать» в вопросе о статусе."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    queue = _pending.get(user_id)
+
+    if not queue:
+        await query.edit_message_text(query.message.text + "\n\n(ответ уже получен)")
+        return
+
+    entry = queue[0]
+    project, task = entry["project"], entry["task"]
+    original_text = query.message.text
+
+    if query.data == "status:done":
+        done_result = {
+            "status_clear": True,
+            "new_status": "выполнена",
+            "clarifying_question": None,
+            "deadline_changed": False,
+            "new_deadline": None,
+            "reason": "",
+            "needs_help": False,
+            "comment_summary": "Сотрудник подтвердил выполнение задачи.",
+            "signal_type": "завершение",
+        }
+        append_comment(project, task["task_id"], "сотрудник", done_result["comment_summary"], related_status="выполнена")
+        await query.edit_message_text(original_text + "\n\n✅ Принято, отмечу как выполненное.")
+        await _apply_status_update(context.bot, project, task, done_result)
+
+        queue.pop(0)
+        if queue:
+            await context.bot.send_message(chat_id=user_id, text=queue[0]["bot_question"], reply_markup=_status_keyboard())
+        else:
+            del _pending[user_id]
+
+    elif query.data == "status:comment":
+        follow_up = "Напиши подробнее: что сделано, нужен ли перенос срока или есть сложности?"
+        entry["bot_question"] = follow_up
+        await query.edit_message_text(original_text + "\n\n📝 Жду твой комментарий:")
+        await context.bot.send_message(chat_id=user_id, text=follow_up)

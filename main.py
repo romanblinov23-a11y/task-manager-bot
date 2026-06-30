@@ -17,7 +17,7 @@ from bot.queries import (
     on_status_command,
     on_stuck_command,
 )
-from bot.status_cycle import run_status_check
+from bot.status_cycle import on_status_button, run_status_check
 from bot.weekly_report import on_weekly_command, send_weekly_report
 from config.settings import (
     DAILY_REPORT_TIME,
@@ -83,6 +83,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_confirmation_callback, pattern=r"^confirm:"))
     app.add_handler(CallbackQueryHandler(on_project_selected, pattern=r"^project:"))
     app.add_handler(CallbackQueryHandler(on_employee_disambiguation, pattern=r"^employee:"))
+    app.add_handler(CallbackQueryHandler(on_status_button, pattern=r"^status:"))
 
     app.job_queue.run_daily(_status_check_job, time=_parse_time(STATUS_CHECK_TIME, TZ))
     app.job_queue.run_daily(_daily_report_job, time=_parse_time(DAILY_REPORT_TIME, TZ))
