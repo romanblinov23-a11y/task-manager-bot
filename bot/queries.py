@@ -5,6 +5,7 @@ from telegram.ext import ContextTypes
 
 from bot.onboarding import get_onboarded_employees
 from config.chats import get_all_bindings, get_project_for_chat
+from config.timeutil import fmt_date
 from config.projects import PROJECTS
 from config.settings import ROMAN_TELEGRAM_ID, STALE_DAYS
 from config.timeutil import now_naive as tz_now_naive
@@ -19,7 +20,7 @@ def _is_roman(update: Update) -> bool:
 
 def _task_line(task: dict, *, show_project: str | None = None) -> str:
     project_part = f"[{show_project}] " if show_project else ""
-    deadline = task.get("deadline_current") or "—"
+    deadline = fmt_date(task.get("deadline_current"))
     help_mark = " 🆘" if task.get("needs_help") == "да" else ""
     assignee = task.get("assignee") or "—"
     return f"{project_part}{task['task_id']} «{task['task_text']}» — {task.get('status')}, срок {deadline}, исполнитель: {assignee}{help_mark}"
@@ -190,7 +191,7 @@ async def on_mytasks_command(update, context):
 
     lines = ["📋 Твои задачи в работе:"]
     for project, task in found:
-        deadline = task.get("deadline_current") or "—"
+        deadline = fmt_date(task.get("deadline_current"))
         status = task.get("status") or "—"
         lines.append(f"\n• [{project}] {task['task_text']}\n  Срок: {deadline} | Статус: {status}")
     await update.effective_message.reply_text("\n".join(lines))

@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 from bot.onboarding import get_display_name, get_username, is_onboarded
 from config.projects import PROJECTS
 from config.settings import MAX_CLARIFYING_ROUNDS, ROMAN_TELEGRAM_ID
+from config.timeutil import fmt_date
 from config.timeutil import now as tz_now
 from config.timeutil import today as tz_today
 from prompts.status_reply import parse_status_reply
@@ -90,7 +91,7 @@ async def run_status_check(bot: Bot) -> None:
             tg_ref = f"@{username}" if username else f"(ID {tid}, username неизвестен)"
             lines.append(
                 f"📌 {project}: «{task['task_text']}»\n"
-                f"   Срок: {task.get('deadline_current') or '—'}\n"
+                f"   Срок: {fmt_date(task.get('deadline_current'))}\n"
                 f"   Исполнитель: {name} — {tg_ref}"
             )
         await bot.send_message(
@@ -110,7 +111,7 @@ def _status_keyboard() -> InlineKeyboardMarkup:
 
 
 async def _enqueue_question(bot: Bot, telegram_id: int, project: str, task: dict) -> None:
-    question = f"Привет! Как дела с задачей «{task['task_text']}»? Срок: {task.get('deadline_current') or '—'}."
+    question = f"Привет! Как дела с задачей «{task['task_text']}»? Срок: {fmt_date(task.get('deadline_current'))}."
     entry = {"project": project, "task": task, "bot_question": question, "unclear_count": 0}
     queue = _pending.setdefault(telegram_id, [])
     queue.append(entry)
@@ -262,7 +263,7 @@ async def _maybe_signal_roman(bot: Bot, project: str, task: dict, result: dict) 
         ),
         "перенос_срока": (
             f"📅 Перенос срока по задаче «{task['task_text']}» ({project}), исполнитель: {assignee}.\n"
-            f"Новый срок: {result.get('new_deadline') or '—'}. Причина: {result.get('reason') or '—'}"
+            f"Новый срок: {fmt_date(result.get('new_deadline'))}. Причина: {result.get('reason') or '—'}"
         ),
         "завершение": f"✅ Задача «{task['task_text']}» ({project}) выполнена, исполнитель: {assignee}.",
     }

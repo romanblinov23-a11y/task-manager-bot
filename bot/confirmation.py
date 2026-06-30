@@ -5,6 +5,7 @@ from telegram.ext import ContextTypes
 
 from bot.onboarding import find_homonyms, find_telegram_id_for_assignee
 from config.settings import ROMAN_TELEGRAM_ID
+from config.timeutil import fmt_date
 from sheets.comments import append_comment
 from sheets.tasks import create_task
 
@@ -24,7 +25,7 @@ def _build_card_text(entry: dict) -> str:
     lines.append(assignee_line)
 
     lines.append(f"Категория: {task.get('category', '—')}")
-    lines.append(f"Срок: {task.get('deadline') or '—'}")
+    lines.append(f"Срок: {fmt_date(task.get('deadline'))}")
 
     project = entry.get("project") or task.get("project")
     project_line = f"Проект: {project or '—'}"
@@ -175,7 +176,7 @@ async def _confirm_task(query, confirmation_id: str, entry: dict) -> None:
 
 
 async def _notify_assignee(bot: Bot, telegram_id: int, project: str, task: dict) -> None:
-    deadline = task.get("deadline") or "—"
+    deadline = fmt_date(task.get("deadline"))
     text = (
         f"📌 Тебе назначена новая задача\n\n"
         f"Проект: {project}\n"
