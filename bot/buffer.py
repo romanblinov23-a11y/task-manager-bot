@@ -10,6 +10,7 @@ class BufferedMessage:
     message_id: int
     timestamp: datetime  # должен быть timezone-aware (UTC) — см. Telegram message.date
     sender_name: str
+    sender_id: int  # Telegram user_id — нужен для однозначной идентификации при совпадении имён
     text: str
     link: str
 

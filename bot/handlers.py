@@ -53,6 +53,7 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         message_id=message.message_id,
         timestamp=message.date,  # timezone-aware UTC, как отдаёт Telegram API
         sender_name=sender_name,
+        sender_id=sender.id if sender else 0,
         text=message.text,
         link=_message_link(chat, message.message_id),
     )
@@ -72,6 +73,15 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not tasks:
         return
 
+    # Карта "нормализованное_имя → telegram_id" для всех отправителей из буфера.
+    # Используется при подтверждении задачи для идентификации "по двум параметрам":
+    # сначала имя совпало → потом проверяем, кто именно с таким именем писал в чате.
+    buffer_id_hints: dict[str, int] = {
+        m.sender_name.strip().lower(): m.sender_id
+        for m in context_messages
+        if m.sender_id
+    }
+
     await send_confirmation_cards(
         context.bot,
         tasks,
@@ -79,4 +89,5 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         source="chat",
         source_chat=chat.title or str(chat.id),
         source_link=buffered.link,
+        buffer_id_hints=buffer_id_hints,
     )

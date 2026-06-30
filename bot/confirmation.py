@@ -57,10 +57,16 @@ async def send_confirmation_cards(
     source: str,
     source_chat: str = "",
     source_link: str = "",
+    buffer_id_hints: dict[str, int] | None = None,
 ) -> None:
     """Отправляет Роману в личку по карточке на каждую извлечённую задачу
     (раздел 3 PROJECT_SPEC.md) — без батчинга, каждая отдельным сообщением
-    с кнопками Да/Править/Отмена."""
+    с кнопками Да/Править/Отмена.
+
+    buffer_id_hints: нормализованное_имя → telegram_id отправителя из буфера группового чата.
+    Если задача пришла из чата, это позволяет идентифицировать исполнителя по двум параметрам:
+    имя из экстракции + фактический telegram_id того, кто написал сообщение, — без
+    нечёткого сопоставления и без disambiguation-диалога при совпадении имён."""
     for task in tasks:
         confirmation_id = uuid.uuid4().hex[:8]
         entry = {
@@ -69,6 +75,7 @@ async def send_confirmation_cards(
             "source": source,
             "source_chat": source_chat,
             "source_link": source_link,
+            "buffer_id_hints": buffer_id_hints or {},
         }
         _pending[confirmation_id] = entry
         await bot.send_message(
@@ -119,19 +126,32 @@ async def _confirm_task(query, confirmation_id: str, entry: dict) -> None:
     project = entry["project"] or task.get("project")
     assignee = task.get("assignee") or ""
 
-    if assignee and "employee_resolved" not in entry:
-        candidates = find_homonyms(project, assignee)
-        if len(candidates) > 1:
-            await query.edit_message_text(
-                _build_card_text(entry)
-                + f"\n\n⚠️ Нашёл несколько сотрудников с именем «{assignee}» в этом проекте. Кто из них?",
-                reply_markup=_employee_keyboard(confirmation_id, candidates),
-            )
-            return
+    # Приоритет идентификации исполнителя:
+    # 1. Ручной выбор Романа (disambiguation-кнопка) — наивысший приоритет
+    # 2. Buffer hint: имя совпало + фактический telegram_id из Telegram (2 параметра)
+    # 3. _resolved: имя уже было сопоставлено с ID при предыдущем онбординге
+    # 4. Disambiguation: несколько кандидатов с одним именем → спросить Романа
 
-    telegram_id = entry.get("employee_resolved") or (
-        find_telegram_id_for_assignee(project, assignee) if assignee else None
-    )
+    if "employee_resolved" in entry:
+        telegram_id = entry["employee_resolved"]
+    else:
+        buffer_hints = entry.get("buffer_id_hints", {})
+        buffer_telegram_id = buffer_hints.get(assignee.strip().lower()) if assignee else None
+
+        if buffer_telegram_id:
+            # Имя ИЗ буфера совпало с именем отправителя → используем его ID напрямую
+            telegram_id = buffer_telegram_id
+        else:
+            if assignee:
+                candidates = find_homonyms(project, assignee)
+                if len(candidates) > 1:
+                    await query.edit_message_text(
+                        _build_card_text(entry)
+                        + f"\n\n⚠️ Нашёл несколько сотрудников с именем «{assignee}» в этом проекте. Кто из них?",
+                        reply_markup=_employee_keyboard(confirmation_id, candidates),
+                    )
+                    return
+            telegram_id = find_telegram_id_for_assignee(project, assignee) if assignee else None
 
     task_id = create_task(
         project,
