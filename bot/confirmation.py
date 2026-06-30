@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -356,31 +357,37 @@ async def on_edit_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
     confirmation_id, field = pending_edit
     entry = _pending.get(confirmation_id)
     if entry is None:
+        await update.effective_message.reply_text("Карточка устарела — создайте задачу заново.")
         return True
 
     new_value = update.effective_message.text.strip()
     task = entry["task"]
 
-    if field == "text":
-        task["task_text"] = new_value
-    elif field == "assignee":
-        task["assignee"] = new_value
-        task["assignee_unclear"] = False
-        # Сбрасываем ранее resolved employee, чтобы новое имя прошло через matching
-        entry.pop("employee_resolved", None)
-    elif field == "deadline":
-        iso = parse_date(new_value)
-        if iso:
-            task["deadline"] = iso
-        else:
-            await update.effective_message.reply_text(
-                f"Не понял формат даты «{new_value}». Попробуйте ДД.ММ.ГГГГ."
-            )
-            _awaiting_field_edit[user_id] = (confirmation_id, field)
-            return True
+    try:
+        if field == "text":
+            task["task_text"] = new_value
+        elif field == "assignee":
+            task["assignee"] = new_value
+            task["assignee_unclear"] = False
+            entry.pop("employee_resolved", None)
+        elif field == "deadline":
+            iso = parse_date(new_value)
+            if iso:
+                task["deadline"] = iso
+            else:
+                await update.effective_message.reply_text(
+                    f"Не понял формат даты «{new_value}». Попробуйте ДД.ММ.ГГГГ, например 07.07.2026."
+                )
+                _awaiting_field_edit[user_id] = (confirmation_id, field)
+                return True
 
-    await update.effective_message.reply_text(
-        _build_card_text(entry),
-        reply_markup=_build_keyboard(confirmation_id),
-    )
+        await update.effective_message.reply_text(
+            _build_card_text(entry),
+            reply_markup=_build_keyboard(confirmation_id),
+        )
+    except Exception as exc:
+        logging.error("Ошибка в on_edit_reply (field=%s): %s", field, exc, exc_info=True)
+        await update.effective_message.reply_text(
+            f"Что-то пошло не так при сохранении «{field}»: {exc}\nПопробуйте ещё раз."
+        )
     return True

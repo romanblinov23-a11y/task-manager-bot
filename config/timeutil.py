@@ -19,13 +19,13 @@ def today() -> date:
 
 
 def parse_date(user_input: str) -> str | None:
-    """Принимает ДД.ММ.ГГГГ или ГГГГ-ММ-ДД, возвращает ISO YYYY-MM-DD или None."""
+    """Принимает ДД.ММ.ГГГГ или ГГГГ-ММ-ДД, возвращает ISO YYYY-MM-DD или None.
+    Использует datetime.strptime (не date.strptime — у date нет этого метода)."""
     if not user_input:
         return None
-    from datetime import date as _date
     for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
         try:
-            return _date.strptime(user_input.strip(), fmt).isoformat()
+            return datetime.strptime(user_input.strip(), fmt).date().isoformat()
         except ValueError:
             continue
     return None
