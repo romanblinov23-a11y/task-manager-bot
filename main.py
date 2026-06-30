@@ -5,7 +5,12 @@ from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from bot.chat_registration import on_register_project
-from bot.confirmation import on_confirmation_callback, on_employee_disambiguation
+from bot.confirmation import (
+    on_confirmation_callback,
+    on_edit_field_selected,
+    on_employee_disambiguation,
+    on_set_category,
+)
 from bot.daily_report import send_daily_report
 from bot.handlers import on_group_message
 from bot.onboarding import on_force_onboard, on_help, on_start
@@ -96,6 +101,8 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))
     app.add_handler(CallbackQueryHandler(on_confirmation_callback, pattern=r"^confirm:"))
+    app.add_handler(CallbackQueryHandler(on_edit_field_selected, pattern=r"^edit_field:"))
+    app.add_handler(CallbackQueryHandler(on_set_category, pattern=r"^set_cat:"))
     app.add_handler(CallbackQueryHandler(on_project_selected, pattern=r"^project:"))
     app.add_handler(CallbackQueryHandler(on_employee_disambiguation, pattern=r"^employee:"))
     app.add_handler(CallbackQueryHandler(on_status_button, pattern=r"^status:"))

@@ -18,6 +18,19 @@ def today() -> date:
     return now().date()
 
 
+def parse_date(user_input: str) -> str | None:
+    """Принимает ДД.ММ.ГГГГ или ГГГГ-ММ-ДД, возвращает ISO YYYY-MM-DD или None."""
+    if not user_input:
+        return None
+    from datetime import date as _date
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+        try:
+            return _date.strptime(user_input.strip(), fmt).isoformat()
+        except ValueError:
+            continue
+    return None
+
+
 def fmt_date(iso_date: str | None) -> str:
     """Конвертирует ISO-дату YYYY-MM-DD в читаемый ДД.ММ.ГГГГ для показа людям.
     Внутреннее хранение в Sheets и передача в Claude остаются в ISO-формате."""

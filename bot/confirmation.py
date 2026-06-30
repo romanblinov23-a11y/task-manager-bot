@@ -10,15 +10,16 @@ from bot.onboarding import (
     get_username,
     is_onboarded,
 )
+from config.projects import CATEGORIES
 from config.settings import ROMAN_TELEGRAM_ID
-from config.timeutil import fmt_date
+from config.timeutil import fmt_date, parse_date
 from sheets.comments import append_comment
 from sheets.tasks import create_task
 
-# confirmation_id -> {"task": dict, "project": str, "source": str, "source_chat": str, "source_link": str}
+# confirmation_id -> {"task": dict, "project": str, "source": str, ...}
 _pending: dict[str, dict] = {}
-# telegram_user_id -> confirmation_id, пока ждём от Романа исправленный текст
-_awaiting_edit: dict[int, str] = {}
+# user_id -> (confirmation_id, field) — ожидаем текстовый ввод конкретного поля
+_awaiting_field_edit: dict[int, tuple[str, str]] = {}
 
 
 def _assignee_onboarding_info(assignee: str, project: str | None, buffer_hints: dict) -> str:
@@ -107,6 +108,31 @@ def _build_keyboard(confirmation_id: str) -> InlineKeyboardMarkup:
     ]])
 
 
+def _edit_field_keyboard(confirmation_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✏️ Текст задачи", callback_data=f"edit_field:text:{confirmation_id}"),
+            InlineKeyboardButton("🏷️ Категория", callback_data=f"edit_field:category:{confirmation_id}"),
+        ],
+        [
+            InlineKeyboardButton("👤 Исполнитель", callback_data=f"edit_field:assignee:{confirmation_id}"),
+            InlineKeyboardButton("📅 Срок", callback_data=f"edit_field:deadline:{confirmation_id}"),
+        ],
+        [InlineKeyboardButton("↩️ Назад к карточке", callback_data=f"confirm:back:{confirmation_id}")],
+    ])
+
+
+def _category_keyboard(confirmation_id: str) -> InlineKeyboardMarkup:
+    buttons = []
+    for i in range(0, len(CATEGORIES), 2):
+        row = [InlineKeyboardButton(CATEGORIES[i], callback_data=f"set_cat:{CATEGORIES[i]}:{confirmation_id}")]
+        if i + 1 < len(CATEGORIES):
+            row.append(InlineKeyboardButton(CATEGORIES[i + 1], callback_data=f"set_cat:{CATEGORIES[i + 1]}:{confirmation_id}"))
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("↩️ Назад", callback_data=f"confirm:edit:{confirmation_id}")])
+    return InlineKeyboardMarkup(buttons)
+
+
 async def send_confirmation_cards(
     bot: Bot,
     tasks: list[dict],
@@ -159,9 +185,14 @@ async def on_confirmation_callback(update: Update, context: ContextTypes.DEFAULT
         _pending.pop(confirmation_id, None)
         await query.edit_message_text("❌ Отменено.")
     elif action == "edit":
-        _awaiting_edit[query.from_user.id] = confirmation_id
         await query.edit_message_text(
-            _build_card_text(entry) + "\n\n✏️ Пришлите исправленный текст задачи следующим сообщением."
+            _build_card_text(entry) + "\n\n✏️ Что хотите исправить?",
+            reply_markup=_edit_field_keyboard(confirmation_id),
+        )
+    elif action == "back":
+        await query.edit_message_text(
+            _build_card_text(entry),
+            reply_markup=_build_keyboard(confirmation_id),
         )
 
 
@@ -260,22 +291,85 @@ async def on_employee_disambiguation(update: Update, context: ContextTypes.DEFAU
     await _confirm_task(query, confirmation_id, entry)
 
 
+async def on_edit_field_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Роман выбрал, какое поле задачи хочет исправить."""
+    query = update.callback_query
+    await query.answer()
+    _, field, confirmation_id = query.data.split(":", 2)
+    entry = _pending.get(confirmation_id)
+    if entry is None:
+        await query.edit_message_text("Карточка уже неактуальна.")
+        return
+
+    if field == "category":
+        await query.edit_message_text(
+            _build_card_text(entry) + "\n\nВыберите новую категорию:",
+            reply_markup=_category_keyboard(confirmation_id),
+        )
+    else:
+        prompts = {
+            "text": "Введите новый текст задачи:",
+            "assignee": "Введите имя исполнителя:",
+            "deadline": f"Введите новый срок (ДД.ММ.ГГГГ, например {fmt_date(entry['task'].get('deadline'))}):",
+        }
+        _awaiting_field_edit[query.from_user.id] = (confirmation_id, field)
+        await query.edit_message_text(
+            _build_card_text(entry) + f"\n\n✏️ {prompts.get(field, 'Введите значение:')}",
+        )
+
+
+async def on_set_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Роман выбрал новую категорию для задачи."""
+    query = update.callback_query
+    await query.answer()
+    _, category, confirmation_id = query.data.split(":", 2)
+    entry = _pending.get(confirmation_id)
+    if entry is None:
+        await query.edit_message_text("Карточка уже неактуальна.")
+        return
+
+    entry["task"]["category"] = category
+    await query.edit_message_text(
+        _build_card_text(entry),
+        reply_markup=_build_keyboard(confirmation_id),
+    )
+
+
 async def on_edit_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Если Роман сейчас правит карточку — подхватывает следующее текстовое
-    сообщение как исправленный текст задачи и пересылает карточку заново.
-    Возвращает True, если сообщение обработано как правка (и дальше его
-    не нужно передавать в обычную логику личных сообщений)."""
+    """Перехватывает текстовый ввод от Романа, если он редактирует конкретное
+    поле карточки. Возвращает True, если сообщение обработано как правка."""
     user_id = update.effective_user.id
-    confirmation_id = _awaiting_edit.get(user_id)
-    if confirmation_id is None:
+    pending_edit = _awaiting_field_edit.get(user_id)
+    if pending_edit is None:
         return False
 
-    del _awaiting_edit[user_id]
+    del _awaiting_field_edit[user_id]
+    confirmation_id, field = pending_edit
     entry = _pending.get(confirmation_id)
     if entry is None:
         return True
 
-    entry["task"]["task_text"] = update.effective_message.text
+    new_value = update.effective_message.text.strip()
+    task = entry["task"]
+
+    if field == "text":
+        task["task_text"] = new_value
+    elif field == "assignee":
+        task["assignee"] = new_value
+        task["assignee_unclear"] = False
+        # Сбрасываем ранее resolved employee, чтобы новое имя прошло через matching
+        entry.pop("employee_resolved", None)
+    elif field == "deadline":
+        iso = parse_date(new_value)
+        if iso:
+            task["deadline"] = iso
+        else:
+            await update.effective_message.reply_text(
+                f"Не понял формат даты «{new_value}». Попробуйте ДД.ММ.ГГГГ."
+            )
+            _awaiting_field_edit[user_id] = (confirmation_id, field)
+            return True
+
     await update.effective_message.reply_text(
         _build_card_text(entry),
         reply_markup=_build_keyboard(confirmation_id),
