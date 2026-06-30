@@ -133,6 +133,27 @@ def find_telegram_id_for_assignee(project: str, assignee_name: str) -> int | Non
     return _resolved.get(f"{project}|{_normalize(assignee_name)}")
 
 
+def is_onboarded(user_id: int) -> bool:
+    """True, если этот пользователь уже открыл диалог с ботом и боту можно
+    писать ему напрямую в личку."""
+    return _known_users.get(str(user_id), {}).get("onboarded", False)
+
+
+def get_username(user_id: int) -> str | None:
+    """Telegram username пользователя, если бот его видел в группе."""
+    return _known_users.get(str(user_id), {}).get("username")
+
+
+def get_display_name(user_id: int) -> str:
+    """Отображаемое имя: real_name → full_name → @username → ID."""
+    info = _known_users.get(str(user_id), {})
+    return (
+        info.get("real_name")
+        or info.get("full_name")
+        or (f"@{info['username']}" if info.get("username") else str(user_id))
+    )
+
+
 def get_onboarded_employees() -> list[dict]:
     """Все сотрудники, прошедшие онбординг, с их данными — для команды /onboarded."""
     result = []

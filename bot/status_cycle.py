@@ -4,6 +4,7 @@ from datetime import date
 from telegram import Bot, Update
 from telegram.ext import ContextTypes
 
+from bot.onboarding import get_display_name, get_username, is_onboarded
 from config.projects import PROJECTS
 from config.settings import MAX_CLARIFYING_ROUNDS, ROMAN_TELEGRAM_ID
 from config.timeutil import now as tz_now
@@ -42,23 +43,34 @@ def _is_due(task: dict, today: date) -> bool:
 async def run_status_check(bot: Bot) -> None:
     """APScheduler job — раздел 4 PROJECT_SPEC.md. Проверяет все три
     таблицы на задачи с подошедшим/просроченным deadline_current и
-    запускает опрос исполнителя в личке."""
+    запускает опрос исполнителя в личке.
+
+    Три случая для задачи с подошедшим сроком:
+    - есть telegram_id И онбордился → бот пишет исполнителю сам
+    - есть telegram_id, но НЕ онбордился → бот просит Романа запросить статус вручную
+    - нет telegram_id вообще → бот сообщает Роману, что исполнитель не идентифицирован"""
     logging.info("Запуск ежедневной проверки статусов задач")
     today = tz_today()
     skipped_no_telegram_id: list[tuple[str, dict]] = []
+    skipped_not_onboarded: list[tuple[str, dict, int]] = []
 
     for project in PROJECTS:
         for task in get_all_tasks(project):
             if not _is_due(task, today):
                 continue
 
-            telegram_id = task.get("assignee_telegram_id")
-            if not telegram_id:
+            telegram_id_str = task.get("assignee_telegram_id")
+            if not telegram_id_str:
                 skipped_no_telegram_id.append((project, task))
                 continue
 
+            telegram_id = int(telegram_id_str)
+            if not is_onboarded(telegram_id):
+                skipped_not_onboarded.append((project, task, telegram_id))
+                continue
+
             update_task(project, task["task_id"], last_status_check=_now())
-            await _enqueue_question(bot, int(telegram_id), project, task)
+            await _enqueue_question(bot, telegram_id, project, task)
 
     if skipped_no_telegram_id:
         lines = [
@@ -67,8 +79,26 @@ async def run_status_check(bot: Bot) -> None:
         ]
         await bot.send_message(
             chat_id=ROMAN_TELEGRAM_ID,
-            text="⚠️ Не смог запросить статус — у исполнителя нет привязанного Telegram "
-            "(не онбордился):\n" + "\n".join(lines),
+            text="⚠️ Исполнитель не идентифицирован — нет Telegram-привязки:\n" + "\n".join(lines),
+        )
+
+    if skipped_not_onboarded:
+        lines = []
+        for project, task, tid in skipped_not_onboarded:
+            username = get_username(tid)
+            name = get_display_name(tid)
+            tg_ref = f"@{username}" if username else f"(ID {tid}, username неизвестен)"
+            lines.append(
+                f"📌 {project}: «{task['task_text']}»\n"
+                f"   Срок: {task.get('deadline_current') or '—'}\n"
+                f"   Исполнитель: {name} — {tg_ref}"
+            )
+        await bot.send_message(
+            chat_id=ROMAN_TELEGRAM_ID,
+            text=(
+                "💬 Нужно запросить статус вручную — эти сотрудники ещё не открыли диалог с ботом:\n\n"
+                + "\n\n".join(lines)
+            ),
         )
 
 
