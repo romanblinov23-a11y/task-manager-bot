@@ -70,10 +70,15 @@ def _build_card_text(entry: dict) -> str:
     assignee_line = f"Исполнитель: {assignee}"
     if task.get("assignee_unclear"):
         assignee_line += " ⚠️ не уверен в исполнителе"
-    elif assignee != "—" and not task.get("project_unclear"):
-        project = entry.get("project") or task.get("project")
-        buffer_hints = entry.get("buffer_id_hints", {})
-        assignee_line += _assignee_onboarding_info(assignee, project, buffer_hints)
+    elif assignee != "—":
+        # Используем entry["project"] — он всегда является итоговым разрешённым проектом,
+        # даже если Claude пометил task["project_unclear"]=True (бот разрешил программно).
+        resolved_project = entry.get("project") or (
+            task.get("project") if not task.get("project_unclear") else None
+        )
+        if resolved_project:
+            buffer_hints = entry.get("buffer_id_hints", {})
+            assignee_line += _assignee_onboarding_info(assignee, resolved_project, buffer_hints)
     lines.append(assignee_line)
 
     lines.append(f"Категория: {task.get('category', '—')}")
