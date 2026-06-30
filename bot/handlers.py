@@ -66,11 +66,14 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if project is None:
         return
 
+    await message.reply_text("Кажется, есть работёнка — забрал 👀")
+
     context_messages = _buffer.get_context(chat.id, hours=EXTRACTION_CONTEXT_HOURS)
     text_blob = format_context(context_messages)
 
     tasks = extract_tasks(text_blob, project_name=project)
     if not tasks:
+        await message.reply_text("Поглядел — не нашёл конкретных задач в переписке.")
         return
 
     # Карта "нормализованное_имя → telegram_id" для всех отправителей из буфера.
