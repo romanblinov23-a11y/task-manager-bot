@@ -3,7 +3,13 @@ import uuid
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from bot.onboarding import find_homonyms, find_telegram_id_for_assignee
+from bot.onboarding import (
+    find_homonyms,
+    find_telegram_id_for_assignee,
+    get_display_name,
+    get_username,
+    is_onboarded,
+)
 from config.settings import ROMAN_TELEGRAM_ID
 from config.timeutil import fmt_date
 from sheets.comments import append_comment
@@ -15,13 +21,59 @@ _pending: dict[str, dict] = {}
 _awaiting_edit: dict[int, str] = {}
 
 
+def _assignee_onboarding_info(assignee: str, project: str | None, buffer_hints: dict) -> str:
+    """Возвращает строку-подсказку об исполнителе для карточки подтверждения:
+    кто именно из онбордившихся это, или предупреждение что никто не найден."""
+    if not assignee or not project:
+        return ""
+
+    # 1. Прямое совпадение по буферу чата (кто физически написал сообщение)
+    tid = buffer_hints.get(assignee.strip().lower())
+    if tid and is_onboarded(tid):
+        name = get_display_name(tid)
+        uname = get_username(tid)
+        ref = f"@{uname}" if uname else f"ID {tid}"
+        return f"\n   → {name} ({ref}) ✅ статусы запрошу сам"
+    if tid and not is_onboarded(tid):
+        uname = get_username(tid)
+        ref = f"@{uname}" if uname else f"ID {tid}"
+        return f"\n   → {ref} ⚠️ не онбордился — статус нужно запросить вручную"
+
+    # 2. Разрешение через кэш онбординга
+    resolved_tid = find_telegram_id_for_assignee(project, assignee)
+    if resolved_tid:
+        name = get_display_name(resolved_tid)
+        uname = get_username(resolved_tid)
+        ref = f"@{uname}" if uname else f"ID {resolved_tid}"
+        return f"\n   → {name} ({ref}) ✅ статусы запрошу сам"
+
+    # 3. Поиск по onboarded-участникам проекта
+    candidates = find_homonyms(project, assignee)
+    if len(candidates) == 1:
+        c = candidates[0]
+        name = c.get("full_name") or ""
+        uname = c.get("username") or ""
+        ref = f"@{uname}" if uname else f"ID {c['user_id']}"
+        return f"\n   → {name} ({ref}) ✅ статусы запрошу сам"
+    if len(candidates) > 1:
+        return "\n   → ⚠️ несколько кандидатов — уточню при нажатии «Да»"
+
+    # 4. Никого не нашли среди онбордившихся
+    return "\n   → ⚠️ не онбордился — статус нужно будет запросить вручную"
+
+
 def _build_card_text(entry: dict) -> str:
     task = entry["task"]
     lines = ["📋 Новая задача", f"Текст: {task.get('task_text', '')}"]
 
-    assignee_line = f"Исполнитель: {task.get('assignee') or '—'}"
+    assignee = task.get("assignee") or "—"
+    assignee_line = f"Исполнитель: {assignee}"
     if task.get("assignee_unclear"):
         assignee_line += " ⚠️ не уверен в исполнителе"
+    elif assignee != "—" and not task.get("project_unclear"):
+        project = entry.get("project") or task.get("project")
+        buffer_hints = entry.get("buffer_id_hints", {})
+        assignee_line += _assignee_onboarding_info(assignee, project, buffer_hints)
     lines.append(assignee_line)
 
     lines.append(f"Категория: {task.get('category', '—')}")
