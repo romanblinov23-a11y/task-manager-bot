@@ -28,6 +28,12 @@ from bot.daily_report import send_daily_report
 from bot.dashboard_cmd import on_dashboard_aggregate_choice, on_dashboard_command, on_dashboard_market_choice
 from bot.dashboard_tasks_cmd import on_dashboard_tasks_command
 from bot.handlers import on_group_message
+from bot.import_readings import (
+    on_import_readings_cancel,
+    on_import_readings_command,
+    on_import_readings_confirm,
+    on_import_readings_market_choice,
+)
 from bot.manager_admin import (
     on_add_project_command,
     on_manager_approve,
@@ -149,6 +155,7 @@ _ROMAN_COMMANDS = [
     BotCommand("managers", "Сотрудники бота и привязки чатов"),
     BotCommand("add_project", "Добавить проект/точку Surf"),
     BotCommand("reset_monitoring", "⚠️ Обнулить конкурентов на выбранном рынке"),
+    BotCommand("import_readings", "Импорт исторических снятий по рынку"),
     BotCommand("add_competitor", "Добавить конкурента на рынок"),
     BotCommand("close_competitor", "Закрыть/открыть конкурента"),
     BotCommand("schedule", "Настроить дни мониторинга рынка"),
@@ -198,6 +205,7 @@ def main() -> None:
     app.add_handler(CommandHandler("managers", on_managers_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("add_project", on_add_project_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("reset_monitoring", on_reset_monitoring_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("import_readings", on_import_readings_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("add_competitor", on_add_competitor_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("close_competitor", on_close_competitor_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("schedule", on_schedule_command, filters=filters.ChatType.PRIVATE))
@@ -242,6 +250,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_market_choice, pattern=r"^reset_monitoring_market:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_confirm, pattern=r"^reset_monitoring_confirm:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_cancel, pattern=r"^reset_monitoring_cancel$"))
+    app.add_handler(CallbackQueryHandler(on_import_readings_market_choice, pattern=r"^impr_market:"))
+    app.add_handler(CallbackQueryHandler(on_import_readings_confirm, pattern=r"^impr_confirm$"))
+    app.add_handler(CallbackQueryHandler(on_import_readings_cancel, pattern=r"^impr_cancel$"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_market_choice, pattern=r"^addc_market:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_format_choice, pattern=r"^addc_format:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_reading_choice, pattern=r"^addc_reading:"))
