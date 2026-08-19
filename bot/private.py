@@ -1,7 +1,10 @@
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from bot.competitors import on_add_competitor_reply
 from bot.confirmation import on_edit_reply, send_confirmation_cards
+from bot.manager_admin import on_manager_admin_reply
+from bot.monitoring_flow import on_monitoring_reply
 from bot.onboarding import on_employee_message
 from bot.status_cycle import on_employee_reply
 from config.projects import PROJECTS
@@ -47,6 +50,15 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     включая Романа — он тоже может быть исполнителем задачи, и его ответ
     на статус-вопрос не должен попасть в обработку как новая задача."""
     if await on_employee_reply(update, context):
+        return
+
+    if await on_manager_admin_reply(update, context):
+        return
+
+    if await on_add_competitor_reply(update, context):
+        return
+
+    if await on_monitoring_reply(update, context):
         return
 
     if not _is_roman(update):

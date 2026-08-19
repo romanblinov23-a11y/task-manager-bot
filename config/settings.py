@@ -22,6 +22,20 @@ ROMAN_TELEGRAM_ID = os.getenv("ROMAN_TELEGRAM_ID")
 # По умолчанию "Роман"; если команда обращается иначе (например "Рома") — задать здесь.
 ROMAN_CHAT_NAME = os.getenv("ROMAN_CHAT_NAME", "Роман")
 
+# Telegram ID владельцев модуля мониторинга конкурентов (через запятую) —
+# видят все рынки, добавляют новые проекты/рынки. Роман входит в список по
+# умолчанию, если явно не переопределён через OWNER_TELEGRAM_IDS.
+OWNER_TELEGRAM_IDS = {
+    uid.strip()
+    for uid in os.getenv("OWNER_TELEGRAM_IDS", ROMAN_TELEGRAM_ID or "").split(",")
+    if uid.strip()
+}
+
+# Путь к SQLite-базе модуля мониторинга конкурентов (рынки, конкуренты, снятия)
+MONITORING_DB_PATH = os.getenv("MONITORING_DB_PATH", "data/monitoring.db")
+# Раз в неделю бот шлёт напоминание-задание по рынкам, у которых сегодня день мониторинга
+MONITORING_REMINDER_TIME = os.getenv("MONITORING_REMINDER_TIME", "09:30")
+
 DAILY_REPORT_TIME = os.getenv("DAILY_REPORT_TIME", "20:00")
 WEEKLY_REPORT_DAY = os.getenv("WEEKLY_REPORT_DAY", "fri")
 WEEKLY_REPORT_TIME = os.getenv("WEEKLY_REPORT_TIME", "22:00")

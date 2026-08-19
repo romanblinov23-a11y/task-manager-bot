@@ -5,6 +5,14 @@ from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from bot.chat_registration import on_register_project
+from bot.competitors import (
+    on_add_competitor_command,
+    on_add_competitor_factors_choice,
+    on_add_competitor_format_choice,
+    on_add_competitor_market_choice,
+    on_add_competitor_own_offer,
+    on_add_competitor_reading_choice,
+)
 from bot.confirmation import (
     on_confirmation_callback,
     on_edit_field_selected,
@@ -12,8 +20,42 @@ from bot.confirmation import (
     on_set_category,
 )
 from bot.daily_report import send_daily_report
+from bot.dashboard_cmd import on_dashboard_aggregate_choice, on_dashboard_command, on_dashboard_market_choice
 from bot.handlers import on_group_message
-from bot.onboarding import on_force_onboard, on_help, on_start
+from bot.manager_admin import (
+    on_add_project_command,
+    on_manager_approve,
+    on_manager_back_to_list,
+    on_manager_market,
+    on_manager_reject,
+    on_manager_remove,
+    on_manager_remove_confirm,
+    on_manager_restore,
+    on_manager_role,
+    on_manager_select,
+    on_manager_set_market,
+    on_manager_set_role,
+    on_managers_command,
+)
+from bot.market_schedule import (
+    on_schedule_command,
+    on_schedule_day_toggle,
+    on_schedule_done,
+    on_schedule_market_choice,
+)
+from bot.monitoring_flow import (
+    on_monitoring_category_choice,
+    on_monitoring_command,
+    on_monitoring_date_choice,
+    on_monitoring_factor_block_choice,
+    on_monitoring_factors_choice,
+    on_monitoring_market_choice,
+    on_monitoring_obs_choice,
+    on_monitoring_skip,
+    on_monitoring_start_button,
+    send_monitoring_reminders,
+)
+from bot.onboarding import on_force_onboard, on_help, on_project_choice, on_role_choice, on_start
 from bot.private import on_private_document, on_private_text, on_project_selected
 from bot.queries import (
     on_employee_command,
@@ -27,13 +69,15 @@ from bot.status_cycle import on_status_button, run_status_check
 from bot.weekly_report import on_weekly_command, send_weekly_report
 from config.settings import (
     DAILY_REPORT_TIME,
-    ROMAN_TELEGRAM_ID,
+    MONITORING_REMINDER_TIME,
+    OWNER_TELEGRAM_IDS,
     STATUS_CHECK_TIME,
     TELEGRAM_BOT_TOKEN,
     TZ,
     WEEKLY_REPORT_DAY,
     WEEKLY_REPORT_TIME,
 )
+from monitoring.db import init_schema
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -52,6 +96,10 @@ async def _weekly_report_job(context) -> None:
     await send_weekly_report(context.bot)
 
 
+async def _monitoring_reminder_job(context) -> None:
+    await send_monitoring_reminders(context.bot)
+
+
 def _parse_time(value: str, tzinfo) -> dt_time:
     hour, minute = (int(part) for part in value.split(":"))
     return dt_time(hour=hour, minute=minute, tzinfo=tzinfo)
@@ -64,26 +112,37 @@ _ROMAN_COMMANDS = [
     BotCommand("needhelp", "Задачи, где нужна помощь"),
     BotCommand("onboarded", "Кто онбордился и привязки чатов"),
     BotCommand("weekly", "Еженедельная аналитика по запросу"),
+    BotCommand("managers", "Менеджеры мониторинга конкурентов"),
+    BotCommand("add_project", "Добавить проект/точку Surf"),
+    BotCommand("add_competitor", "Добавить конкурента на рынок"),
+    BotCommand("schedule", "Настроить дни мониторинга рынка"),
+    BotCommand("monitoring", "Провести мониторинг конкурентов"),
+    BotCommand("dashboard_market", "Дашборд по рынку"),
     BotCommand("help", "Список команд"),
 ]
 
 _EMPLOYEE_COMMANDS = [
     BotCommand("mytasks", "Мои задачи в работе"),
+    BotCommand("add_competitor", "Добавить конкурента на рынок"),
+    BotCommand("schedule", "Настроить дни мониторинга рынка"),
+    BotCommand("monitoring", "Провести мониторинг конкурентов"),
+    BotCommand("dashboard_market", "Дашборд по рынку"),
 ]
 
 
 async def _set_bot_commands(app) -> None:
     # Для всех по умолчанию — только кнопка «Мои задачи»
     await app.bot.set_my_commands(_EMPLOYEE_COMMANDS, scope=BotCommandScopeDefault())
-    # Для Романа в личке — полный список
-    if ROMAN_TELEGRAM_ID:
+    # Для владельцев в личке — полный список
+    for owner_id in OWNER_TELEGRAM_IDS:
         await app.bot.set_my_commands(
             _ROMAN_COMMANDS,
-            scope=BotCommandScopeChat(chat_id=int(ROMAN_TELEGRAM_ID)),
+            scope=BotCommandScopeChat(chat_id=int(owner_id)),
         )
 
 
 def main() -> None:
+    init_schema()
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_set_bot_commands).build()
 
     app.add_handler(CommandHandler("start", on_start, filters=filters.ChatType.PRIVATE))
@@ -97,6 +156,12 @@ def main() -> None:
     app.add_handler(CommandHandler("register_project", on_register_project, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("onboard", on_force_onboard, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("mytasks", on_mytasks_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("managers", on_managers_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("add_project", on_add_project_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("add_competitor", on_add_competitor_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("schedule", on_schedule_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("monitoring", on_monitoring_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("dashboard_market", on_dashboard_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, on_group_message))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))
@@ -106,6 +171,37 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_project_selected, pattern=r"^project:"))
     app.add_handler(CallbackQueryHandler(on_employee_disambiguation, pattern=r"^employee:"))
     app.add_handler(CallbackQueryHandler(on_status_button, pattern=r"^status:"))
+    app.add_handler(CallbackQueryHandler(on_project_choice, pattern=r"^onb_project:"))
+    app.add_handler(CallbackQueryHandler(on_role_choice, pattern=r"^onb_role:"))
+    app.add_handler(CallbackQueryHandler(on_manager_select, pattern=r"^mgr_select:"))
+    app.add_handler(CallbackQueryHandler(on_manager_approve, pattern=r"^mgr_approve:"))
+    app.add_handler(CallbackQueryHandler(on_manager_reject, pattern=r"^mgr_reject:"))
+    app.add_handler(CallbackQueryHandler(on_manager_set_role, pattern=r"^mgr_setrole:"))
+    app.add_handler(CallbackQueryHandler(on_manager_role, pattern=r"^mgr_role:"))
+    app.add_handler(CallbackQueryHandler(on_manager_set_market, pattern=r"^mgr_setmarket:"))
+    app.add_handler(CallbackQueryHandler(on_manager_market, pattern=r"^mgr_market:"))
+    app.add_handler(CallbackQueryHandler(on_manager_remove_confirm, pattern=r"^mgr_remove_confirm:"))
+    app.add_handler(CallbackQueryHandler(on_manager_remove, pattern=r"^mgr_remove:"))
+    app.add_handler(CallbackQueryHandler(on_manager_restore, pattern=r"^mgr_restore:"))
+    app.add_handler(CallbackQueryHandler(on_manager_back_to_list, pattern=r"^mgr_list$"))
+    app.add_handler(CallbackQueryHandler(on_add_competitor_market_choice, pattern=r"^addc_market:"))
+    app.add_handler(CallbackQueryHandler(on_add_competitor_format_choice, pattern=r"^addc_format:"))
+    app.add_handler(CallbackQueryHandler(on_add_competitor_reading_choice, pattern=r"^addc_reading:"))
+    app.add_handler(CallbackQueryHandler(on_add_competitor_factors_choice, pattern=r"^addc_factors:"))
+    app.add_handler(CallbackQueryHandler(on_add_competitor_own_offer, pattern=r"^addc_own:"))
+    app.add_handler(CallbackQueryHandler(on_schedule_market_choice, pattern=r"^sched_market:"))
+    app.add_handler(CallbackQueryHandler(on_schedule_day_toggle, pattern=r"^sched_day:"))
+    app.add_handler(CallbackQueryHandler(on_schedule_done, pattern=r"^sched_done:"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_market_choice, pattern=r"^monf_market:"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_start_button, pattern=r"^monf_go:"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_skip, pattern=r"^monf_skip:"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_date_choice, pattern=r"^monf_date:"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_obs_choice, pattern=r"^monf_obs:"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_category_choice, pattern=r"^monf_cat:"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_factors_choice, pattern=r"^monf_factors:"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_factor_block_choice, pattern=r"^monf_fblock:"))
+    app.add_handler(CallbackQueryHandler(on_dashboard_market_choice, pattern=r"^dash_market:"))
+    app.add_handler(CallbackQueryHandler(on_dashboard_aggregate_choice, pattern=r"^dash_all$"))
 
     app.job_queue.run_daily(_status_check_job, time=_parse_time(STATUS_CHECK_TIME, TZ))
     app.job_queue.run_daily(_daily_report_job, time=_parse_time(DAILY_REPORT_TIME, TZ))
@@ -114,6 +210,7 @@ def main() -> None:
         time=_parse_time(WEEKLY_REPORT_TIME, TZ),
         days=(_WEEKDAYS[WEEKLY_REPORT_DAY.lower()],),
     )
+    app.job_queue.run_daily(_monitoring_reminder_job, time=_parse_time(MONITORING_REMINDER_TIME, TZ))
 
     app.run_polling()
 

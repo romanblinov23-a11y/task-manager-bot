@@ -1,11 +1,15 @@
 import json
+import logging
 from pathlib import Path
 
-from telegram import Update, User
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, User
 from telegram.ext import ContextTypes
 
 from config.chats import get_chats_for_project, get_project_for_chat
-from config.settings import ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
+from config.settings import OWNER_TELEGRAM_IDS, ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
+from monitoring.constants import MANAGER_POSITIONS
+from monitoring.managers import get_manager, is_owner, register_manager
+from monitoring.markets import get_market, list_markets
 from sheets.tasks import get_all_tasks, update_task
 
 _STORE_PATH = Path(__file__).resolve().parent.parent / "data" / "known_users.json"
@@ -16,8 +20,11 @@ _known_users: dict[str, dict] = {}
 _seen_in_chats: dict[str, list[int]] = {}
 # "{project}|{normalized_assignee}" -> telegram_id — уже разрешённые сопоставления
 _resolved: dict[str, int] = {}
-# user_id (str), которым сейчас задан вопрос "как тебя зовут в рабочих чатах?"
+# user_id (str), которым сейчас задан вопрос "как тебя зовут?"
 _awaiting_name: set[str] = set()
+# user_id (str) -> {"step": "project"|"name"|"role", "market_id", "market_name", "real_name"}
+# состояние диалога первичного онбординга (проект → имя → роль)
+_pending_onboarding: dict[str, dict] = {}
 
 
 def _load() -> None:
@@ -201,40 +208,88 @@ def record_group_member(chat_id: int, user: User | None) -> None:
         _try_match_and_backfill(user.id)
 
 
+def _project_choice_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"onb_project:{m['id']}")] for m in markets])
+
+
+def _role_choice_keyboard() -> InlineKeyboardMarkup:
+    buttons = []
+    for i in range(0, len(MANAGER_POSITIONS), 2):
+        row = [InlineKeyboardButton(MANAGER_POSITIONS[i], callback_data=f"onb_role:{i}")]
+        if i + 1 < len(MANAGER_POSITIONS):
+            row.append(InlineKeyboardButton(MANAGER_POSITIONS[i + 1], callback_data=f"onb_role:{i + 1}"))
+        buttons.append(row)
+    return InlineKeyboardMarkup(buttons)
+
+
+async def _start_project_selection(update: Update, user_id: str) -> None:
+    markets = list_markets()
+    _pending_onboarding[user_id] = {"step": "project"}
+    await update.effective_message.reply_text(
+        "Привет! Я Енисей — бот-менеджер задач и мониторинга конкурентов.\n\n"
+        "В каком проекте ты трудишься?",
+        reply_markup=_project_choice_keyboard(markets),
+    )
+
+
 async def on_employee_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Любое личное сообщение сотрудника боту открывает возможность писать
-    ему в личку (раздел 4: "/start или любое сообщение")."""
+    ему в личку (раздел 4: "/start или любое сообщение"), а для новых
+    пользователей запускает онбординг: проект → имя → роль."""
     user = update.effective_user
     user_id = str(user.id)
 
     if user_id in _awaiting_name:
-        await _save_real_name_and_continue(update)
+        await _handle_name_reply(update)
         return
 
-    already_onboarded = _known_users.get(user_id, {}).get("onboarded", False)
+    pending = _pending_onboarding.get(user_id)
+    if pending and pending.get("step") == "role":
+        await update.effective_message.reply_text("Выбери роль кнопкой выше 🙂")
+        return
 
     _known_users.setdefault(user_id, {})
     _known_users[user_id]["username"] = user.username
     _known_users[user_id]["full_name"] = user.full_name
+    already_contacted = _known_users[user_id].get("onboarded", False)
     _known_users[user_id]["onboarded"] = True
     _save()
 
-    if not _known_users[user_id].get("real_name"):
-        _awaiting_name.add(user_id)
-        await update.effective_message.reply_text(
-            "Привет! Я Енисей — бот-менеджер задач. Как тебя зовут в рабочих чатах "
-            "(имя, по которому к тебе обращаются коллеги)? Напиши его следующим сообщением — "
-            "это поможет находить твои задачи, даже если в Telegram у тебя другое имя или ник."
-        )
+    if not is_owner(user.id) and get_manager(user.id) is None:
+        await _start_project_selection(update, user_id)
         return
 
-    if already_onboarded:
+    if already_contacted:
         return
 
-    await _greet_after_onboarding(update, user.id)
+    await _greet_after_onboarding(update.effective_message, user.id)
 
 
-async def _save_real_name_and_continue(update: Update) -> None:
+async def on_project_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user_id = str(query.from_user.id)
+    pending = _pending_onboarding.get(user_id)
+    if not pending or pending.get("step") != "project":
+        await query.answer()
+        return
+
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Проект не найден", show_alert=True)
+        return
+
+    pending["market_id"] = market_id
+    pending["market_name"] = market["name"]
+    pending["step"] = "name"
+    await query.answer()
+    await query.edit_message_text(f"Проект: {market['name']}")
+
+    _awaiting_name.add(user_id)
+    await query.message.reply_text("Как тебя зовут?")
+
+
+async def _handle_name_reply(update: Update) -> None:
     user_id = str(update.effective_user.id)
     real_name = update.effective_message.text.strip()
 
@@ -243,19 +298,91 @@ async def _save_real_name_and_continue(update: Update) -> None:
     _known_users[user_id]["real_name"] = real_name
     _save()
 
+    pending = _pending_onboarding.get(user_id)
+    if pending and pending.get("step") == "name":
+        pending["real_name"] = real_name
+        pending["step"] = "role"
+        await update.effective_message.reply_text(
+            f"Спасибо! Записал тебя как «{real_name}».\n\nКакая у тебя роль?",
+            reply_markup=_role_choice_keyboard(),
+        )
+        return
+
     await update.effective_message.reply_text(f"Спасибо! Записал тебя как «{real_name}».")
-    await _greet_after_onboarding(update, int(user_id))
+    await _greet_after_onboarding(update.effective_message, int(user_id))
 
 
-async def _greet_after_onboarding(update: Update, user_id: int) -> None:
+async def on_role_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user_id = str(query.from_user.id)
+    pending = _pending_onboarding.get(user_id)
+    if not pending or pending.get("step") != "role":
+        await query.answer()
+        return
+
+    index = int(query.data.split(":", 1)[1])
+    if index < 0 or index >= len(MANAGER_POSITIONS):
+        await query.answer()
+        return
+    position = MANAGER_POSITIONS[index]
+
+    await query.answer()
+    await query.edit_message_text(f"Роль: {position}")
+
+    register_manager(
+        telegram_user_id=int(user_id),
+        name=pending["real_name"],
+        position=position,
+        market_id=pending["market_id"],
+    )
+    market_name = pending["market_name"]
+    del _pending_onboarding[user_id]
+
+    await query.message.reply_text(
+        f"Заявка отправлена владельцу: «{position}» на проекте «{market_name}». "
+        "Как только подтвердят — станут доступны /schedule, /add_competitor и /monitoring."
+    )
+    await _notify_owners_of_pending(context, int(user_id), pending["real_name"], position, market_name)
+    await _greet_after_onboarding(query.message, int(user_id))
+
+
+def _approval_keyboard(telegram_user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("✅ Подтвердить", callback_data=f"mgr_approve:{telegram_user_id}"),
+                InlineKeyboardButton("❌ Отклонить", callback_data=f"mgr_reject:{telegram_user_id}"),
+            ]
+        ]
+    )
+
+
+async def _notify_owners_of_pending(
+    context: ContextTypes.DEFAULT_TYPE, telegram_user_id: int, name: str, position: str, market_name: str
+) -> None:
+    text = (
+        f"🆕 Новая заявка на доступ к мониторингу конкурентов:\n"
+        f"{name} — «{position}», проект «{market_name}».\n"
+        f"Telegram ID: {telegram_user_id}"
+    )
+    for owner_id in OWNER_TELEGRAM_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=int(owner_id), text=text, reply_markup=_approval_keyboard(telegram_user_id)
+            )
+        except Exception:
+            logging.getLogger(__name__).exception("Не удалось уведомить владельца %s о новой заявке", owner_id)
+
+
+async def _greet_after_onboarding(message, user_id: int) -> None:
     matched = _try_match_and_backfill(user_id)
     if matched:
-        await update.effective_message.reply_text(
+        await message.reply_text(
             "Вижу, что на тебя уже есть задача в таблице — буду писать сюда, если "
             "понадобится спросить про статус или сроки."
         )
     else:
-        await update.effective_message.reply_text(
+        await message.reply_text(
             "Как только появится задача на твоё имя, напишу сюда, чтобы спросить про статус."
         )
 
