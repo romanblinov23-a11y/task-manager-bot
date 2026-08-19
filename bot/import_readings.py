@@ -63,16 +63,21 @@ async def on_import_readings_market_choice(update: Update, context: ContextTypes
     _awaiting_paste[owner_id] = {"market_id": market_id}
     await query.answer()
     await query.edit_message_text(
-        f"Рынок «{market['name']}». Известные коды:\n{codes_list}\n\n"
+        f"Рынок «{market['name']}». Известные точки:\n{codes_list}\n\n"
         "Вставьте данные текстом, по одному снятию на строку:\n"
-        "код дата показатель\n\n"
-        "Дата — в любом привычном формате (01.07.2026, 2026-07-01, «9 июля»). "
+        "код или название · дата · показатель\n\n"
+        "Название можно писать как в списке выше (можно с пробелами, например «Surf Coffee»). "
+        "Дата — в любом привычном формате (01.07.2026, 2026-07-01, «9 июля»), последнее число в строке — показатель. "
         "Разделитель — пробел или таб, можно вставлять прямо из таблицы."
     )
 
 
 def _parse_paste(text: str, competitors: list[dict]) -> tuple[list[dict], list[dict]]:
-    by_code = {c["code"].strip().lower(): c for c in competitors}
+    by_key: dict[str, dict] = {}
+    for c in competitors:
+        by_key[c["code"].strip().lower()] = c
+        by_key[c["name"].strip().lower()] = c
+
     rows, errors = [], []
     for i, raw_line in enumerate(text.splitlines(), start=1):
         line = raw_line.strip()
@@ -80,13 +85,17 @@ def _parse_paste(text: str, competitors: list[dict]) -> tuple[list[dict], list[d
             continue
         tokens = line.split()
         if len(tokens) < 3:
-            errors.append({"line_no": i, "raw": line, "reason": "меньше трёх полей (код, дата, показатель)"})
+            errors.append({"line_no": i, "raw": line, "reason": "меньше трёх полей (точка, дата, показатель)"})
             continue
 
-        code, date_raw, value_raw = tokens[0], tokens[1], tokens[2]
-        competitor = by_code.get(code.strip().lower())
+        # Название может быть из нескольких слов ("Surf Coffee") — дата и
+        # показатель всегда два последних токена в строке, всё до них — код
+        # или название точки.
+        value_raw, date_raw = tokens[-1], tokens[-2]
+        name_or_code = " ".join(tokens[:-2])
+        competitor = by_key.get(name_or_code.strip().lower())
         if not competitor:
-            errors.append({"line_no": i, "raw": line, "reason": f"неизвестный код «{code}»"})
+            errors.append({"line_no": i, "raw": line, "reason": f"неизвестная точка «{name_or_code}»"})
             continue
 
         reading_at = parse_date(date_raw)
