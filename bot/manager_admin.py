@@ -2,6 +2,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from monitoring.constants import MANAGER_POSITIONS
+from monitoring.db import reset_all
 from monitoring.managers import (
     approve_manager,
     get_manager,
@@ -327,3 +328,45 @@ async def on_manager_admin_reply(update: Update, context: ContextTypes.DEFAULT_T
         f"✅ Проект «{name}» добавлен — теперь появится в онбординге через /start."
     )
     return True
+
+
+def _reset_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🗑 Да, обнулить всё", callback_data="reset_monitoring_confirm"),
+                InlineKeyboardButton("Отмена", callback_data="reset_monitoring_cancel"),
+            ]
+        ]
+    )
+
+
+async def on_reset_monitoring_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_owner(update.effective_user.id):
+        return
+    await update.effective_message.reply_text(
+        "⚠️ Это удалит ВСЕ данные модуля мониторинга конкурентов на всех рынках: менеджеров, "
+        "конкурентов, снятия, наблюдения, расписания. Действие необратимо. Точно продолжить?",
+        reply_markup=_reset_confirm_keyboard(),
+    )
+
+
+async def on_reset_monitoring_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    await query.answer("Обнуляю…")
+    reset_all()
+    await query.edit_message_text(
+        "✅ База модуля мониторинга обнулена. Рынки пересеяны из списка проектов — можно проходить онбординг заново."
+    )
+
+
+async def on_reset_monitoring_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    await query.answer()
+    await query.edit_message_text("Отменено, ничего не удалено.")

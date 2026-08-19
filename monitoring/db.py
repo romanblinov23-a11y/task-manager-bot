@@ -114,3 +114,31 @@ def init_schema() -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def reset_all() -> None:
+    """Необратимо стирает все данные модуля мониторинга (менеджеров,
+    конкурентов, снятия, наблюдения, расписания на всех рынках) и заново
+    сидирует market из PROJECTS — чистый старт. Только для владельца,
+    вызывается через /reset_monitoring в bot/manager_admin.py."""
+    conn = get_connection()
+    try:
+        for table in (
+            "observation",
+            "daily_avg_reading",
+            "competitor_factors",
+            "competitor",
+            "manager_market",
+            "manager",
+            "monitoring_schedule",
+            "market",
+        ):
+            conn.execute(f"DELETE FROM {table}")
+        for project in PROJECTS:
+            conn.execute(
+                "INSERT INTO market (name, city, our_point_name) VALUES (?, '', ?)",
+                (project, project),
+            )
+        conn.commit()
+    finally:
+        conn.close()
