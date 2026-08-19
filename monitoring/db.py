@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS competitor (
     is_own INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    closed_at TEXT,
     UNIQUE (market_id, code)
 );
 
@@ -106,6 +107,7 @@ def init_schema() -> None:
     try:
         conn.executescript(_SCHEMA)
         _ensure_column(conn, "manager", "status", "status TEXT NOT NULL DEFAULT 'pending'")
+        _ensure_column(conn, "competitor", "closed_at", "closed_at TEXT")
         for project in PROJECTS:
             conn.execute(
                 "INSERT OR IGNORE INTO market (name, city, our_point_name) VALUES (?, '', ?)",

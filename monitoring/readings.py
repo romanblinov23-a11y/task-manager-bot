@@ -94,6 +94,27 @@ def get_last_market_cycle_date(market_id: int) -> str | None:
         conn.close()
 
 
+def get_last_reading_dates_by_creator(market_id: int) -> dict[int, str]:
+    """Для каждого telegram_user_id, вносившего снятия по конкурентам этого
+    рынка — дата его последнего снятия. Используется для показа активности
+    менеджеров рынка на дашборде."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT daily_avg_reading.created_by AS created_by, MAX(daily_avg_reading.reading_at) AS last_date
+            FROM daily_avg_reading
+            JOIN competitor ON competitor.id = daily_avg_reading.competitor_id
+            WHERE competitor.market_id = ?
+            GROUP BY daily_avg_reading.created_by
+            """,
+            (market_id,),
+        ).fetchall()
+        return {row["created_by"]: row["last_date"] for row in rows}
+    finally:
+        conn.close()
+
+
 def get_competitors_pending_this_cycle(market_id: int) -> list[dict]:
     """Конкуренты (и точка Surf) рынка, у которых нет снятия за последние
     MONITORING_CYCLE_DAYS дней — это то, что ещё нужно пройти на текущем

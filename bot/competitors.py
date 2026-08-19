@@ -1,7 +1,16 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from monitoring.competitors import code_taken, create_competitor, get_own_competitor, next_code
+from monitoring.competitors import (
+    close_competitor,
+    code_taken,
+    create_competitor,
+    get_competitor,
+    get_own_competitor,
+    list_competitors,
+    next_code,
+    reopen_competitor,
+)
 from monitoring.constants import COMPETITOR_FORMATS
 from monitoring.factors import save_factors
 from monitoring.managers import get_markets_for_manager, is_active_manager, is_owner
@@ -311,3 +320,113 @@ async def on_add_competitor_reply(update: Update, context: ContextTypes.DEFAULT_
         return True
 
     return False
+
+
+def _close_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"cc_market:{m['id']}")] for m in markets])
+
+
+def _close_competitor_pick_keyboard(competitors: list[dict]) -> InlineKeyboardMarkup:
+    buttons = []
+    for c in competitors:
+        icon = "🔴" if c["status"] == "closed" else "🟢"
+        label = f"{icon} {c['code']} — {c['name']}" + (" (закрыт)" if c["status"] == "closed" else "")
+        buttons.append([InlineKeyboardButton(label, callback_data=f"cc_pick:{c['id']}")])
+    return InlineKeyboardMarkup(buttons)
+
+
+async def _show_competitor_list(message, market: dict) -> None:
+    competitors = list_competitors(market["id"], include_closed=True)
+    if not competitors:
+        await message.reply_text(f"На рынке «{market['name']}» ещё нет конкурентов.")
+        return
+    await message.reply_text(
+        f"Рынок «{market['name']}» — кого закрыть или открыть заново?",
+        reply_markup=_close_competitor_pick_keyboard(competitors),
+    )
+
+
+async def on_close_competitor_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if not (is_owner(user.id) or is_active_manager(user.id)):
+        await update.effective_message.reply_text("Эта команда доступна только подтверждённым владельцем менеджерам.")
+        return
+
+    markets = _available_markets(user.id)
+    if not markets:
+        await update.effective_message.reply_text("Нет доступных рынков — сначала пройдите онбординг через /start.")
+        return
+
+    if len(markets) == 1:
+        await _show_competitor_list(update.effective_message, markets[0])
+        return
+
+    await update.effective_message.reply_text(
+        "По какому рынку?", reply_markup=_close_market_pick_keyboard(markets)
+    )
+
+
+async def on_close_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(f"Рынок: {market['name']}")
+    await _show_competitor_list(query.message, market)
+
+
+async def on_close_competitor_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    competitor_id = int(query.data.split(":", 1)[1])
+    competitor = get_competitor(competitor_id)
+    if not competitor:
+        await query.answer("Не найден", show_alert=True)
+        return
+    await query.answer()
+    if competitor["status"] == "closed":
+        await query.edit_message_text(
+            f"Открыть заново «{competitor['name']}» ({competitor['code']})?",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton("♻️ Да, открыть", callback_data=f"cc_confirm:reopen:{competitor_id}"),
+                        InlineKeyboardButton("Отмена", callback_data=f"cc_confirm:cancel:{competitor_id}"),
+                    ]
+                ]
+            ),
+        )
+    else:
+        await query.edit_message_text(
+            f"Закрыть «{competitor['name']}» ({competitor['code']})? История снятий и наблюдений сохранится, "
+            "но точка перестанет участвовать в еженедельном мониторинге и расчёте ёмкости рынка.",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton("🔴 Да, закрыть", callback_data=f"cc_confirm:close:{competitor_id}"),
+                        InlineKeyboardButton("Отмена", callback_data=f"cc_confirm:cancel:{competitor_id}"),
+                    ]
+                ]
+            ),
+        )
+
+
+async def on_close_competitor_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    _, action, competitor_id_str = query.data.split(":", 2)
+    competitor_id = int(competitor_id_str)
+    competitor = get_competitor(competitor_id)
+    if not competitor:
+        await query.answer("Не найден", show_alert=True)
+        return
+    await query.answer()
+    if action == "close":
+        close_competitor(competitor_id)
+        await query.edit_message_text(f"🔴 «{competitor['name']}» ({competitor['code']}) закрыт(а).")
+    elif action == "reopen":
+        reopen_competitor(competitor_id)
+        await query.edit_message_text(f"🟢 «{competitor['name']}» ({competitor['code']}) снова активен(на).")
+    else:
+        await query.edit_message_text("Отменено.")

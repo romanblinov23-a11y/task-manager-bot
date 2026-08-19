@@ -4,13 +4,24 @@ from datetime import date, timedelta
 from config.timeutil import today
 from monitoring.calculations import compute_market_capacity, compute_share, is_anomaly
 from monitoring.competitors import list_competitors
-from monitoring.constants import ANOMALY_WINDOW_READINGS
+from monitoring.constants import ANOMALY_WINDOW_READINGS, COMPETITOR_FORMATS, MONITORING_CYCLE_DAYS
+from monitoring.factors import get_latest_factors
+from monitoring.managers import get_managers_for_market
 from monitoring.markets import get_market, list_markets
 from monitoring.observations import get_observations
-from monitoring.readings import get_readings
+from monitoring.readings import get_last_reading_dates_by_creator, get_latest_reading, get_readings
 
 _OWN_COLOR = "#2E8B7A"
 _COMPETITOR_PALETTE = ["#E07A5F", "#3D5A80", "#F2CC8F", "#81B29A", "#9B5DE5", "#F4845F", "#577590", "#B56576"]
+_FORMAT_PALETTE = ["#3D5A80", "#E07A5F", "#81B29A"]
+
+_FACTOR_FIELDS = [
+    ("product", "Продукт"),
+    ("atmosphere", "Атмосфера/интерьер"),
+    ("service", "Персонализация/сервис"),
+    ("brand_strength", "Сила бренда"),
+    ("labor_market", "Рынок труда"),
+]
 
 _RECOMMENDATIONS = {
     ("competitor", "up"): "Резкий рост у конкурента — стоит посетить точку лично и проверить все факторы формирования (продукт, атмосферу, сервис, бренд, персонал).",
@@ -143,6 +154,227 @@ def _dataset_for(series_item: dict, timeline: list[dict], color: str) -> dict:
     }
 
 
+def _wow_delta(timeline: list[dict]) -> dict | None:
+    if len(timeline) < 2 or timeline[-2]["capacity"] <= 0:
+        return None
+    current, previous = timeline[-1]["capacity"], timeline[-2]["capacity"]
+    delta_pct = (current - previous) / previous * 100
+    return {"delta_pct": delta_pct, "direction": "up" if delta_pct >= 0 else "down"}
+
+
+def _format_distribution(active_competitors: list[dict]) -> dict[str, int]:
+    counts = {fmt: 0 for fmt in COMPETITOR_FORMATS}
+    for c in active_competitors:
+        counts[c["format"]] = counts.get(c["format"], 0) + 1
+    return counts
+
+
+def _ranking_rows(series: list[dict], timeline: list[dict]) -> list[dict]:
+    if not timeline:
+        return []
+
+    def ranks_at(point: dict) -> dict[int, int]:
+        ranked = sorted(point["shares"].items(), key=lambda kv: kv[1], reverse=True)
+        return {cid: i + 1 for i, (cid, _) in enumerate(ranked)}
+
+    current_ranks = ranks_at(timeline[-1])
+    previous_ranks = ranks_at(timeline[-2]) if len(timeline) >= 2 else {}
+
+    rows = []
+    for s in series:
+        cid = s["competitor"]["id"]
+        if cid not in current_ranks:
+            continue
+        prev_place = previous_ranks.get(cid)
+        place = current_ranks[cid]
+        rows.append(
+            {
+                "competitor": s["competitor"],
+                "place": place,
+                "share": round(timeline[-1]["shares"].get(cid, 0), 1),
+                "prev_place": prev_place,
+                "delta": (prev_place - place) if prev_place is not None else None,
+            }
+        )
+    rows.sort(key=lambda r: r["place"])
+    return rows
+
+
+def _freshness_rows(active_competitors: list[dict]) -> tuple[list[dict], int]:
+    cutoff = (today() - timedelta(days=MONITORING_CYCLE_DAYS)).isoformat()
+    rows = []
+    ok_count = 0
+    for c in active_competitors:
+        latest = get_latest_reading(c["id"])
+        if latest:
+            days_since = (today() - date.fromisoformat(latest["reading_at"])).days
+            overdue = latest["reading_at"] < cutoff
+        else:
+            days_since = None
+            overdue = True
+        if not overdue:
+            ok_count += 1
+        rows.append(
+            {
+                "competitor": c,
+                "last_date": latest["reading_at"] if latest else None,
+                "days_since": days_since,
+                "overdue": overdue,
+            }
+        )
+    return rows, ok_count
+
+
+def _manager_activity_rows(market_id: int) -> list[dict]:
+    last_dates = get_last_reading_dates_by_creator(market_id)
+    rows = []
+    for m in get_managers_for_market(market_id):
+        if m["status"] != "active":
+            continue
+        rows.append({"name": m["name"], "position": m["position"] or "—", "last_date": last_dates.get(m["telegram_user_id"])})
+    rows.sort(key=lambda r: r["last_date"] or "", reverse=True)
+    return rows
+
+
+# ---------- HTML-рендеринг новых блоков ----------
+
+
+def _render_wow_card(wow: dict | None) -> str:
+    if not wow:
+        return '<div class="card"><div class="value">—</div><div class="label">Изменение к пред. снятию (недостаточно данных)</div></div>'
+    arrow = "▲" if wow["direction"] == "up" else "▼"
+    cls = "delta-up" if wow["direction"] == "up" else "delta-down"
+    return (
+        f'<div class="card"><div class="value {cls}">{arrow} {abs(wow["delta_pct"]):.1f}%</div>'
+        '<div class="label">Изменение ёмкости к пред. снятию</div></div>'
+    )
+
+
+def _render_format_section(counts: dict[str, int]) -> str:
+    if not any(counts.values()):
+        return '<div class="notice">Нет активных конкурентов с указанным форматом.</div>'
+    rows = "".join(f"<tr><td>{fmt}</td><td>{n}</td></tr>" for fmt, n in counts.items() if n)
+    return f'<table><thead><tr><th>Формат</th><th>Точек</th></tr></thead><tbody>{rows}</tbody></table><div class="chart-wrap"><canvas id="formatChart"></canvas></div>'
+
+
+def _render_ranking_table(rows: list[dict]) -> str:
+    if not rows:
+        return '<div class="notice">Пока недостаточно данных для рейтинга.</div>'
+    body = []
+    for r in rows:
+        c = r["competitor"]
+        if r["delta"] is None:
+            delta_html = "—"
+        elif r["delta"] > 0:
+            delta_html = f'<span class="delta-up">▲ {r["delta"]}</span>'
+        elif r["delta"] < 0:
+            delta_html = f'<span class="delta-down">▼ {abs(r["delta"])}</span>'
+        else:
+            delta_html = "="
+        own_tag = " (наша точка)" if c["is_own"] else ""
+        body.append(
+            f"<tr><td>{r['place']}</td><td>{c['code']} — {c['name']}{own_tag}</td>"
+            f"<td>{r['share']:g}%</td><td>{delta_html}</td></tr>"
+        )
+    return (
+        "<table><thead><tr><th>Место</th><th>Точка</th><th>Доля</th><th>Δ места</th></tr></thead>"
+        f"<tbody>{''.join(body)}</tbody></table>"
+    )
+
+
+def _render_factors_profile(series: list[dict]) -> str:
+    cards = []
+    for s in series:
+        c = s["competitor"]
+        factors = get_latest_factors(c["id"])
+        own_tag = " (наша точка)" if c["is_own"] else ""
+        if not factors:
+            cards.append(f'<div class="factor-card"><h3>{c["code"]} — {c["name"]}{own_tag}</h3><div class="factor-row">Факторы ещё не заполнены.</div></div>')
+            continue
+        rows = "".join(
+            f'<div class="factor-row"><b>{label}:</b> {factors.get(field) or "—"}</div>' for field, label in _FACTOR_FIELDS
+        )
+        cards.append(f'<div class="factor-card"><h3>{c["code"]} — {c["name"]}{own_tag}</h3>{rows}</div>')
+    return "".join(cards)
+
+
+def _render_observations_feed(market_id: int, series: list[dict], limit: int = 50) -> str:
+    competitors_by_id = {s["competitor"]["id"]: s["competitor"] for s in series}
+    obs = get_observations(market_id)
+    if not obs:
+        return '<div class="notice">Наблюдений по этому рынку пока нет.</div>'
+    items = []
+    for o in obs[:limit]:
+        c = competitors_by_id.get(o["competitor_id"])
+        label = f"{c['code']} — {c['name']}" if c else "—"
+        text = f": {o['text']}" if o["text"] else ""
+        items.append(
+            f'<div class="obs-item"><div class="meta">{o["observed_at"][:10]} · {label} · {o["category"]}</div>{text}</div>'
+        )
+    more_note = f'<div class="notice">Показаны последние {limit} из {len(obs)} наблюдений.</div>' if len(obs) > limit else ""
+    return "".join(items) + more_note
+
+
+def _render_freshness_section(rows: list[dict], ok_count: int, total: int) -> str:
+    if not rows:
+        return '<div class="notice">На рынке пока нет активных точек.</div>'
+    summary = f'<div class="notice">{ok_count} из {total} точек мониторятся вовремя (снятие не старше {MONITORING_CYCLE_DAYS} дней).</div>'
+    body = []
+    for r in rows:
+        c = r["competitor"]
+        badge = '<span class="badge overdue">просрочено</span>' if r["overdue"] else '<span class="badge ok">в порядке</span>'
+        last = r["last_date"] or "нет данных"
+        days = f'{r["days_since"]} дн. назад' if r["days_since"] is not None else "—"
+        body.append(f"<tr><td>{c['code']} — {c['name']}</td><td>{last}</td><td>{days}</td><td>{badge}</td></tr>")
+    table = (
+        "<table><thead><tr><th>Точка</th><th>Последнее снятие</th><th>Давность</th><th>Статус</th></tr></thead>"
+        f"<tbody>{''.join(body)}</tbody></table>"
+    )
+    return summary + table
+
+
+def _render_closed_section(closed: list[dict]) -> str:
+    if not closed:
+        return '<div class="notice">Закрывшихся точек на этом рынке нет.</div>'
+    body = "".join(
+        f"<tr><td>{c['code']} — {c['name']}</td><td>{c.get('closed_at') or '—'}</td></tr>" for c in closed
+    )
+    return f"<table><thead><tr><th>Точка</th><th>Закрыта</th></tr></thead><tbody>{body}</tbody></table>"
+
+
+def _render_manager_activity(rows: list[dict]) -> str:
+    if not rows:
+        return '<div class="notice">На этом рынке пока нет подтверждённых менеджеров.</div>'
+    body = "".join(
+        f"<tr><td>{r['name']}</td><td>{r['position']}</td><td>{r['last_date'] or 'ещё не проводил(а)'}</td></tr>"
+        for r in rows
+    )
+    return f"<table><thead><tr><th>Менеджер</th><th>Роль</th><th>Последний мониторинг</th></tr></thead><tbody>{body}</tbody></table>"
+
+
+def _render_summary_table(series: list[dict], timeline: list[dict]) -> str:
+    if not timeline:
+        return '<div class="notice">Пока нет ни одного снятия.</div>'
+    now_point = timeline[-1]
+    body = []
+    for s in series:
+        c = s["competitor"]
+        value = now_point["values"].get(c["id"])
+        share = now_point["shares"].get(c["id"])
+        own_tag = " (наша точка)" if c["is_own"] else ""
+        status = "закрыт" if c["status"] == "closed" else "активен"
+        value_cell = f"{value:g} чек/день" if value is not None else "нет данных"
+        share_cell = f"{share:.1f}%" if share is not None else "—"
+        body.append(
+            f"<tr><td>{c['code']}</td><td>{c['name']}{own_tag}</td><td>{c['format']}</td>"
+            f"<td>{value_cell}</td><td>{share_cell}</td><td>{status}</td></tr>"
+        )
+    return (
+        "<table><thead><tr><th>Код</th><th>Название</th><th>Формат</th><th>Показатель</th>"
+        f"<th>Доля</th><th>Статус</th></tr></thead><tbody>{''.join(body)}</tbody></table>"
+    )
+
+
 _HTML_TEMPLATE = """<!doctype html>
 <html lang="ru">
 <head>
@@ -167,6 +399,20 @@ _HTML_TEMPLATE = """<!doctype html>
   .anomaly .rec {{ margin-top: 8px; font-size: 14px; }}
   .anomaly .causes {{ margin-top: 6px; font-size: 13px; color: #444; }}
   .cdn-note {{ color: #999; font-size: 12px; margin-top: 40px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 14px; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }}
+  th, td {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid #eee; }}
+  th {{ color: #666; font-weight: 600; font-size: 12px; text-transform: uppercase; }}
+  .badge {{ display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }}
+  .badge.ok {{ background: #e3f4ee; color: #1f6f5c; }}
+  .badge.overdue {{ background: #fdeceb; color: #a13c30; }}
+  .obs-item {{ background: #fff; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }}
+  .obs-item .meta {{ color: #888; font-size: 12px; margin-bottom: 4px; }}
+  .factor-card {{ background: #fff; border-radius: 12px; padding: 14px 18px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }}
+  .factor-card h3 {{ margin: 0 0 8px; font-size: 15px; }}
+  .factor-row {{ font-size: 13px; margin: 3px 0; color: #333; }}
+  .factor-row b {{ color: #555; }}
+  .delta-up {{ color: #2E8B7A; }}
+  .delta-down {{ color: #E07A5F; }}
 </style>
 </head>
 <body>
@@ -177,6 +423,7 @@ _HTML_TEMPLATE = """<!doctype html>
 
 <div class="cards">
   <div class="card"><div class="value">{capacity_now:g}</div><div class="label">Ёмкость рынка, чек/день (≈{capacity_week:g} чек/нед.)</div></div>
+  {wow_card}
 </div>
 
 <h2>1. Ёмкость рынка во времени</h2>
@@ -184,6 +431,9 @@ _HTML_TEMPLATE = """<!doctype html>
 
 <h2>2. Доля рынка по каждому конкуренту (последний период)</h2>
 <div class="chart-wrap"><canvas id="shareNowChart"></canvas></div>
+
+<h2>Распределение по формату</h2>
+{format_html}
 
 <h2>3. Тенденция доли — за всё время</h2>
 <div class="chart-wrap"><canvas id="shareAllChart"></canvas></div>
@@ -194,8 +444,29 @@ _HTML_TEMPLATE = """<!doctype html>
 <h2>5. Тенденция доли — последний месяц</h2>
 <div class="chart-wrap"><canvas id="share1mChart"></canvas></div>
 
+<h2>Рейтинг точек и его динамика</h2>
+{ranking_html}
+
 <h2>6. Явные изменения, возможные причины и рекомендации</h2>
 {anomalies_html}
+
+<h2>Профили конкурентов (факторы формирования)</h2>
+{factors_html}
+
+<h2>Лента наблюдений</h2>
+{observations_html}
+
+<h2>Свежесть данных / здоровье мониторинга</h2>
+{freshness_html}
+
+<h2>Закрывшиеся точки</h2>
+{closed_html}
+
+<h2>Активность менеджеров рынка</h2>
+{manager_activity_html}
+
+<h2>Сводная таблица</h2>
+{summary_html}
 
 <div class="cdn-note">Графики интерактивны (наведите курсор на точки) — для их отображения нужен доступ в интернет (библиотека графиков подгружается с CDN).</div>
 
@@ -211,6 +482,9 @@ const shareDatasets1m = {share_datasets_1m};
 const shareNowLabels = {share_now_labels};
 const shareNowData = {share_now_data};
 const shareNowColors = {share_now_colors};
+const formatLabels = {format_labels};
+const formatData = {format_data};
+const formatColors = {format_colors};
 
 new Chart(document.getElementById('capacityChart'), {{
   type: 'line',
@@ -223,6 +497,13 @@ new Chart(document.getElementById('shareNowChart'), {{
   data: {{ labels: shareNowLabels, datasets: [{{ label: 'Доля, %', data: shareNowData, backgroundColor: shareNowColors }}] }},
   options: {{ plugins: {{ legend: {{ display: false }} }}, scales: {{ y: {{ beginAtZero: true, max: 100 }} }} }}
 }});
+
+if (formatLabels.length) {{
+  new Chart(document.getElementById('formatChart'), {{
+    type: 'pie',
+    data: {{ labels: formatLabels, datasets: [{{ data: formatData, backgroundColor: formatColors }}] }}
+  }});
+}}
 
 function shareLineChart(id, labels, datasets) {{
   new Chart(document.getElementById(id), {{
@@ -269,6 +550,7 @@ def generate_market_dashboard(market_id: int) -> tuple[str, str]:
     market = get_market(market_id)
     series = _load_competitor_series(market_id)
     timeline = _build_capacity_timeline(series)
+    active_competitors = list_competitors(market_id)
 
     distinct_dates = sorted({p["date"] for p in timeline})
     insufficient_banner = ""
@@ -295,12 +577,26 @@ def generate_market_dashboard(market_id: int) -> tuple[str, str]:
     competitor_anomalies = _detect_competitor_anomalies(series, market_id)
     market_anomalies = _detect_market_anomalies(timeline)
 
+    format_counts = _format_distribution(active_competitors)
+    format_items = [(fmt, n) for fmt, n in format_counts.items() if n]
+    freshness_rows, freshness_ok = _freshness_rows(active_competitors)
+    closed_competitors = [c for c in list_competitors(market_id, include_closed=True) if c["status"] == "closed"]
+
     html = _HTML_TEMPLATE.format(
         title=f"Дашборд рынка «{market['name']}»",
         subtitle=f"Наша точка: {market['our_point_name']}. Обновлено {today().isoformat()}.",
         insufficient_data_banner=insufficient_banner,
         capacity_now=capacity_now,
         capacity_week=capacity_now * 7,
+        wow_card=_render_wow_card(_wow_delta(timeline)),
+        format_html=_render_format_section(format_counts),
+        ranking_html=_render_ranking_table(_ranking_rows(series, timeline)),
+        factors_html=_render_factors_profile(series),
+        observations_html=_render_observations_feed(market_id, series),
+        freshness_html=_render_freshness_section(freshness_rows, freshness_ok, len(active_competitors)),
+        closed_html=_render_closed_section(closed_competitors),
+        manager_activity_html=_render_manager_activity(_manager_activity_rows(market_id)),
+        summary_html=_render_summary_table(series, timeline),
         capacity_labels=json.dumps([p["date"] for p in timeline], ensure_ascii=False),
         capacity_data=json.dumps([round(p["capacity"], 1) for p in timeline]),
         share_labels_all=json.dumps([p["date"] for p in timeline], ensure_ascii=False),
@@ -312,6 +608,9 @@ def generate_market_dashboard(market_id: int) -> tuple[str, str]:
         share_now_labels=json.dumps(share_now_labels, ensure_ascii=False),
         share_now_data=json.dumps(share_now_data),
         share_now_colors=json.dumps(share_now_colors),
+        format_labels=json.dumps([fmt for fmt, _ in format_items], ensure_ascii=False),
+        format_data=json.dumps([n for _, n in format_items]),
+        format_colors=json.dumps(_FORMAT_PALETTE[: len(format_items)]),
         anomalies_html=_render_anomalies_html(competitor_anomalies, market_anomalies),
     )
 
@@ -350,7 +649,7 @@ def generate_aggregate_dashboard() -> tuple[str, str]:
 <body>
 <h1>Ёмкость рынков — сводно на {today().isoformat()}</h1>
 <div class="chart-wrap"><canvas id="marketsChart"></canvas></div>
-<div class="cdn-note">Для детальной аналитики (тенденции, аномалии, причины) по конкретному рынку используйте /dashboard_market и выберите рынок. Для отображения графика нужен доступ в интернет.</div>
+<div class="cdn-note">Для детальной аналитики (тенденции, аномалии, причины, факторы, наблюдения) по конкретному рынку используйте /dashboard_market и выберите рынок. Для отображения графика нужен доступ в интернет.</div>
 <script>
 new Chart(document.getElementById('marketsChart'), {{
   type: 'bar',

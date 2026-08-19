@@ -12,6 +12,10 @@ from bot.competitors import (
     on_add_competitor_market_choice,
     on_add_competitor_own_first_choice,
     on_add_competitor_reading_choice,
+    on_close_competitor_command,
+    on_close_competitor_confirm,
+    on_close_competitor_pick,
+    on_close_market_choice,
 )
 from bot.confirmation import (
     on_confirmation_callback,
@@ -119,6 +123,7 @@ _ROMAN_COMMANDS = [
     BotCommand("add_project", "Добавить проект/точку Surf"),
     BotCommand("reset_monitoring", "⚠️ Обнулить все данные мониторинга"),
     BotCommand("add_competitor", "Добавить конкурента на рынок"),
+    BotCommand("close_competitor", "Закрыть/открыть конкурента"),
     BotCommand("schedule", "Настроить дни мониторинга рынка"),
     BotCommand("monitoring", "Провести мониторинг конкурентов"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
@@ -128,6 +133,7 @@ _ROMAN_COMMANDS = [
 _EMPLOYEE_COMMANDS = [
     BotCommand("mytasks", "Мои задачи в работе"),
     BotCommand("add_competitor", "Добавить конкурента на рынок"),
+    BotCommand("close_competitor", "Закрыть/открыть конкурента"),
     BotCommand("schedule", "Настроить дни мониторинга рынка"),
     BotCommand("monitoring", "Провести мониторинг конкурентов"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
@@ -164,6 +170,7 @@ def main() -> None:
     app.add_handler(CommandHandler("add_project", on_add_project_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("reset_monitoring", on_reset_monitoring_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("add_competitor", on_add_competitor_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("close_competitor", on_close_competitor_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("schedule", on_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("monitoring", on_monitoring_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("dashboard_market", on_dashboard_command, filters=filters.ChatType.PRIVATE))
@@ -196,6 +203,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_add_competitor_reading_choice, pattern=r"^addc_reading:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_factors_choice, pattern=r"^addc_factors:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_own_first_choice, pattern=r"^addc_ownfirst:"))
+    app.add_handler(CallbackQueryHandler(on_close_market_choice, pattern=r"^cc_market:"))
+    app.add_handler(CallbackQueryHandler(on_close_competitor_pick, pattern=r"^cc_pick:"))
+    app.add_handler(CallbackQueryHandler(on_close_competitor_confirm, pattern=r"^cc_confirm:"))
     app.add_handler(CallbackQueryHandler(on_schedule_market_choice, pattern=r"^sched_market:"))
     app.add_handler(CallbackQueryHandler(on_schedule_day_toggle, pattern=r"^sched_day:"))
     app.add_handler(CallbackQueryHandler(on_schedule_done, pattern=r"^sched_done:"))

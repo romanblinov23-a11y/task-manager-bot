@@ -76,3 +76,23 @@ def create_competitor(
         return dict(row)
     finally:
         conn.close()
+
+
+def close_competitor(competitor_id: int) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE competitor SET status = 'closed', closed_at = datetime('now') WHERE id = ?", (competitor_id,)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def reopen_competitor(competitor_id: int) -> None:
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE competitor SET status = 'active', closed_at = NULL WHERE id = ?", (competitor_id,))
+        conn.commit()
+    finally:
+        conn.close()
