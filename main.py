@@ -64,6 +64,7 @@ from bot.monitoring_flow import (
 )
 from bot.onboarding import on_force_onboard, on_help, on_project_choice, on_role_choice, on_start
 from bot.private import on_private_document, on_private_text, on_project_selected
+from bot.regulations import on_regulations_command
 from bot.queries import (
     on_employee_command,
     on_mytasks_command,
@@ -127,6 +128,7 @@ _ROMAN_COMMANDS = [
     BotCommand("schedule", "Настроить дни мониторинга рынка"),
     BotCommand("monitoring", "Провести мониторинг конкурентов"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
+    BotCommand("regulations", "Регламенты работы с ботом"),
     BotCommand("help", "Список команд"),
 ]
 
@@ -137,6 +139,7 @@ _EMPLOYEE_COMMANDS = [
     BotCommand("schedule", "Настроить дни мониторинга рынка"),
     BotCommand("monitoring", "Провести мониторинг конкурентов"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
+    BotCommand("regulations", "Регламенты работы с ботом"),
 ]
 
 
@@ -166,6 +169,7 @@ def main() -> None:
     app.add_handler(CommandHandler("register_project", on_register_project, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("onboard", on_force_onboard, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("mytasks", on_mytasks_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("regulations", on_regulations_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("managers", on_managers_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("add_project", on_add_project_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("reset_monitoring", on_reset_monitoring_command, filters=filters.ChatType.PRIVATE))

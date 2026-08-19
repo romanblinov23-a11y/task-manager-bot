@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS competitor (
     code TEXT NOT NULL,
     name TEXT NOT NULL,
     address TEXT NOT NULL DEFAULT '',
-    format TEXT NOT NULL CHECK (format IN ('навынос', 'посадка', 'полный')),
+    format TEXT NOT NULL,
     is_own INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -120,11 +120,14 @@ def init_schema() -> None:
 
 def reset_all() -> None:
     """Необратимо стирает все данные модуля мониторинга (менеджеров,
-    конкурентов, снятия, наблюдения, расписания на всех рынках) и заново
-    сидирует market из PROJECTS — чистый старт. Только для владельца,
-    вызывается через /reset_monitoring в bot/manager_admin.py."""
+    конкурентов, снятия, наблюдения, расписания на всех рынках) и создаёт
+    таблицы заново по актуальной _SCHEMA (не просто чистит строки) — так
+    сброс заодно подхватывает изменения схемы вроде списка форматов
+    конкурентов, для которых SQLite не даёт поменять CHECK через ALTER.
+    Только для владельца, вызывается через /reset_monitoring."""
     conn = get_connection()
     try:
+        conn.execute("PRAGMA foreign_keys = OFF")
         for table in (
             "observation",
             "daily_avg_reading",
@@ -135,7 +138,9 @@ def reset_all() -> None:
             "monitoring_schedule",
             "market",
         ):
-            conn.execute(f"DELETE FROM {table}")
+            conn.execute(f"DROP TABLE IF EXISTS {table}")
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.executescript(_SCHEMA)
         for project in PROJECTS:
             conn.execute(
                 "INSERT INTO market (name, city, our_point_name) VALUES (?, '', ?)",
