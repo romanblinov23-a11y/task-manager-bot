@@ -2,8 +2,9 @@ from telegram import BotCommand, BotCommandScopeChat, InlineKeyboardButton, Inli
 from telegram.ext import ContextTypes
 
 from bot.market_schedule import start_schedule_flow
-from bot.onboarding import list_legacy_employees, remove_legacy_employee, request_registration
+from bot.onboarding import get_onboarded_employees, list_legacy_employees, remove_legacy_employee, request_registration
 from bot.regulations import send_next_regulation
+from config.chats import get_all_bindings, get_project_for_chat, register_chat, unregister_chat
 from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS, BLOCK_MONITORING, BLOCK_TASKS, MANAGER_POSITIONS
 from monitoring.db import reset_market_players
 from monitoring.managers import (
@@ -108,6 +109,8 @@ def _manager_list_keyboard(managers: list[dict], legacy: list[dict]) -> InlineKe
                 InlineKeyboardButton("🗑", callback_data=f"mgr_legacy_remove:{e['user_id']}"),
             ]
         )
+    buttons.append([InlineKeyboardButton("💬 Чаты", callback_data="mgr_chats")])
+    buttons.append([InlineKeyboardButton("📋 Все, кто писал боту", callback_data="mgr_onboarded")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -175,7 +178,9 @@ def _blocks_keyboard(uid: int, selected: set[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def _list_view_text(legacy: list[dict]) -> str:
+def _list_view_text(managers: list[dict], legacy: list[dict]) -> str:
+    if not managers and not legacy:
+        return "Пока нет ни одного сотрудника с ролью — но ниже можно посмотреть привязки чатов и всех, кто писал боту."
     text = "Сотрудники бота:"
     if legacy:
         text += (
@@ -188,10 +193,7 @@ def _list_view_text(legacy: list[dict]) -> str:
 async def _reply_manager_list(message) -> None:
     managers = list_managers()
     legacy = list_legacy_employees()
-    if not managers and not legacy:
-        await message.reply_text("Пока нет ни одного сотрудника.")
-        return
-    await message.reply_text(_list_view_text(legacy), reply_markup=_manager_list_keyboard(managers, legacy))
+    await message.reply_text(_list_view_text(managers, legacy), reply_markup=_manager_list_keyboard(managers, legacy))
 
 
 async def on_managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -208,10 +210,7 @@ async def on_manager_back_to_list(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
     managers = list_managers()
     legacy = list_legacy_employees()
-    if not managers and not legacy:
-        await query.edit_message_text("Пока нет ни одного сотрудника.")
-        return
-    await query.edit_message_text(_list_view_text(legacy), reply_markup=_manager_list_keyboard(managers, legacy))
+    await query.edit_message_text(_list_view_text(managers, legacy), reply_markup=_manager_list_keyboard(managers, legacy))
 
 
 async def on_manager_nudge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -260,10 +259,164 @@ async def on_manager_legacy_remove_confirm(update: Update, context: ContextTypes
     await query.answer("Удалено" if removed else "Уже не найден")
     managers = list_managers()
     legacy = list_legacy_employees()
-    if not managers and not legacy:
-        await query.edit_message_text("Пока нет ни одного сотрудника.")
+    await query.edit_message_text(_list_view_text(managers, legacy), reply_markup=_manager_list_keyboard(managers, legacy))
+
+
+def _chat_bindings_keyboard(bindings: list[tuple[int, str, str]]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(f"{project} — {chat_id}", callback_data=f"mgr_chat_select:{chat_id}")]
+        for chat_id, project, _source in bindings
+    ]
+    rows.append([InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _chat_card_text(chat_id: int, project: str, source: str) -> str:
+    source_label = "из .env (CHAT_PROJECT_MAP)" if source == "env" else "через /register_project"
+    return f"Чат {chat_id}\nПроект: {project}\nИсточник: {source_label}"
+
+
+def _chat_card_keyboard(chat_id: int, source: str) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton("🔁 Сменить проект", callback_data=f"mgr_chat_market:{chat_id}")]]
+    if source == "runtime":
+        rows.append([InlineKeyboardButton("🗑 Отвязать", callback_data=f"mgr_chat_unbind:{chat_id}")])
+    rows.append([InlineKeyboardButton("↩️ К чатам", callback_data="mgr_chats")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _chat_market_pick_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(m["name"], callback_data=f"mgr_chat_setmarket:{chat_id}:{m['id']}")] for m in list_markets()
+    ]
+    buttons.append([InlineKeyboardButton("↩️ Отмена", callback_data=f"mgr_chat_select:{chat_id}")])
+    return InlineKeyboardMarkup(buttons)
+
+
+async def on_manager_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
         return
-    await query.edit_message_text(_list_view_text(legacy), reply_markup=_manager_list_keyboard(managers, legacy))
+    await query.answer()
+    bindings = get_all_bindings()
+    if not bindings:
+        await query.edit_message_text(
+            "Нет привязанных чатов. Чтобы привязать группу к проекту — вызовите /register_project внутри неё.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")]]),
+        )
+        return
+    await query.edit_message_text(
+        "💬 Привязанные чаты. Чтобы привязать новый — вызовите /register_project внутри него.",
+        reply_markup=_chat_bindings_keyboard(bindings),
+    )
+
+
+async def on_manager_chat_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    chat_id = int(query.data.split(":", 1)[1])
+    binding = next((b for b in get_all_bindings() if b[0] == chat_id), None)
+    if not binding:
+        await query.answer("Не найден", show_alert=True)
+        return
+    await query.answer()
+    _, project, source = binding
+    await query.edit_message_text(_chat_card_text(chat_id, project, source), reply_markup=_chat_card_keyboard(chat_id, source))
+
+
+async def on_manager_chat_market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    chat_id = int(query.data.split(":", 1)[1])
+    await query.answer()
+    await query.edit_message_text("Выберите проект для этого чата:", reply_markup=_chat_market_pick_keyboard(chat_id))
+
+
+async def on_manager_chat_set_market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    _, chat_id_str, market_id_str = query.data.split(":", 2)
+    chat_id, market_id = int(chat_id_str), int(market_id_str)
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Проект не найден", show_alert=True)
+        return
+    register_chat(chat_id, market["name"])
+    await query.answer("Привязано")
+    await query.edit_message_text(
+        _chat_card_text(chat_id, market["name"], "runtime"), reply_markup=_chat_card_keyboard(chat_id, "runtime")
+    )
+
+
+async def on_manager_chat_unbind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    chat_id = int(query.data.split(":", 1)[1])
+    await query.answer()
+    await query.edit_message_text(
+        f"Точно отвязать чат {chat_id} от проекта?",
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("🗑 Да, отвязать", callback_data=f"mgr_chat_unbind_confirm:{chat_id}"),
+                    InlineKeyboardButton("↩️ Отмена", callback_data=f"mgr_chat_select:{chat_id}"),
+                ]
+            ]
+        ),
+    )
+
+
+async def on_manager_chat_unbind_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    chat_id = int(query.data.split(":", 1)[1])
+    unregister_chat(chat_id)
+    await query.answer("Отвязано")
+    bindings = get_all_bindings()
+    if not bindings:
+        await query.edit_message_text(
+            "Нет привязанных чатов. Чтобы привязать группу к проекту — вызовите /register_project внутри неё.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")]]),
+        )
+        return
+    await query.edit_message_text("💬 Привязанные чаты:", reply_markup=_chat_bindings_keyboard(bindings))
+
+
+async def on_manager_onboarded(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """«📋 Все, кто писал боту» — читает то же, что раньше показывала
+    упразднённая команда /onboarded: все, кого бот хоть раз видел в личке
+    (трекер задач), с их именем и проектом, определённым по чатам, где их
+    видели."""
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    await query.answer()
+    employees = get_onboarded_employees()
+    lines = ["📋 Все, кто хоть раз писал боту:"]
+    if not employees:
+        lines.append("Пока никто не онбордился.")
+    else:
+        for emp in employees:
+            display_name = emp["real_name"] or emp["full_name"] or "(без имени)"
+            username_part = f"@{emp['username']}" if emp["username"] else "без username"
+            projects = sorted({p for c in emp["chats"] if (p := get_project_for_chat(c))})
+            projects_part = ", ".join(projects) if projects else "не видели в привязанных чатах"
+            lines.append(f"- {display_name} ({username_part}, ID {emp['user_id']}) — {projects_part}")
+    await query.edit_message_text(
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")]]),
+    )
 
 
 async def on_manager_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

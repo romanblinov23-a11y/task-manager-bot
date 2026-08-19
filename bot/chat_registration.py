@@ -2,15 +2,16 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from config.chats import register_chat
-from config.settings import ROMAN_TELEGRAM_ID
+from monitoring.managers import is_owner
 from monitoring.markets import list_market_names
 
 
 async def on_register_project(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Самообслуживание для онбординга чата: Роман вызывает эту команду
+    """Самообслуживание для онбординга чата: владелец вызывает эту команду
     внутри рабочей группы, чтобы привязать её к проекту без правки .env
-    и перезапуска бота."""
-    if str(update.effective_user.id) != str(ROMAN_TELEGRAM_ID):
+    и перезапуска бота. Посмотреть/сменить/отвязать привязки существующих
+    чатов можно в /managers → «💬 Чаты»."""
+    if not is_owner(update.effective_user.id):
         return
 
     chat = update.effective_chat

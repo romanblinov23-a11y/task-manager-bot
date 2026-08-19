@@ -47,8 +47,19 @@ def register_chat(chat_id: int, project: str) -> None:
     _save_runtime()
 
 
+def unregister_chat(chat_id: int) -> bool:
+    """Отвязывает чат, привязанный через /register_project. Привязки из
+    CHAT_PROJECT_MAP так не снимаются — их меняют только через переменную
+    окружения. Возвращает False, если рантайм-привязки для чата не было."""
+    if chat_id not in _runtime_map:
+        return False
+    del _runtime_map[chat_id]
+    _save_runtime()
+    return True
+
+
 def get_all_bindings() -> list[tuple[int, str, str]]:
-    """Все привязки chat_id -> project, с указанием источника, для /onboarded."""
+    """Все привязки chat_id -> project, с указанием источника, для /managers."""
     bindings = [(chat_id, project, "env") for chat_id, project in _ENV_MAP.items()]
     bindings += [
         (chat_id, project, "runtime") for chat_id, project in _runtime_map.items() if chat_id not in _ENV_MAP

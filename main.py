@@ -33,10 +33,17 @@ from bot.manager_admin import (
     on_manager_back_to_list,
     on_manager_blocks,
     on_manager_blocks_done,
+    on_manager_chat_market,
+    on_manager_chat_select,
+    on_manager_chat_set_market,
+    on_manager_chat_unbind,
+    on_manager_chat_unbind_confirm,
+    on_manager_chats,
     on_manager_legacy_remove,
     on_manager_legacy_remove_confirm,
     on_manager_market,
     on_manager_nudge,
+    on_manager_onboarded,
     on_manager_reject,
     on_manager_remove,
     on_manager_remove_confirm,
@@ -79,7 +86,6 @@ from bot.queries import (
     on_employee_command,
     on_mytasks_command,
     on_needhelp_command,
-    on_onboarded_command,
     on_status_command,
     on_stuck_command,
 )
@@ -130,9 +136,8 @@ _ROMAN_COMMANDS = [
     BotCommand("employee", "Задачи сотрудника по всем проектам"),
     BotCommand("stuck", "Подвисшие задачи"),
     BotCommand("needhelp", "Задачи, где нужна помощь"),
-    BotCommand("onboarded", "Кто онбордился и привязки чатов"),
     BotCommand("weekly", "Еженедельная аналитика по запросу"),
-    BotCommand("managers", "Менеджеры мониторинга конкурентов"),
+    BotCommand("managers", "Сотрудники бота и привязки чатов"),
     BotCommand("add_project", "Добавить проект/точку Surf"),
     BotCommand("reset_monitoring", "⚠️ Обнулить конкурентов на выбранном рынке"),
     BotCommand("add_competitor", "Добавить конкурента на рынок"),
@@ -177,7 +182,6 @@ def main() -> None:
     app.add_handler(CommandHandler("employee", on_employee_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("stuck", on_stuck_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("needhelp", on_needhelp_command, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("onboarded", on_onboarded_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("register_project", on_register_project, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("onboard", on_force_onboard, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("mytasks", on_mytasks_command, filters=filters.ChatType.PRIVATE))
@@ -217,6 +221,13 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_manager_toggle_block, pattern=r"^mgr_toggleblock:"))
     app.add_handler(CallbackQueryHandler(on_manager_blocks_done, pattern=r"^mgr_blocksdone:"))
     app.add_handler(CallbackQueryHandler(on_manager_blocks, pattern=r"^mgr_blocks:"))
+    app.add_handler(CallbackQueryHandler(on_manager_onboarded, pattern=r"^mgr_onboarded$"))
+    app.add_handler(CallbackQueryHandler(on_manager_chats, pattern=r"^mgr_chats$"))
+    app.add_handler(CallbackQueryHandler(on_manager_chat_unbind_confirm, pattern=r"^mgr_chat_unbind_confirm:"))
+    app.add_handler(CallbackQueryHandler(on_manager_chat_unbind, pattern=r"^mgr_chat_unbind:"))
+    app.add_handler(CallbackQueryHandler(on_manager_chat_set_market, pattern=r"^mgr_chat_setmarket:"))
+    app.add_handler(CallbackQueryHandler(on_manager_chat_market, pattern=r"^mgr_chat_market:"))
+    app.add_handler(CallbackQueryHandler(on_manager_chat_select, pattern=r"^mgr_chat_select:"))
     app.add_handler(CallbackQueryHandler(on_regulation_ack, pattern=r"^reg_ack:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_market_choice, pattern=r"^reset_monitoring_market:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_confirm, pattern=r"^reset_monitoring_confirm:"))

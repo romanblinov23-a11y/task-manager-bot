@@ -3,8 +3,6 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from bot.onboarding import get_onboarded_employees
-from config.chats import get_all_bindings, get_project_for_chat
 from config.settings import ROMAN_TELEGRAM_ID, STALE_DAYS
 from config.timeutil import fmt_date
 from config.timeutil import now_naive as tz_now_naive
@@ -141,36 +139,6 @@ async def on_needhelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not found_any:
         await update.effective_message.reply_text("Запросов помощи сейчас нет.")
         return
-    await update.effective_message.reply_text("\n".join(lines))
-
-
-async def on_onboarded_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/onboarded — кто прошёл онбординг и какие чаты привязаны к каким проектам."""
-    if not _is_roman(update):
-        return
-
-    lines = ["👥 Сотрудники, прошедшие онбординг:"]
-    employees = get_onboarded_employees()
-    if not employees:
-        lines.append("Пока никто не онбордился.")
-    else:
-        for emp in employees:
-            display_name = emp["real_name"] or emp["full_name"] or "(без имени)"
-            username_part = f"@{emp['username']}" if emp["username"] else "без username"
-            projects = sorted({p for c in emp["chats"] if (p := get_project_for_chat(c))})
-            projects_part = ", ".join(projects) if projects else "не видели в привязанных чатах"
-            lines.append(f"- {display_name} ({username_part}, ID {emp['user_id']}) — {projects_part}")
-
-    lines.append("")
-    lines.append("🔗 Привязки чатов к проектам:")
-    bindings = get_all_bindings()
-    if not bindings:
-        lines.append("Нет привязанных чатов.")
-    else:
-        for chat_id, project, source in bindings:
-            source_label = "из .env" if source == "env" else "через /register_project"
-            lines.append(f"- {project}: chat_id {chat_id} ({source_label})")
-
     await update.effective_message.reply_text("\n".join(lines))
 
 
