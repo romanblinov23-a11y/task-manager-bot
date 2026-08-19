@@ -68,6 +68,13 @@ def _yesno_keyboard(prefix: str) -> InlineKeyboardMarkup:
 
 
 async def _start_competitor_flow(message, user_id: str, market: dict, *, is_own: bool = False) -> None:
+    if not is_own and not get_own_competitor(market["id"]):
+        await message.reply_text(
+            f"ℹ️ На рынке «{market['name']}» ещё не добавлена сама точка Surf «{market['our_point_name']}» — "
+            "без неё нельзя посчитать нашу долю рынка. Можно завести её сейчас или продолжить добавлять "
+            "конкурентов — в конце я ещё раз предложу добавить точку Surf, если вы её пропустите."
+        )
+
     suggested = next_code(market["id"])
     _pending[user_id] = {
         "step": "code",
