@@ -262,6 +262,20 @@ def list_legacy_employees() -> list[dict]:
     return result
 
 
+def remove_legacy_employee(user_id: int) -> bool:
+    """Убирает из known_users.json того, кто писал боту, но не выбрал
+    проект/роль для мониторинга (тестовый аккаунт, ошибка и т.п.). Если
+    человек напишет боту снова — онбординг запустится заново с чистого
+    листа. Возвращает False, если такой записи уже нет."""
+    uid = str(user_id)
+    if uid not in _known_users:
+        return False
+    del _known_users[uid]
+    _seen_in_chats.pop(uid, None)
+    _save()
+    return True
+
+
 async def request_registration(bot, user_id: int) -> None:
     """Владелец просит сотрудника, который уже писал боту, но не выбрал
     проект/роль для мониторинга, — пройти этот шаг сейчас. Тот же диалог,
@@ -298,9 +312,16 @@ async def on_employee_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     _known_users[user_id]["onboarded"] = True
     _save()
 
-    if not is_owner(user.id) and get_manager(user.id) is None:
-        await _start_project_selection(update.effective_message, user_id)
-        return
+    if not is_owner(user.id):
+        manager = get_manager(user.id)
+        if manager is not None and manager["status"] == "removed":
+            await update.effective_message.reply_text(
+                "🚫 Владелец отозвал твой доступ к боту. Если это ошибка — напиши владельцу напрямую."
+            )
+            return
+        if manager is None:
+            await _start_project_selection(update.effective_message, user_id)
+            return
 
     if already_contacted:
         return

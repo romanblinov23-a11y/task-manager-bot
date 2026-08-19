@@ -33,6 +33,8 @@ from bot.manager_admin import (
     on_manager_back_to_list,
     on_manager_blocks,
     on_manager_blocks_done,
+    on_manager_legacy_remove,
+    on_manager_legacy_remove_confirm,
     on_manager_market,
     on_manager_nudge,
     on_manager_reject,
@@ -200,6 +202,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_role_choice, pattern=r"^onb_role:"))
     app.add_handler(CallbackQueryHandler(on_manager_select, pattern=r"^mgr_select:"))
     app.add_handler(CallbackQueryHandler(on_manager_nudge, pattern=r"^mgr_nudge:"))
+    app.add_handler(CallbackQueryHandler(on_manager_legacy_remove_confirm, pattern=r"^mgr_legacy_remove_confirm:"))
+    app.add_handler(CallbackQueryHandler(on_manager_legacy_remove, pattern=r"^mgr_legacy_remove:"))
     app.add_handler(CallbackQueryHandler(on_manager_approve, pattern=r"^mgr_approve:"))
     app.add_handler(CallbackQueryHandler(on_manager_reject, pattern=r"^mgr_reject:"))
     app.add_handler(CallbackQueryHandler(on_manager_set_role, pattern=r"^mgr_setrole:"))

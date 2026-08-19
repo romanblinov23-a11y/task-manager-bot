@@ -2,7 +2,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from bot.market_schedule import start_schedule_flow
-from bot.onboarding import list_legacy_employees, request_registration
+from bot.onboarding import list_legacy_employees, remove_legacy_employee, request_registration
 from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS, MANAGER_POSITIONS
 from monitoring.db import reset_market_players
 from monitoring.managers import (
@@ -55,7 +55,10 @@ def _manager_list_keyboard(managers: list[dict], legacy: list[dict]) -> InlineKe
         )
     for e in legacy:
         buttons.append(
-            [InlineKeyboardButton(f"📨 {e['name']} — не выбрал(а) проект", callback_data=f"mgr_nudge:{e['user_id']}")]
+            [
+                InlineKeyboardButton(f"📨 {e['name']} — не выбрал(а) проект", callback_data=f"mgr_nudge:{e['user_id']}"),
+                InlineKeyboardButton("🗑", callback_data=f"mgr_legacy_remove:{e['user_id']}"),
+            ]
         )
     return InlineKeyboardMarkup(buttons)
 
@@ -178,6 +181,43 @@ async def on_manager_nudge(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.edit_message_text("Не получилось отправить — возможно, сотрудник ещё ни разу не писал боту в личку.")
         return
     await query.edit_message_text(f"📨 Отправил(а) вопрос про проект и роль сотруднику (ID {user_id}).")
+
+
+async def on_manager_legacy_remove(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    user_id = int(query.data.split(":", 1)[1])
+    await query.answer()
+    await query.edit_message_text(
+        f"Удалить сотрудника (ID {user_id}) из списка? Он не потеряет доступ к трекеру задач — "
+        "просто сможет позже снова написать боту и пройти онбординг заново.",
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("🗑 Да, удалить", callback_data=f"mgr_legacy_remove_confirm:{user_id}"),
+                    InlineKeyboardButton("↩️ Отмена", callback_data="mgr_list"),
+                ]
+            ]
+        ),
+    )
+
+
+async def on_manager_legacy_remove_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    user_id = int(query.data.split(":", 1)[1])
+    removed = remove_legacy_employee(user_id)
+    await query.answer("Удалено" if removed else "Уже не найден")
+    managers = list_managers()
+    legacy = list_legacy_employees()
+    if not managers and not legacy:
+        await query.edit_message_text("Пока нет ни одного сотрудника.")
+        return
+    await query.edit_message_text(_list_view_text(legacy), reply_markup=_manager_list_keyboard(managers, legacy))
 
 
 async def on_manager_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
