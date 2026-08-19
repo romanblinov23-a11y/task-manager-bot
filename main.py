@@ -40,7 +40,6 @@ from bot.manager_admin import (
     on_manager_reject,
     on_manager_remove,
     on_manager_remove_confirm,
-    on_manager_restore,
     on_manager_role,
     on_manager_select,
     on_manager_set_market,
@@ -213,7 +212,6 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_manager_market, pattern=r"^mgr_market:"))
     app.add_handler(CallbackQueryHandler(on_manager_remove_confirm, pattern=r"^mgr_remove_confirm:"))
     app.add_handler(CallbackQueryHandler(on_manager_remove, pattern=r"^mgr_remove:"))
-    app.add_handler(CallbackQueryHandler(on_manager_restore, pattern=r"^mgr_restore:"))
     app.add_handler(CallbackQueryHandler(on_manager_back_to_list, pattern=r"^mgr_list$"))
     app.add_handler(CallbackQueryHandler(on_manager_toggle_block, pattern=r"^mgr_toggleblock:"))
     app.add_handler(CallbackQueryHandler(on_manager_blocks_done, pattern=r"^mgr_blocksdone:"))

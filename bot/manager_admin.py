@@ -16,7 +16,6 @@ from monitoring.managers import (
     list_managers,
     reject_manager,
     remove_manager,
-    restore_manager,
     set_manager_blocks,
     set_manager_market,
     set_manager_position,
@@ -29,7 +28,7 @@ _awaiting_new_project: set[str] = set()
 # telegram_user_id (str) владельца -> {"uid": int, "selected": set[str]} — сессия редактирования блоков
 _pending_blocks: dict[str, dict] = {}
 
-_STATUS_LABELS = {"pending": "🕓 Ожидает подтверждения", "active": "✅ Активен", "removed": "🚫 Доступ отозван"}
+_STATUS_LABELS = {"pending": "🕓 Ожидает подтверждения", "active": "✅ Активен"}
 
 
 class _ChatMessenger:
@@ -92,7 +91,7 @@ async def sync_employee_commands(bot, uid: int) -> None:
 def _manager_list_keyboard(managers: list[dict], legacy: list[dict]) -> InlineKeyboardMarkup:
     buttons = []
     for m in managers:
-        icon = {"pending": "🕓", "active": "✅", "removed": "🚫"}[m["status"]]
+        icon = {"pending": "🕓", "active": "✅"}[m["status"]]
         markets_label = ", ".join(mk["name"] for mk in m["markets"]) or "—"
         buttons.append(
             [InlineKeyboardButton(f"{icon} {m['name']} — {markets_label}", callback_data=f"mgr_select:{m['telegram_user_id']}")]
@@ -138,8 +137,6 @@ def _manager_card_keyboard(manager: dict) -> InlineKeyboardMarkup:
         )
         if manager["status"] == "active":
             rows.append([InlineKeyboardButton("🗑 Удалить", callback_data=f"mgr_remove:{uid}")])
-        elif manager["status"] == "removed":
-            rows.append([InlineKeyboardButton("♻️ Восстановить", callback_data=f"mgr_restore:{uid}")])
     rows.append([InlineKeyboardButton("🧩 Блоки", callback_data=f"mgr_blocks:{uid}")])
     rows.append([InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")])
     return InlineKeyboardMarkup(rows)
@@ -577,29 +574,10 @@ async def on_manager_remove_confirm(update: Update, context: ContextTypes.DEFAUL
     await query.edit_message_text(f"🚫 Доступ отозван у {manager['name']} (ID {uid}).")
     await sync_employee_commands(context.bot, uid)
     try:
-        await context.bot.send_message(chat_id=uid, text="🚫 Владелец отозвал твой доступ к боту.")
-    except Exception:
-        pass
-
-
-async def on_manager_restore(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    if not is_owner(query.from_user.id):
-        await query.answer()
-        return
-    uid = int(query.data.split(":", 1)[1])
-    manager = get_manager(uid)
-    if not manager:
-        await query.answer("Не найден", show_alert=True)
-        return
-    restore_manager(uid)
-    manager = get_manager(uid)
-    markets = get_markets_for_manager(uid)
-    await query.answer("Восстановлено")
-    await query.edit_message_text(_manager_card_text(manager, markets), reply_markup=_manager_card_keyboard(manager))
-    await sync_employee_commands(context.bot, uid)
-    try:
-        await context.bot.send_message(chat_id=uid, text="✅ Владелец восстановил твой доступ к боту.")
+        await context.bot.send_message(
+            chat_id=uid,
+            text="🚫 Владелец отозвал твой доступ к боту. Если понадобится вернуться — напиши /start и пройди онбординг заново.",
+        )
     except Exception:
         pass
 

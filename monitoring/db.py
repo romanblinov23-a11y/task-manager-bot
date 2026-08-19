@@ -115,6 +115,15 @@ def init_schema() -> None:
         _ensure_column(conn, "manager", "status", "status TEXT NOT NULL DEFAULT 'pending'")
         _ensure_column(conn, "manager", "blocks", "blocks TEXT NOT NULL DEFAULT 'tasks,monitoring'")
         _ensure_column(conn, "competitor", "closed_at", "closed_at TEXT")
+        # Разовая чистка: remove_manager раньше делал soft-delete (status =
+        # 'removed'), теперь удаляет запись полностью — доступ возвращается
+        # только через новый онбординг. На базах, где остались старые
+        # soft-deleted записи, подчищаем их здесь; на новых базах это no-op.
+        conn.execute(
+            "DELETE FROM manager_market WHERE manager_telegram_user_id IN "
+            "(SELECT telegram_user_id FROM manager WHERE status = 'removed')"
+        )
+        conn.execute("DELETE FROM manager WHERE status = 'removed'")
         for project in _BOOTSTRAP_MARKETS:
             conn.execute(
                 "INSERT OR IGNORE INTO market (name, city, our_point_name) VALUES (?, '', ?)",

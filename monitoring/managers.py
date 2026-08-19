@@ -150,24 +150,18 @@ def reject_manager(telegram_user_id: int) -> None:
 
 
 def remove_manager(telegram_user_id: int) -> None:
-    """Отзывает доступ у уже активного менеджера. Запись и его исторические
-    снятия/наблюдения не удаляются — это soft-delete через статус."""
+    """Отзывает доступ у менеджера. Сам он и привязка к рынку удаляются
+    полностью — его исторические снятия/наблюдения (daily_avg_reading,
+    observation) хранят created_by отдельным полем без FK на manager и не
+    затрагиваются. Вернуть доступ можно только через новый онбординг
+    (см. bot.onboarding.on_employee_message) — восстановления «как было»
+    больше нет."""
     conn = get_connection()
     try:
         conn.execute(
-            "UPDATE manager SET status = 'removed' WHERE telegram_user_id = ?", (telegram_user_id,)
+            "DELETE FROM manager_market WHERE manager_telegram_user_id = ?", (telegram_user_id,)
         )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def restore_manager(telegram_user_id: int) -> None:
-    conn = get_connection()
-    try:
-        conn.execute(
-            "UPDATE manager SET status = 'active' WHERE telegram_user_id = ?", (telegram_user_id,)
-        )
+        conn.execute("DELETE FROM manager WHERE telegram_user_id = ?", (telegram_user_id,))
         conn.commit()
     finally:
         conn.close()
