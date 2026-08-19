@@ -14,8 +14,8 @@ from bot.onboarding import (
 from config.projects import CATEGORIES
 from config.settings import ROMAN_TELEGRAM_ID
 from config.timeutil import fmt_date, parse_date
-from sheets.comments import append_comment
-from sheets.tasks import create_task
+from tasks.comments import append_comment
+from tasks.tasks import create_task
 
 # confirmation_id -> {"task": dict, "project": str, "source": str, ...}
 _pending: dict[str, dict] = {}

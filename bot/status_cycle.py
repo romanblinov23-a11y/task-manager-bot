@@ -5,15 +5,15 @@ from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from bot.onboarding import get_display_name, get_username, is_onboarded
-from config.projects import PROJECTS
 from config.settings import MAX_CLARIFYING_ROUNDS, ROMAN_TELEGRAM_ID
 from config.timeutil import fmt_date
 from config.timeutil import now as tz_now
 from config.timeutil import today as tz_today
+from monitoring.markets import list_market_names
 from prompts.status_reply import parse_status_reply
-from sheets.comments import append_comment
-from sheets.log import append_log_entry
-from sheets.tasks import get_all_tasks, update_task
+from tasks.comments import append_comment
+from tasks.log import append_log_entry
+from tasks.tasks import get_all_tasks, update_task
 
 # telegram_user_id -> очередь {"project":, "task": dict, "bot_question": str}
 _pending: dict[int, list[dict]] = {}
@@ -55,7 +55,7 @@ async def run_status_check(bot: Bot) -> None:
     skipped_no_telegram_id: list[tuple[str, dict]] = []
     skipped_not_onboarded: list[tuple[str, dict, int]] = []
 
-    for project in PROJECTS:
+    for project in list_market_names():
         for task in get_all_tasks(project):
             if not _is_due(task, today):
                 continue

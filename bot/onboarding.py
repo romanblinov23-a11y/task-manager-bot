@@ -11,7 +11,7 @@ from bot.regulations import send_regulations
 from monitoring.constants import MANAGER_POSITIONS
 from monitoring.managers import get_manager, is_owner, register_manager
 from monitoring.markets import get_market, list_markets
-from sheets.tasks import get_all_tasks, update_task
+from tasks.tasks import get_all_tasks, update_task
 
 _STORE_PATH = Path(__file__).resolve().parent.parent / "data" / "known_users.json"
 

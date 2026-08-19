@@ -5,13 +5,12 @@ from telegram.ext import ContextTypes
 
 from bot.onboarding import get_onboarded_employees
 from config.chats import get_all_bindings, get_project_for_chat
-from config.timeutil import fmt_date
-from config.projects import PROJECTS
 from config.settings import ROMAN_TELEGRAM_ID, STALE_DAYS
+from config.timeutil import fmt_date
 from config.timeutil import now_naive as tz_now_naive
-from sheets.client import open_project_spreadsheet
-from sheets.schema import LOG_SHEET
-from sheets.tasks import get_all_tasks
+from monitoring.markets import list_market_names
+from tasks.log import get_log_entries
+from tasks.tasks import get_all_tasks
 
 
 def _is_roman(update: Update) -> bool:
@@ -31,15 +30,16 @@ async def on_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not _is_roman(update):
         return
 
+    projects = list_market_names()
     if not context.args:
         await update.effective_message.reply_text(
-            "Укажите проект: /status <название>\nДоступные: " + ", ".join(PROJECTS)
+            "Укажите проект: /status <название>\nДоступные: " + ", ".join(projects)
         )
         return
 
     project = " ".join(context.args)
-    if project not in PROJECTS:
-        await update.effective_message.reply_text(f"Неизвестный проект «{project}». Доступные: " + ", ".join(PROJECTS))
+    if project not in projects:
+        await update.effective_message.reply_text(f"Неизвестный проект «{project}». Доступные: " + ", ".join(projects))
         return
 
     tasks = [t for t in get_all_tasks(project) if t.get("status") != "выполнена"]
@@ -64,7 +64,7 @@ async def on_employee_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     name_norm = raw_name.strip().lower()
 
     found = []
-    for project in PROJECTS:
+    for project in list_market_names():
         for task in get_all_tasks(project):
             if (task.get("assignee") or "").strip().lower() == name_norm:
                 found.append((project, task))
@@ -78,7 +78,7 @@ async def on_employee_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 def _count_transfers(project: str) -> dict[str, int]:
-    log_entries = open_project_spreadsheet(project).worksheet(LOG_SHEET).get_all_records()
+    log_entries = get_log_entries(project)
     counts: dict[str, int] = {}
     for entry in log_entries:
         if entry["event_type"] == "перенос_срока":
@@ -95,7 +95,7 @@ async def on_stuck_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     found_any = False
     now = tz_now_naive()
 
-    for project in PROJECTS:
+    for project in list_market_names():
         transfers_by_task = _count_transfers(project)
         for task in get_all_tasks(project):
             if task.get("status") == "выполнена":
@@ -132,7 +132,7 @@ async def on_needhelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     lines = ["🆘 Задачи, где нужна помощь"]
     found_any = False
-    for project in PROJECTS:
+    for project in list_market_names():
         for task in get_all_tasks(project):
             if task.get("needs_help") == "да" and task.get("status") != "выполнена":
                 lines.append(_task_line(task, show_project=project))
@@ -176,11 +176,9 @@ async def on_onboarded_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def on_mytasks_command(update, context):
     """/mytasks — сотрудник видит свои активные задачи по всем проектам."""
-    from config.projects import PROJECTS
-    from sheets.tasks import get_all_tasks
     user_id = str(update.effective_user.id)
     found = []
-    for project in PROJECTS:
+    for project in list_market_names():
         for task in get_all_tasks(project):
             if str(task.get("assignee_telegram_id")) == user_id and task.get("status") != "выполнена":
                 found.append((project, task))

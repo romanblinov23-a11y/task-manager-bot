@@ -92,7 +92,8 @@ from config.settings import (
     WEEKLY_REPORT_DAY,
     WEEKLY_REPORT_TIME,
 )
-from monitoring.db import init_schema
+from monitoring.db import init_schema as init_monitoring_schema
+from tasks.db import init_schema as init_tasks_schema
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -162,7 +163,8 @@ async def _set_bot_commands(app) -> None:
 
 
 def main() -> None:
-    init_schema()
+    init_monitoring_schema()
+    init_tasks_schema()
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_set_bot_commands).build()
 
     app.add_handler(CommandHandler("start", on_start, filters=filters.ChatType.PRIVATE))

@@ -1,9 +1,9 @@
 from telegram import Bot
 
-from config.projects import PROJECTS
 from config.settings import ROMAN_TELEGRAM_ID
 from config.timeutil import today as tz_today
-from sheets.tasks import get_all_tasks
+from monitoring.markets import list_market_names
+from tasks.tasks import get_all_tasks
 
 
 def _task_label(task: dict) -> str:
@@ -16,7 +16,7 @@ def build_daily_report() -> str:
     today_str = today.isoformat()
     sections = []
 
-    for project in PROJECTS:
+    for project in list_market_names():
         tasks = get_all_tasks(project)
         due_today = [t for t in tasks if t.get("deadline_current") == today_str]
         overdue = [

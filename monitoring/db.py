@@ -1,10 +1,14 @@
 import sqlite3
 from pathlib import Path
 
-from config.projects import PROJECTS
 from config.settings import MONITORING_DB_PATH
 
 _DB_PATH = Path(MONITORING_DB_PATH)
+
+# Рынок и проект — одна сущность (см. monitoring.markets.list_market_names).
+# Это стартовый список для первого запуска на пустой базе; дальше новые
+# проекты/рынки заводятся владельцем через /add_project, а не правкой кода.
+_BOOTSTRAP_MARKETS = ["Парк Горького", "Окко", "Аврора"]
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS market (
@@ -101,16 +105,17 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) 
 
 
 def init_schema() -> None:
-    """Создаёт таблицы модуля мониторинга (если их ещё нет) и сидирует
-    рынки из существующих проектов (config.projects.PROJECTS) — один рынок
-    на точку Surf, привязанную к проекту в task-manager'е."""
+    """Создаёт таблицы модуля мониторинга (если их ещё нет) и на пустой базе
+    сидирует стартовые рынки/проекты (_BOOTSTRAP_MARKETS) — один рынок на
+    точку Surf. На непустой базе ничего не досеивает: новые рынки заводятся
+    только через /add_project."""
     conn = get_connection()
     try:
         conn.executescript(_SCHEMA)
         _ensure_column(conn, "manager", "status", "status TEXT NOT NULL DEFAULT 'pending'")
         _ensure_column(conn, "manager", "blocks", "blocks TEXT NOT NULL DEFAULT 'tasks,monitoring'")
         _ensure_column(conn, "competitor", "closed_at", "closed_at TEXT")
-        for project in PROJECTS:
+        for project in _BOOTSTRAP_MARKETS:
             conn.execute(
                 "INSERT OR IGNORE INTO market (name, city, our_point_name) VALUES (?, '', ?)",
                 (project, project),

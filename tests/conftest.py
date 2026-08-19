@@ -1,13 +1,16 @@
 import pytest
 
-import monitoring.db as db
+import monitoring.db as monitoring_db
+import tasks.db as tasks_db
 
 
 @pytest.fixture(autouse=True)
 def isolated_db(tmp_path, monkeypatch):
-    """Каждый тест получает свою чистую SQLite-базу — модуль-уровневый
-    _DB_PATH в monitoring.db подменяется на временный файл, так что тесты
-    не видят данные друг друга и не трогают реальную data/monitoring.db."""
-    monkeypatch.setattr(db, "_DB_PATH", tmp_path / "test_monitoring.db")
-    db.init_schema()
+    """Каждый тест получает свои чистые SQLite-базы — модуль-уровневые
+    _DB_PATH в monitoring.db и tasks.db подменяются на временные файлы, так
+    что тесты не видят данные друг друга и не трогают реальные data/*.db."""
+    monkeypatch.setattr(monitoring_db, "_DB_PATH", tmp_path / "test_monitoring.db")
+    monitoring_db.init_schema()
+    monkeypatch.setattr(tasks_db, "_DB_PATH", tmp_path / "test_tasks.db")
+    tasks_db.init_schema()
     yield

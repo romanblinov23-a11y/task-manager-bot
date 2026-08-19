@@ -7,11 +7,11 @@ from bot.manager_admin import on_manager_admin_reply
 from bot.monitoring_flow import on_monitoring_reply
 from bot.onboarding import on_employee_message
 from bot.status_cycle import on_employee_reply
-from config.projects import PROJECTS
 from config.settings import ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
 from config.timeutil import now as tz_now
+from monitoring.markets import list_market_names
 from prompts.extraction import extract_tasks
-from sheets.tasks import get_all_tasks
+from tasks.tasks import get_all_tasks
 
 
 def _is_roman(update: Update) -> bool:
@@ -23,18 +23,18 @@ _awaiting_project: dict[int, list[dict]] = {}
 
 
 def _project_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton(p, callback_data=f"project:{p}")] for p in PROJECTS])
+    return InlineKeyboardMarkup([[InlineKeyboardButton(p, callback_data=f"project:{p}")] for p in list_market_names()])
 
 
 def _find_project_by_assignee(name: str) -> str | None:
     """Код-сторонняя проверка: если исполнитель уже встречается ровно в
-    одном из трёх проектов — определяем проект по факту, без участия Claude
+    одном из проектов — определяем проект по факту, без участия Claude
     (раздел 2.2: "по исполнителю, если он уже встречается в одной из трёх таблиц")."""
     if not name:
         return None
     found = {
         project
-        for project in PROJECTS
+        for project in list_market_names()
         for task in get_all_tasks(project)
         if task.get("assignee", "").strip().lower() == name.strip().lower()
     }

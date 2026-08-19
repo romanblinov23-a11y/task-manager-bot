@@ -11,11 +11,6 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
-GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "credentials.json")
-# Альтернатива GOOGLE_SERVICE_ACCOUNT_FILE для хостов без локальной файловой
-# системы (Railway) — содержимое JSON-ключа целиком, одной строкой
-GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-
 ROMAN_TELEGRAM_ID = os.getenv("ROMAN_TELEGRAM_ID")
 # Имя, которым Романа называют в рабочих чатах — отображается в буфере сообщений
 # и используется для сопоставления задач, назначенных на него самого.
@@ -33,6 +28,9 @@ OWNER_TELEGRAM_IDS = {
 
 # Путь к SQLite-базе модуля мониторинга конкурентов (рынки, конкуренты, снятия)
 MONITORING_DB_PATH = os.getenv("MONITORING_DB_PATH", "data/monitoring.db")
+# Путь к SQLite-базе трекера задач — отдельная база от мониторинга, общие
+# только пользователи (monitoring.manager, по telegram_user_id)
+TASKS_DB_PATH = os.getenv("TASKS_DB_PATH", "data/tasks.db")
 # Раз в неделю бот шлёт напоминание-задание по рынкам, у которых сегодня день мониторинга
 MONITORING_REMINDER_TIME = os.getenv("MONITORING_REMINDER_TIME", "09:30")
 

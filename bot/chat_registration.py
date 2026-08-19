@@ -2,8 +2,8 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from config.chats import register_chat
-from config.projects import PROJECTS
 from config.settings import ROMAN_TELEGRAM_ID
+from monitoring.markets import list_market_names
 
 
 async def on_register_project(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -18,10 +18,11 @@ async def on_register_project(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.effective_message.reply_text("Эта команда работает только внутри группового чата.")
         return
 
+    projects = list_market_names()
     project = " ".join(context.args) if context.args else ""
-    if project not in PROJECTS:
+    if project not in projects:
         await update.effective_message.reply_text(
-            "Укажите проект: /register_project <название>\nДоступные: " + ", ".join(PROJECTS)
+            "Укажите проект: /register_project <название>\nДоступные: " + ", ".join(projects)
         )
         return
 

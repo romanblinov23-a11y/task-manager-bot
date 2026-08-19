@@ -4,14 +4,13 @@ from datetime import date, datetime, timedelta
 from telegram import Bot, Update
 from telegram.ext import ContextTypes
 
-from config.projects import PROJECTS
 from config.settings import ROMAN_TELEGRAM_ID, STALE_DAYS
 from config.timeutil import now_naive as tz_now_naive
 from config.timeutil import today as tz_today
+from monitoring.markets import list_market_names
 from prompts.weekly_analytics import generate_weekly_report
-from sheets.client import open_project_spreadsheet
-from sheets.schema import LOG_SHEET
-from sheets.tasks import get_all_tasks
+from tasks.log import get_log_entries
+from tasks.tasks import get_all_tasks
 
 
 def _is_roman(update: Update) -> bool:
@@ -46,7 +45,7 @@ def _empty_employee_stats() -> dict:
 
 def _build_project_stats(project: str, stale_days: int, today: date, week_ago: datetime) -> dict:
     tasks = get_all_tasks(project)
-    log_entries = open_project_spreadsheet(project).worksheet(LOG_SHEET).get_all_records()
+    log_entries = get_log_entries(project)
 
     log_by_task: dict[str, list[dict]] = defaultdict(list)
     for entry in log_entries:
@@ -133,7 +132,7 @@ def build_weekly_report(stale_days: int = STALE_DAYS) -> str:
     today = tz_today()
     week_ago = tz_now_naive() - timedelta(days=7)
 
-    projects_stats = [_build_project_stats(p, stale_days, today, week_ago) for p in PROJECTS]
+    projects_stats = [_build_project_stats(p, stale_days, today, week_ago) for p in list_market_names()]
     multi_project_employees = _build_multi_project_employees(projects_stats)
 
     return generate_weekly_report(projects_stats, multi_project_employees, stale_days=stale_days)

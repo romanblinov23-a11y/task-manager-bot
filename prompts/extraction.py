@@ -1,7 +1,8 @@
 from datetime import date
 
-from config.projects import CATEGORIES, PROJECTS
+from config.projects import CATEGORIES
 from config.timeutil import today as tz_today
+from monitoring.markets import list_market_names
 from prompts.client import ask_claude
 from prompts.utils import parse_json_response
 
@@ -17,8 +18,8 @@ _PROMPT_TEMPLATE = """Ты — модуль анализа задач для б�
 - Текст протокола встречи
 
 Тебе известен проект, к которому относится этот текст: {project_name}
-(один из: "Парк Горького", "Окко", "Аврора"; может быть null, если
-определить нужно по содержанию — см. ниже)
+(один из: {project_list}; может быть null, если определить нужно по
+содержанию — см. ниже)
 
 ЧТО НУЖНО НАЙТИ
 Найди ВСЕ задачи и договорённости в тексте — их может быть от 0 до
@@ -46,7 +47,7 @@ _PROMPT_TEMPLATE = """Ты — модуль анализа задач для б�
 5. project — если {project_name} известен заранее, используй его.
    Если null (личное сообщение/протокол без явной привязки к чату) —
    определи проект по исполнителю, если он уже встречается в одном из
-   трёх проектов. Если определить невозможно — поставь project: null
+   проектов. Если определить невозможно — поставь project: null
    и project_unclear: true.
 6. source_excerpt — точная цитата или фраза из текста, на основании
    которой ты сделал этот вывод (для проверки Романом)
@@ -86,9 +87,11 @@ def extract_tasks(text: str, project_name: str | None = None, current_date: date
     if current_date is None:
         current_date = tz_today()
 
+    projects = list_market_names()
     prompt = (
         _PROMPT_TEMPLATE
         .replace("{project_name}", project_name if project_name else "null")
+        .replace("{project_list}", ", ".join(f'"{p}"' for p in projects))
         .replace("{current_date}", current_date.isoformat())
         + "\n\nТЕКСТ ДЛЯ АНАЛИЗА (формат строк — \"[время] Имя: сообщение\"; "
         "если автор сообщения говорит о себе в первом лице — \"я возьму\", "
@@ -99,14 +102,14 @@ def extract_tasks(text: str, project_name: str | None = None, current_date: date
     data = parse_json_response(ask_claude(prompt))
     tasks = data.get("tasks", [])
     for task in tasks:
-        _validate_task(task)
+        _validate_task(task, projects)
     return tasks
 
 
-def _validate_task(task: dict) -> None:
+def _validate_task(task: dict, projects: list[str]) -> None:
     category = task.get("category")
     if category not in CATEGORIES:
         raise ValueError(f"Claude вернул категорию вне фиксированного списка: {category!r}")
     project = task.get("project")
-    if project is not None and project not in PROJECTS:
+    if project is not None and project not in projects:
         raise ValueError(f"Claude вернул проект вне фиксированного списка: {project!r}")
