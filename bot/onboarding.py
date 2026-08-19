@@ -314,12 +314,7 @@ async def on_employee_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if not is_owner(user.id):
         manager = get_manager(user.id)
-        if manager is not None and manager["status"] == "removed":
-            await update.effective_message.reply_text(
-                "🚫 Владелец отозвал твой доступ к боту. Если это ошибка — напиши владельцу напрямую."
-            )
-            return
-        if manager is None:
+        if manager is None or manager["status"] == "removed":
             await _start_project_selection(update.effective_message, user_id)
             return
 

@@ -21,14 +21,17 @@ def get_manager(telegram_user_id: int) -> dict | None:
 def register_manager(telegram_user_id: int, name: str, position: str, market_id: int) -> dict:
     """Онбординг менеджера: создаёт (или обновляет) запись manager со статусом
     'pending' и привязывает его к рынку. Доступ к боту менеджер получает
-    только после подтверждения владельцем (см. approve_manager)."""
+    только после подтверждения владельцем (см. approve_manager). Конфликт
+    случается, когда ранее удалённый (status='removed') сотрудник проходит
+    онбординг заново — тогда статус тоже сбрасывается в 'pending', чтобы
+    владелец увидел заявку и подтвердил доступ повторно."""
     conn = get_connection()
     try:
         conn.execute(
             """
             INSERT INTO manager (telegram_user_id, name, role, position, status)
             VALUES (?, ?, 'manager', ?, 'pending')
-            ON CONFLICT (telegram_user_id) DO UPDATE SET name = excluded.name, position = excluded.position
+            ON CONFLICT (telegram_user_id) DO UPDATE SET name = excluded.name, position = excluded.position, status = 'pending'
             """,
             (telegram_user_id, name, position),
         )
