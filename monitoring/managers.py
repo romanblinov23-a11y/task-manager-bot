@@ -1,4 +1,5 @@
 from config.settings import OWNER_TELEGRAM_IDS
+from monitoring.constants import BLOCK_MONITORING
 from monitoring.db import get_connection
 
 
@@ -44,23 +45,61 @@ def register_manager(telegram_user_id: int, name: str, position: str, market_id:
         conn.close()
 
 
+def get_manager_blocks(telegram_user_id: int) -> list[str]:
+    manager = get_manager(telegram_user_id)
+    if not manager or not manager.get("blocks"):
+        return []
+    return [b for b in manager["blocks"].split(",") if b]
+
+
+def set_manager_blocks(telegram_user_id: int, blocks: list[str]) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE manager SET blocks = ? WHERE telegram_user_id = ?", (",".join(blocks), telegram_user_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _has_monitoring_block(manager: dict | None) -> bool:
+    if not manager or manager["status"] != "active":
+        return False
+    return BLOCK_MONITORING in (manager.get("blocks") or "").split(",")
+
+
 def is_active_manager(telegram_user_id: int) -> bool:
-    """True, если пользователь подтверждён владельцем и может пользоваться
-    модулем мониторинга (или является владельцем — у того доступ всегда)."""
+    """True, если пользователь подтверждён владельцем, ему выдан блок
+    «Мониторинг» и он может пользоваться модулем (или является владельцем —
+    у того доступ всегда)."""
     if is_owner(telegram_user_id):
         return True
-    manager = get_manager(telegram_user_id)
-    return bool(manager and manager["status"] == "active")
+    return _has_monitoring_block(get_manager(telegram_user_id))
 
 
 def is_market_editor(telegram_user_id: int) -> bool:
     """True для владельца и для активных менеджеров с должностью
-    «Управляющий» — только им можно менять список конкурентов и
-    расписание рынка. Ходить на сам мониторинг могут все (is_active_manager)."""
+    «Управляющий» (и выданным блоком «Мониторинг») — только им можно менять
+    список конкурентов и расписание рынка. Ходить на сам мониторинг могут
+    все (is_active_manager)."""
     if is_owner(telegram_user_id):
         return True
     manager = get_manager(telegram_user_id)
-    return bool(manager and manager["status"] == "active" and manager["position"] == "Управляющий")
+    return _has_monitoring_block(manager) and manager["position"] == "Управляющий"
+
+
+def get_market_supervisor(market_id: int, exclude_telegram_user_id: int | None = None) -> dict | None:
+    """Активный Управляющий этого рынка, если есть (кроме исключённого
+    пользователя) — у рынка может быть только один Управляющий, используется
+    для проверки перед назначением этой роли."""
+    for manager in get_managers_for_market(market_id):
+        if manager["status"] != "active" or manager["position"] != "Управляющий":
+            continue
+        if exclude_telegram_user_id is not None and manager["telegram_user_id"] == exclude_telegram_user_id:
+            continue
+        return manager
+    return None
 
 
 def list_managers() -> list[dict]:

@@ -363,9 +363,11 @@ async def _notify_owners_of_pending(
     context: ContextTypes.DEFAULT_TYPE, telegram_user_id: int, name: str, position: str, market_name: str
 ) -> None:
     text = (
-        f"🆕 Новая заявка на доступ к мониторингу конкурентов:\n"
+        f"🆕 Новая заявка на доступ к боту:\n"
         f"{name} — «{position}», проект «{market_name}».\n"
-        f"Telegram ID: {telegram_user_id}"
+        f"Telegram ID: {telegram_user_id}\n\n"
+        "При подтверждении будут выданы оба блока бота (задачи и мониторинг) — доступные блоки "
+        "можно изменить позже через /managers."
     )
     for owner_id in OWNER_TELEGRAM_IDS:
         try:

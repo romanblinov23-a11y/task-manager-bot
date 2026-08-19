@@ -31,6 +31,8 @@ from bot.manager_admin import (
     on_add_project_command,
     on_manager_approve,
     on_manager_back_to_list,
+    on_manager_blocks,
+    on_manager_blocks_done,
     on_manager_market,
     on_manager_reject,
     on_manager_remove,
@@ -40,6 +42,7 @@ from bot.manager_admin import (
     on_manager_select,
     on_manager_set_market,
     on_manager_set_role,
+    on_manager_toggle_block,
     on_managers_command,
     on_reset_monitoring_cancel,
     on_reset_monitoring_command,
@@ -203,6 +206,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_manager_remove, pattern=r"^mgr_remove:"))
     app.add_handler(CallbackQueryHandler(on_manager_restore, pattern=r"^mgr_restore:"))
     app.add_handler(CallbackQueryHandler(on_manager_back_to_list, pattern=r"^mgr_list$"))
+    app.add_handler(CallbackQueryHandler(on_manager_toggle_block, pattern=r"^mgr_toggleblock:"))
+    app.add_handler(CallbackQueryHandler(on_manager_blocks_done, pattern=r"^mgr_blocksdone:"))
+    app.add_handler(CallbackQueryHandler(on_manager_blocks, pattern=r"^mgr_blocks:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_market_choice, pattern=r"^reset_monitoring_market:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_confirm, pattern=r"^reset_monitoring_confirm:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_cancel, pattern=r"^reset_monitoring_cancel$"))

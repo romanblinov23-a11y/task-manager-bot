@@ -33,7 +33,7 @@ def _schedule_keyboard(market_id: int, selected: set[int]) -> InlineKeyboardMark
     return InlineKeyboardMarkup(rows)
 
 
-async def _start_schedule_flow(message, user_id: str, market: dict) -> None:
+async def start_schedule_flow(message, user_id: str, market: dict) -> None:
     existing = get_schedule(market["id"])
     selected = set(existing["weekdays"]) if existing else set()
     _pending[user_id] = {"market_id": market["id"], "selected": selected}
@@ -58,7 +58,7 @@ async def on_schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if len(markets) == 1:
-        await _start_schedule_flow(update.effective_message, str(user.id), markets[0])
+        await start_schedule_flow(update.effective_message, str(user.id), markets[0])
         return
 
     await update.effective_message.reply_text("По какому рынку настроить расписание?", reply_markup=_market_pick_keyboard(markets))
@@ -74,7 +74,7 @@ async def on_schedule_market_choice(update: Update, context: ContextTypes.DEFAUL
         return
     await query.answer()
     await query.edit_message_text(f"Рынок: {market['name']}")
-    await _start_schedule_flow(query.message, user_id, market)
+    await start_schedule_flow(query.message, user_id, market)
 
 
 async def on_schedule_day_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

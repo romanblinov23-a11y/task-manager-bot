@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS manager (
     role TEXT NOT NULL CHECK (role IN ('manager', 'owner')),
     position TEXT,
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'removed')),
+    blocks TEXT NOT NULL DEFAULT 'tasks,monitoring',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -107,6 +108,7 @@ def init_schema() -> None:
     try:
         conn.executescript(_SCHEMA)
         _ensure_column(conn, "manager", "status", "status TEXT NOT NULL DEFAULT 'pending'")
+        _ensure_column(conn, "manager", "blocks", "blocks TEXT NOT NULL DEFAULT 'tasks,monitoring'")
         _ensure_column(conn, "competitor", "closed_at", "closed_at TEXT")
         for project in PROJECTS:
             conn.execute(

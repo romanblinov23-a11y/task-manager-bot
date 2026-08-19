@@ -1,17 +1,21 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from monitoring.constants import MANAGER_POSITIONS
+from bot.market_schedule import start_schedule_flow
+from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS, MANAGER_POSITIONS
 from monitoring.db import reset_market_players
 from monitoring.managers import (
     approve_manager,
     get_manager,
+    get_manager_blocks,
+    get_market_supervisor,
     get_markets_for_manager,
     is_owner,
     list_managers,
     reject_manager,
     remove_manager,
     restore_manager,
+    set_manager_blocks,
     set_manager_market,
     set_manager_position,
 )
@@ -20,7 +24,24 @@ from monitoring.markets import create_market, get_market, get_market_by_name, li
 # telegram_user_id (str) владельца -> True, если ждём от него название нового проекта
 _awaiting_new_project: set[str] = set()
 
+# telegram_user_id (str) владельца -> {"uid": int, "selected": set[str]} — сессия редактирования блоков
+_pending_blocks: dict[str, dict] = {}
+
 _STATUS_LABELS = {"pending": "🕓 Ожидает подтверждения", "active": "✅ Активен", "removed": "🚫 Доступ отозван"}
+
+
+class _ChatMessenger:
+    """Адаптер с интерфейсом .reply_text для отправки НОВОГО сообщения по
+    chat_id (а не ответа на существующее) — нужен, чтобы переиспользовать
+    bot.market_schedule.start_schedule_flow сразу после подтверждения
+    нового Управляющего, без правки самого market_schedule.py."""
+
+    def __init__(self, bot, chat_id: int):
+        self._bot = bot
+        self._chat_id = chat_id
+
+    async def reply_text(self, text, reply_markup=None):
+        return await self._bot.send_message(chat_id=self._chat_id, text=text, reply_markup=reply_markup)
 
 
 def _manager_list_keyboard(managers: list[dict]) -> InlineKeyboardMarkup:
@@ -36,10 +57,12 @@ def _manager_list_keyboard(managers: list[dict]) -> InlineKeyboardMarkup:
 
 def _manager_card_text(manager: dict, markets: list[dict]) -> str:
     markets_label = ", ".join(m["name"] for m in markets) or "—"
+    blocks_label = ", ".join(BLOCK_LABELS[b] for b in get_manager_blocks(manager["telegram_user_id"])) or "нет"
     return (
         f"{manager['name']} (ID {manager['telegram_user_id']})\n"
         f"Роль: {manager['position'] or '—'}\n"
         f"Проект(ы): {markets_label}\n"
+        f"Блоки: {blocks_label}\n"
         f"Статус: {_STATUS_LABELS[manager['status']]}"
     )
 
@@ -65,6 +88,7 @@ def _manager_card_keyboard(manager: dict) -> InlineKeyboardMarkup:
             rows.append([InlineKeyboardButton("🗑 Удалить", callback_data=f"mgr_remove:{uid}")])
         elif manager["status"] == "removed":
             rows.append([InlineKeyboardButton("♻️ Восстановить", callback_data=f"mgr_restore:{uid}")])
+    rows.append([InlineKeyboardButton("🧩 Блоки", callback_data=f"mgr_blocks:{uid}")])
     rows.append([InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")])
     return InlineKeyboardMarkup(rows)
 
@@ -86,6 +110,15 @@ def _market_pick_keyboard(uid: int) -> InlineKeyboardMarkup:
     ]
     buttons.append([InlineKeyboardButton("↩️ Отмена", callback_data=f"mgr_select:{uid}")])
     return InlineKeyboardMarkup(buttons)
+
+
+def _blocks_keyboard(uid: int, selected: set[str]) -> InlineKeyboardMarkup:
+    rows = []
+    for block_key in AVAILABLE_BLOCKS:
+        mark = "✅ " if block_key in selected else "⬜ "
+        rows.append([InlineKeyboardButton(f"{mark}{BLOCK_LABELS[block_key]}", callback_data=f"mgr_toggleblock:{uid}:{block_key}")])
+    rows.append([InlineKeyboardButton("✔️ Готово", callback_data=f"mgr_blocksdone:{uid}")])
+    return InlineKeyboardMarkup(rows)
 
 
 async def _reply_manager_list(message) -> None:
@@ -130,6 +163,49 @@ async def on_manager_select(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.edit_message_text(_manager_card_text(manager, markets), reply_markup=_manager_card_keyboard(manager))
 
 
+async def _check_supervisor_conflict(query, uid: int) -> bool:
+    """True, если назначение uid Управляющим блокируется конфликтом — на
+    каком-то из его рынков уже есть другой активный Управляющий (у рынка
+    может быть только один). Уже показывает алерт владельцу, если нашёл."""
+    for market in get_markets_for_manager(uid):
+        existing = get_market_supervisor(market["id"], exclude_telegram_user_id=uid)
+        if existing:
+            await query.answer(
+                f"На рынке «{market['name']}» уже есть Управляющий — {existing['name']}. "
+                "Сначала смените его роль через /managers, потом назначайте нового.",
+                show_alert=True,
+            )
+            return True
+    return False
+
+
+async def _notify_approved(bot, manager: dict, uid: int) -> None:
+    if manager["position"] == "Управляющий":
+        text = (
+            "✅ Владелец подтвердил твою заявку! Теперь доступны /add_competitor, "
+            "/close_competitor, /schedule, /monitoring и /dashboard_market."
+        )
+    else:
+        text = "✅ Владелец подтвердил твою заявку! Теперь доступны /monitoring и /dashboard_market."
+    try:
+        await bot.send_message(chat_id=uid, text=text)
+    except Exception:
+        pass
+
+
+async def _prompt_new_supervisor_schedule(bot, uid: int) -> None:
+    """Сразу после того, как человек становится Управляющим рынка,
+    спрашиваем у него дни недели для мониторинга — не нужно ждать, пока он
+    сам вспомнит про /schedule."""
+    markets = get_markets_for_manager(uid)
+    if not markets:
+        return
+    market = markets[0]
+    messenger = _ChatMessenger(bot, uid)
+    await messenger.reply_text(f"Вы — Управляющий рынка «{market['name']}». Выберите дни недели для мониторинга конкурентов:")
+    await start_schedule_flow(messenger, str(uid), market)
+
+
 async def on_manager_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not is_owner(query.from_user.id):
@@ -140,16 +216,17 @@ async def on_manager_approve(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not manager:
         await query.answer("Заявка уже неактуальна", show_alert=True)
         return
+
+    if manager["position"] == "Управляющий" and await _check_supervisor_conflict(query, uid):
+        return
+
     approve_manager(uid)
     await query.answer("Подтверждено")
     await query.edit_message_text(f"✅ Доступ подтверждён для {manager['name']} (ID {uid}).")
-    try:
-        await context.bot.send_message(
-            chat_id=uid,
-            text="✅ Владелец подтвердил твою заявку! Теперь доступны /schedule, /add_competitor и /monitoring.",
-        )
-    except Exception:
-        pass
+    await _notify_approved(context.bot, manager, uid)
+
+    if manager["position"] == "Управляющий":
+        await _prompt_new_supervisor_schedule(context.bot, uid)
 
 
 async def on_manager_reject(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -166,7 +243,7 @@ async def on_manager_reject(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer("Отклонено")
     await query.edit_message_text(f"❌ Заявка {manager['name']} (ID {uid}) отклонена.")
     try:
-        await context.bot.send_message(chat_id=uid, text="❌ Владелец отклонил заявку на доступ к мониторингу конкурентов.")
+        await context.bot.send_message(chat_id=uid, text="❌ Владелец отклонил заявку на доступ к боту.")
     except Exception:
         pass
 
@@ -192,6 +269,13 @@ async def on_manager_set_role(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer()
         return
     position = MANAGER_POSITIONS[index]
+
+    if position == "Управляющий" and await _check_supervisor_conflict(query, uid):
+        return
+
+    manager_before = get_manager(uid)
+    previous_position = manager_before["position"] if manager_before else None
+
     set_manager_position(uid, position)
     manager = get_manager(uid)
     markets = get_markets_for_manager(uid)
@@ -201,6 +285,9 @@ async def on_manager_set_role(update: Update, context: ContextTypes.DEFAULT_TYPE
         await context.bot.send_message(chat_id=uid, text=f"Владелец изменил твою роль на «{position}».")
     except Exception:
         pass
+
+    if position == "Управляющий" and previous_position != "Управляющий" and manager["status"] == "active":
+        await _prompt_new_supervisor_schedule(context.bot, uid)
 
 
 async def on_manager_market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -224,6 +311,18 @@ async def on_manager_set_market(update: Update, context: ContextTypes.DEFAULT_TY
     if not market:
         await query.answer("Проект не найден", show_alert=True)
         return
+
+    manager = get_manager(uid)
+    if manager and manager["position"] == "Управляющий":
+        existing = get_market_supervisor(market_id, exclude_telegram_user_id=uid)
+        if existing:
+            await query.answer(
+                f"На рынке «{market['name']}» уже есть Управляющий — {existing['name']}. "
+                "Сначала смените его роль через /managers.",
+                show_alert=True,
+            )
+            return
+
     set_manager_market(uid, market_id)
     manager = get_manager(uid)
     markets = get_markets_for_manager(uid)
@@ -231,6 +330,75 @@ async def on_manager_set_market(update: Update, context: ContextTypes.DEFAULT_TY
     await query.edit_message_text(_manager_card_text(manager, markets), reply_markup=_manager_card_keyboard(manager))
     try:
         await context.bot.send_message(chat_id=uid, text=f"Владелец переназначил тебя на проект «{market['name']}».")
+    except Exception:
+        pass
+
+    if manager["position"] == "Управляющий" and manager["status"] == "active":
+        await _prompt_new_supervisor_schedule(context.bot, uid)
+
+
+async def on_manager_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    uid = int(query.data.split(":", 1)[1])
+    manager = get_manager(uid)
+    if not manager:
+        await query.answer("Не найден", show_alert=True)
+        return
+    owner_id = str(query.from_user.id)
+    _pending_blocks[owner_id] = {"uid": uid, "selected": set(get_manager_blocks(uid))}
+    await query.answer()
+    await query.edit_message_text(
+        f"Какие блоки бота доступны {manager['name']}?", reply_markup=_blocks_keyboard(uid, _pending_blocks[owner_id]["selected"])
+    )
+
+
+async def on_manager_toggle_block(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    _, uid_str, block_key = query.data.split(":", 2)
+    uid = int(uid_str)
+    owner_id = str(query.from_user.id)
+    pending = _pending_blocks.get(owner_id)
+    if not pending or pending["uid"] != uid:
+        await query.answer("Сессия неактуальна, откройте карточку заново", show_alert=True)
+        return
+    if block_key in pending["selected"]:
+        pending["selected"].discard(block_key)
+    else:
+        pending["selected"].add(block_key)
+    await query.answer()
+    await query.edit_message_reply_markup(reply_markup=_blocks_keyboard(uid, pending["selected"]))
+
+
+async def on_manager_blocks_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    uid = int(query.data.split(":", 1)[1])
+    owner_id = str(query.from_user.id)
+    pending = _pending_blocks.get(owner_id)
+    if not pending or pending["uid"] != uid:
+        await query.answer("Сессия неактуальна", show_alert=True)
+        return
+
+    selected = pending["selected"]
+    set_manager_blocks(uid, list(selected))
+    del _pending_blocks[owner_id]
+
+    manager = get_manager(uid)
+    markets = get_markets_for_manager(uid)
+    await query.answer("Сохранено")
+    await query.edit_message_text(_manager_card_text(manager, markets), reply_markup=_manager_card_keyboard(manager))
+
+    blocks_label = ", ".join(BLOCK_LABELS[b] for b in selected) or "ничего (доступ ко всем блокам отключён)"
+    try:
+        await context.bot.send_message(chat_id=uid, text=f"Владелец изменил доступные тебе блоки бота: {blocks_label}.")
     except Exception:
         pass
 
@@ -273,7 +441,7 @@ async def on_manager_remove_confirm(update: Update, context: ContextTypes.DEFAUL
     await query.answer("Удалено")
     await query.edit_message_text(f"🚫 Доступ отозван у {manager['name']} (ID {uid}).")
     try:
-        await context.bot.send_message(chat_id=uid, text="🚫 Владелец отозвал твой доступ к модулю мониторинга конкурентов.")
+        await context.bot.send_message(chat_id=uid, text="🚫 Владелец отозвал твой доступ к боту.")
     except Exception:
         pass
 
@@ -294,7 +462,7 @@ async def on_manager_restore(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer("Восстановлено")
     await query.edit_message_text(_manager_card_text(manager, markets), reply_markup=_manager_card_keyboard(manager))
     try:
-        await context.bot.send_message(chat_id=uid, text="✅ Владелец восстановил твой доступ к модулю мониторинга конкурентов.")
+        await context.bot.send_message(chat_id=uid, text="✅ Владелец восстановил твой доступ к боту.")
     except Exception:
         pass
 
