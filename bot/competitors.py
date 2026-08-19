@@ -24,7 +24,7 @@ from monitoring.factor_schema import (
     serialized_blocks,
 )
 from monitoring.factors import save_factors
-from monitoring.managers import get_markets_for_manager, is_active_manager, is_owner
+from monitoring.managers import get_markets_for_manager, is_market_editor, is_owner
 from monitoring.markets import get_market, list_markets
 from monitoring.readings import record_reading
 
@@ -114,9 +114,9 @@ async def on_add_competitor_own_first_choice(update: Update, context: ContextTyp
 
 async def on_add_competitor_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
-    if not (is_owner(user.id) or is_active_manager(user.id)):
+    if not is_market_editor(user.id):
         await update.effective_message.reply_text(
-            "Эта команда доступна только подтверждённым владельцем менеджерам."
+            "Список конкурентов может менять только владелец или Управляющий."
         )
         return
 
@@ -371,8 +371,8 @@ async def _show_competitor_list(message, market: dict) -> None:
 
 async def on_close_competitor_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
-    if not (is_owner(user.id) or is_active_manager(user.id)):
-        await update.effective_message.reply_text("Эта команда доступна только подтверждённым владельцем менеджерам.")
+    if not is_market_editor(user.id):
+        await update.effective_message.reply_text("Список конкурентов может менять только владелец или Управляющий.")
         return
 
     markets = _available_markets(user.id)

@@ -44,6 +44,7 @@ from bot.manager_admin import (
     on_reset_monitoring_cancel,
     on_reset_monitoring_command,
     on_reset_monitoring_confirm,
+    on_reset_monitoring_market_choice,
 )
 from bot.market_schedule import (
     on_schedule_command,
@@ -52,11 +53,11 @@ from bot.market_schedule import (
     on_schedule_market_choice,
 )
 from bot.monitoring_flow import (
+    on_monitoring_assign_choice,
     on_monitoring_category_choice,
     on_monitoring_command,
     on_monitoring_date_choice,
-    on_monitoring_factor_block_choice,
-    on_monitoring_factor_field_choice,
+    on_monitoring_factor_confirm,
     on_monitoring_factors_choice,
     on_monitoring_market_choice,
     on_monitoring_obs_choice,
@@ -124,7 +125,7 @@ _ROMAN_COMMANDS = [
     BotCommand("weekly", "Еженедельная аналитика по запросу"),
     BotCommand("managers", "Менеджеры мониторинга конкурентов"),
     BotCommand("add_project", "Добавить проект/точку Surf"),
-    BotCommand("reset_monitoring", "⚠️ Обнулить все данные мониторинга"),
+    BotCommand("reset_monitoring", "⚠️ Обнулить конкурентов на выбранном рынке"),
     BotCommand("add_competitor", "Добавить конкурента на рынок"),
     BotCommand("close_competitor", "Закрыть/открыть конкурента"),
     BotCommand("schedule", "Настроить дни мониторинга рынка"),
@@ -202,7 +203,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_manager_remove, pattern=r"^mgr_remove:"))
     app.add_handler(CallbackQueryHandler(on_manager_restore, pattern=r"^mgr_restore:"))
     app.add_handler(CallbackQueryHandler(on_manager_back_to_list, pattern=r"^mgr_list$"))
-    app.add_handler(CallbackQueryHandler(on_reset_monitoring_confirm, pattern=r"^reset_monitoring_confirm$"))
+    app.add_handler(CallbackQueryHandler(on_reset_monitoring_market_choice, pattern=r"^reset_monitoring_market:"))
+    app.add_handler(CallbackQueryHandler(on_reset_monitoring_confirm, pattern=r"^reset_monitoring_confirm:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_cancel, pattern=r"^reset_monitoring_cancel$"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_market_choice, pattern=r"^addc_market:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_format_choice, pattern=r"^addc_format:"))
@@ -218,13 +220,13 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_schedule_done, pattern=r"^sched_done:"))
     app.add_handler(CallbackQueryHandler(on_monitoring_market_choice, pattern=r"^monf_market:"))
     app.add_handler(CallbackQueryHandler(on_monitoring_start_button, pattern=r"^monf_go:"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_assign_choice, pattern=r"^monf_assign:"))
     app.add_handler(CallbackQueryHandler(on_monitoring_skip, pattern=r"^monf_skip:"))
     app.add_handler(CallbackQueryHandler(on_monitoring_date_choice, pattern=r"^monf_date:"))
     app.add_handler(CallbackQueryHandler(on_monitoring_obs_choice, pattern=r"^monf_obs:"))
     app.add_handler(CallbackQueryHandler(on_monitoring_category_choice, pattern=r"^monf_cat:"))
     app.add_handler(CallbackQueryHandler(on_monitoring_factors_choice, pattern=r"^monf_factors:"))
-    app.add_handler(CallbackQueryHandler(on_monitoring_factor_block_choice, pattern=r"^monf_fblock:"))
-    app.add_handler(CallbackQueryHandler(on_monitoring_factor_field_choice, pattern=r"^monf_ffield:"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_factor_confirm, pattern=r"^monf_factorconfirm:"))
     app.add_handler(CallbackQueryHandler(on_dashboard_market_choice, pattern=r"^dash_market:"))
     app.add_handler(CallbackQueryHandler(on_dashboard_aggregate_choice, pattern=r"^dash_all$"))
 

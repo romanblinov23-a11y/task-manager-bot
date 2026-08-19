@@ -25,13 +25,12 @@ ATMOSPHERE_FIELDS = [
 ]
 
 SERVICE_FIELDS = [
-    (
-        "service",
-        "Персонализация/сервис",
-        "text",
-        None,
-        "встреча и прощание с гостем, коммуникация при заказе, опрятность, форма, слаженность команды, работа с отзывами, рейтинг",
-    ),
+    ("greeting", "Встреча и прощание", "buttons", ["нет", "есть банальное", "есть, эмоционально тёплое"], None),
+    ("order_communication", "Коммуникация при заказе", "buttons", ["нет (диджитал)", "есть сухая", "есть эмоционально тёплое"], None),
+    ("neatness", "Опрятность", "buttons", ["неопрятные", "опрятные сотрудники"], None),
+    ("team_cohesion", "Слаженность команды", "buttons", ["нет", "есть (чувствуется сила команды)"], None),
+    ("review_handling", "Работа с отзывами", "buttons", ["нет", "давно не отвечали", "отвечают регулярно"], None),
+    ("yandex_rating", "Рейтинг на Яндексе", "number", None, "укажите оценку числом, например 4.7"),
 ]
 
 BRAND_FIELDS = [
@@ -165,3 +164,104 @@ def render_block_lines(block_key: str, raw) -> list[tuple[str, str]]:
         if value not in (None, ""):
             lines.append((label, str(value)))
     return lines
+
+
+def find_field(block_key: str, field_key: str) -> tuple | None:
+    try:
+        _, fields = get_block(block_key)
+    except KeyError:
+        return None
+    for field in fields:
+        if field[0] == field_key:
+            return field
+    return None
+
+
+def describe_schema() -> str:
+    """Текстовое описание схемы для промпта Claude — какие поля есть в
+    каждом блоке и какие у них допустимые значения."""
+    lines = []
+    for block_key, block_title, fields in FACTOR_BLOCKS:
+        lines.append(f'Блок "{block_key}" ({block_title}):')
+        for key, label, kind, options, note in fields:
+            if kind == "buttons":
+                lines.append(f"  - {key} ({label}) — один из вариантов: {', '.join(options)}")
+            elif kind == "number":
+                lines.append(f"  - {key} ({label}) — число")
+            else:
+                lines.append(f"  - {key} ({label}) — короткий текст")
+    return "\n".join(lines)
+
+
+def describe_current_values(factors_row: dict | None) -> str:
+    """Текущие значения факторов конкурента для промпта Claude, чтобы
+    модель понимала контекст ("было раньше")."""
+    if not factors_row:
+        return "Факторы формирования ещё не заполнены."
+    lines = []
+    for block_key, block_title, _ in FACTOR_BLOCKS:
+        block_lines = render_block_lines(block_key, factors_row.get(block_key))
+        if not block_lines:
+            continue
+        lines.append(f"{block_title}:")
+        lines.extend(f"  {label}: {value}" for label, value in block_lines)
+    return "\n".join(lines) if lines else "Факторы формирования ещё не заполнены."
+
+
+def validate_proposed_changes(raw_changes, factors_row: dict | None) -> list[dict]:
+    """Проверяет предложенные Claude изменения против схемы и отбрасывает
+    невалидные (несуществующее поле, значение не из списка вариантов,
+    нечисловое значение для number-поля) — лучше молча пропустить
+    сомнительное изменение, чем записать мусор в базу."""
+    result = []
+    for change in raw_changes if isinstance(raw_changes, list) else []:
+        if not isinstance(change, dict):
+            continue
+        field = find_field(change.get("block"), change.get("field"))
+        new_value_raw = change.get("new_value")
+        if not field or new_value_raw is None:
+            continue
+        field_key, label, kind, options, _ = field
+        block_key = change["block"]
+
+        if kind == "buttons":
+            match = next((o for o in options if o == str(new_value_raw).strip()), None)
+            if not match:
+                continue
+            new_value = match
+        elif kind == "number":
+            try:
+                num = float(str(new_value_raw).replace(",", "."))
+            except (ValueError, TypeError):
+                continue
+            new_value = int(num) if num == int(num) else num
+        else:
+            new_value = str(new_value_raw).strip()
+            if not new_value:
+                continue
+
+        current_data = parse_block_value((factors_row or {}).get(block_key))
+        result.append(
+            {
+                "block_key": block_key,
+                "field_key": field_key,
+                "label": label,
+                "old_value": current_data.get(field_key, "—"),
+                "new_value": new_value,
+                "reason": str(change.get("reason") or "").strip(),
+            }
+        )
+    return result
+
+
+def apply_changes_to_factors(factors_row: dict | None, changes: list[dict]) -> dict[str, str]:
+    """block_key -> новая JSON-строка со всеми полями блока (изменённые +
+    сохранённые прежние) — готово для save_factors(**this)."""
+    blocks: dict[str, dict] = {}
+    for block_key, _, _ in FACTOR_BLOCKS:
+        data = parse_block_value((factors_row or {}).get(block_key))
+        data.pop("_raw", None)
+        blocks[block_key] = data
+    for change in changes:
+        blocks[change["block_key"]][change["field_key"]] = change["new_value"]
+    return {block_key: serialize_block(values) for block_key, values in blocks.items()}

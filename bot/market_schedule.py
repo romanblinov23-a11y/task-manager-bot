@@ -2,7 +2,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from monitoring.constants import WEEKDAY_LABELS
-from monitoring.managers import get_markets_for_manager, is_active_manager, is_owner
+from monitoring.managers import get_markets_for_manager, is_market_editor, is_owner
 from monitoring.markets import get_market, list_markets
 from monitoring.schedule import get_schedule, set_schedule
 
@@ -46,9 +46,9 @@ async def _start_schedule_flow(message, user_id: str, market: dict) -> None:
 
 async def on_schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
-    if not (is_owner(user.id) or is_active_manager(user.id)):
+    if not is_market_editor(user.id):
         await update.effective_message.reply_text(
-            "Эта команда доступна только подтверждённым владельцем менеджерам."
+            "Расписание мониторинга может менять только владелец или Управляющий."
         )
         return
 

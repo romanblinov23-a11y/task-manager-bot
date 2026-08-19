@@ -53,6 +53,16 @@ def is_active_manager(telegram_user_id: int) -> bool:
     return bool(manager and manager["status"] == "active")
 
 
+def is_market_editor(telegram_user_id: int) -> bool:
+    """True для владельца и для активных менеджеров с должностью
+    «Управляющий» — только им можно менять список конкурентов и
+    расписание рынка. Ходить на сам мониторинг могут все (is_active_manager)."""
+    if is_owner(telegram_user_id):
+        return True
+    manager = get_manager(telegram_user_id)
+    return bool(manager and manager["status"] == "active" and manager["position"] == "Управляющий")
+
+
 def list_managers() -> list[dict]:
     """Все менеджеры (любого статуса) с их рынками — для /managers."""
     conn = get_connection()

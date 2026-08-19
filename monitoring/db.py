@@ -118,34 +118,21 @@ def init_schema() -> None:
         conn.close()
 
 
-def reset_all() -> None:
-    """Необратимо стирает все данные модуля мониторинга (менеджеров,
-    конкурентов, снятия, наблюдения, расписания на всех рынках) и создаёт
-    таблицы заново по актуальной _SCHEMA (не просто чистит строки) — так
-    сброс заодно подхватывает изменения схемы вроде списка форматов
-    конкурентов, для которых SQLite не даёт поменять CHECK через ALTER.
-    Только для владельца, вызывается через /reset_monitoring."""
+def reset_market_players(market_id: int) -> None:
+    """Стирает данные по игрокам ОДНОГО рынка (конкуренты, их факторы,
+    снятия, наблюдения) — менеджеры, их привязка к рынку и расписание
+    мониторинга не трогаются, это отдельные сущности (сотрудники, а не
+    игроки рынка). Вызывается через /reset_monitoring после выбора рынка
+    владельцем."""
     conn = get_connection()
     try:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        for table in (
-            "observation",
-            "daily_avg_reading",
-            "competitor_factors",
-            "competitor",
-            "manager_market",
-            "manager",
-            "monitoring_schedule",
-            "market",
-        ):
-            conn.execute(f"DROP TABLE IF EXISTS {table}")
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.executescript(_SCHEMA)
-        for project in PROJECTS:
-            conn.execute(
-                "INSERT INTO market (name, city, our_point_name) VALUES (?, '', ?)",
-                (project, project),
-            )
+        competitor_ids = [row["id"] for row in conn.execute("SELECT id FROM competitor WHERE market_id = ?", (market_id,))]
+        if competitor_ids:
+            placeholders = ",".join("?" * len(competitor_ids))
+            conn.execute(f"DELETE FROM competitor_factors WHERE competitor_id IN ({placeholders})", competitor_ids)
+            conn.execute(f"DELETE FROM daily_avg_reading WHERE competitor_id IN ({placeholders})", competitor_ids)
+        conn.execute("DELETE FROM observation WHERE market_id = ?", (market_id,))
+        conn.execute("DELETE FROM competitor WHERE market_id = ?", (market_id,))
         conn.commit()
     finally:
         conn.close()

@@ -2,7 +2,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from monitoring.constants import MANAGER_POSITIONS
-from monitoring.db import reset_all
+from monitoring.db import reset_market_players
 from monitoring.managers import (
     approve_manager,
     get_manager,
@@ -330,11 +330,17 @@ async def on_manager_admin_reply(update: Update, context: ContextTypes.DEFAULT_T
     return True
 
 
-def _reset_confirm_keyboard() -> InlineKeyboardMarkup:
+def _reset_market_pick_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(m["name"], callback_data=f"reset_monitoring_market:{m['id']}")] for m in list_markets()]
+    )
+
+
+def _reset_confirm_keyboard(market_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("🗑 Да, обнулить всё", callback_data="reset_monitoring_confirm"),
+                InlineKeyboardButton("🗑 Да, обнулить", callback_data=f"reset_monitoring_confirm:{market_id}"),
                 InlineKeyboardButton("Отмена", callback_data="reset_monitoring_cancel"),
             ]
         ]
@@ -344,10 +350,32 @@ def _reset_confirm_keyboard() -> InlineKeyboardMarkup:
 async def on_reset_monitoring_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_owner(update.effective_user.id):
         return
+    markets = list_markets()
+    if not markets:
+        await update.effective_message.reply_text("Пока нет ни одного рынка.")
+        return
     await update.effective_message.reply_text(
-        "⚠️ Это удалит ВСЕ данные модуля мониторинга конкурентов на всех рынках: менеджеров, "
-        "конкурентов, снятия, наблюдения, расписания. Действие необратимо. Точно продолжить?",
-        reply_markup=_reset_confirm_keyboard(),
+        "По какому рынку обнулить данные конкурентов (снятия, факторы, наблюдения)? "
+        "Менеджеры и их привязка к рынку не тронутся.",
+        reply_markup=_reset_market_pick_keyboard(),
+    )
+
+
+async def on_reset_monitoring_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(
+        f"⚠️ Удалить всех конкурентов, их факторы, снятия и наблюдения на рынке «{market['name']}»? "
+        "Менеджеры и расписание мониторинга останутся. Действие необратимо.",
+        reply_markup=_reset_confirm_keyboard(market_id),
     )
 
 
@@ -356,11 +384,14 @@ async def on_reset_monitoring_confirm(update: Update, context: ContextTypes.DEFA
     if not is_owner(query.from_user.id):
         await query.answer()
         return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
     await query.answer("Обнуляю…")
-    reset_all()
-    await query.edit_message_text(
-        "✅ База модуля мониторинга обнулена. Рынки пересеяны из списка проектов — можно проходить онбординг заново."
-    )
+    reset_market_players(market_id)
+    await query.edit_message_text(f"✅ Данные конкурентов на рынке «{market['name']}» обнулены. Можно добавлять заново через /add_competitor.")
 
 
 async def on_reset_monitoring_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -1,28 +1,18 @@
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from bot.factor_wizard import field_keyboard, field_prompt_text
 from config.timeutil import parse_date, today
 from monitoring.calculations import compute_market_capacity, compute_share, is_sudden_change
 from monitoring.competitors import get_competitor, list_competitors
-from monitoring.constants import MONITORING_CYCLE_DAYS, OBSERVATION_CATEGORIES
-from monitoring.factor_schema import (
-    FACTOR_BLOCKS,
-    advance_factor_cursor,
-    current_field,
-    factor_progress_done,
-    factor_state_init,
-    is_first_field_of_block,
-    parse_field_value,
-    record_answer,
-    serialized_blocks,
-)
+from monitoring.constants import FACTOR_CHANGE_OBSERVATION_CATEGORY, MONITORING_CYCLE_DAYS, OBSERVATION_CATEGORIES
+from monitoring.factor_schema import apply_changes_to_factors
 from monitoring.factors import get_latest_factors, save_factors
-from monitoring.managers import get_managers_for_market, get_markets_for_manager, is_active_manager, is_owner
+from monitoring.managers import get_manager, get_managers_for_market, get_markets_for_manager, is_active_manager, is_owner
 from monitoring.markets import get_market, list_markets
 from monitoring.observations import create_observation
 from monitoring.readings import get_competitors_pending_this_cycle, get_last_market_cycle_date, get_latest_reading, record_reading
 from monitoring.schedule import list_markets_scheduled_for_weekday
+from prompts.factor_update import propose_factor_changes
 
 # user_id (str) -> состояние диалога /monitoring
 _pending: dict[str, dict] = {}
@@ -58,16 +48,6 @@ def _category_keyboard() -> InlineKeyboardMarkup:
         row = [InlineKeyboardButton(OBSERVATION_CATEGORIES[i], callback_data=f"monf_cat:{i}")]
         if i + 1 < len(OBSERVATION_CATEGORIES):
             row.append(InlineKeyboardButton(OBSERVATION_CATEGORIES[i + 1], callback_data=f"monf_cat:{i + 1}"))
-        buttons.append(row)
-    return InlineKeyboardMarkup(buttons)
-
-
-def _factor_block_keyboard() -> InlineKeyboardMarkup:
-    buttons = []
-    for i in range(0, len(FACTOR_BLOCKS), 2):
-        row = [InlineKeyboardButton(FACTOR_BLOCKS[i][1], callback_data=f"monf_fblock:{i}")]
-        if i + 1 < len(FACTOR_BLOCKS):
-            row.append(InlineKeyboardButton(FACTOR_BLOCKS[i + 1][1], callback_data=f"monf_fblock:{i + 1}"))
         buttons.append(row)
     return InlineKeyboardMarkup(buttons)
 
@@ -248,6 +228,14 @@ async def _save_reading_and_continue(message, user_id: str, reading_at: str) -> 
     await message.reply_text("Заметили видимые изменения по этой точке?", reply_markup=_yesno_keyboard("monf_obs"))
 
 
+async def _ask_factor_change_prompt(message, state: dict) -> None:
+    state["step"] = "factors_ai_prompt"
+    await message.reply_text(
+        "Поменялось ли что-то в факторах формирования у этой точки? Хотите внести изменения или дополнения?",
+        reply_markup=_yesno_keyboard("monf_factors"),
+    )
+
+
 async def on_monitoring_obs_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     user_id = str(query.from_user.id)
@@ -259,7 +247,7 @@ async def on_monitoring_obs_choice(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     if choice == "no":
         await query.edit_message_text("Хорошо.")
-        await _advance_to_next(query.message, user_id)
+        await _ask_factor_change_prompt(query.message, state)
         return
     state["step"] = "obs_category"
     await query.edit_message_text("Что изменилось?", reply_markup=_category_keyboard())
@@ -287,7 +275,7 @@ async def on_monitoring_factors_choice(update: Update, context: ContextTypes.DEF
     query = update.callback_query
     user_id = str(query.from_user.id)
     state = _pending.get(user_id)
-    if not state or state.get("step") != "factors_prompt":
+    if not state or state.get("step") != "factors_ai_prompt":
         await query.answer()
         return
     choice = query.data.split(":", 1)[1]
@@ -296,76 +284,41 @@ async def on_monitoring_factors_choice(update: Update, context: ContextTypes.DEF
         await query.edit_message_text("Хорошо.")
         await _advance_to_next(query.message, user_id)
         return
-    state["step"] = "factors_block_choice"
-    await query.edit_message_text("Какой блок изменился?", reply_markup=_factor_block_keyboard())
+    state["step"] = "factors_ai_text"
+    await query.edit_message_text("Опишите, что изменилось.")
+    await query.message.reply_text("Опишите одним сообщением, что именно изменилось в факторах формирования у этой точки:")
 
 
-async def on_monitoring_factor_block_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def on_monitoring_factor_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     user_id = str(query.from_user.id)
     state = _pending.get(user_id)
-    if not state or state.get("step") != "factors_block_choice":
+    if not state or state.get("step") != "factors_ai_confirm":
         await query.answer()
         return
-    index = int(query.data.split(":", 1)[1])
-    if index < 0 or index >= len(FACTOR_BLOCKS):
-        await query.answer()
-        return
-    block_key, title, _ = FACTOR_BLOCKS[index]
-    state["step"] = "factors_wizard"
-    state["fstate"] = factor_state_init([block_key])
+    choice = query.data.split(":", 1)[1]
     await query.answer()
-    await query.edit_message_text(f"Блок: {title}")
-    await _prompt_current_factor_field(query.message, state)
+    changes = state.pop("proposed_factor_changes", [])
+    change_text = state.pop("factor_change_text", "")
 
+    if choice == "no" or not changes:
+        await query.edit_message_text("Хорошо, факторы не меняю.")
+        await _advance_to_next(query.message, user_id)
+        return
 
-async def _prompt_current_factor_field(message, state: dict) -> None:
-    fstate = state["fstate"]
-    _, block_title, field = current_field(fstate)
-    await message.reply_text(
-        field_prompt_text(block_title, field, is_first_field_of_block(fstate)),
-        reply_markup=field_keyboard(field, "monf_ffield"),
+    competitor = state["current"]
+    latest = get_latest_factors(competitor["id"])
+    save_factors(competitor["id"], **apply_changes_to_factors(latest, changes))
+    summary = "; ".join(f"{c['label']}: {c['old_value']} → {c['new_value']}" for c in changes)
+    create_observation(
+        competitor_id=competitor["id"],
+        market_id=state["market_id"],
+        category=FACTOR_CHANGE_OBSERVATION_CATEGORY,
+        text=f"{change_text.strip()} — обновлено: {summary}" if change_text else summary,
+        created_by=int(user_id),
     )
-
-
-async def _advance_factor_wizard(message, user_id: str) -> None:
-    state = _pending[user_id]
-    fstate = state["fstate"]
-    advance_factor_cursor(fstate)
-    if factor_progress_done(fstate):
-        competitor = state["current"]
-        latest = get_latest_factors(competitor["id"]) or {}
-        merged = {key: latest.get(key, "") for key, _, _ in FACTOR_BLOCKS}
-        merged.update(serialized_blocks(fstate))
-        save_factors(competitor["id"], **merged)
-        del state["fstate"]
-        await message.reply_text("Записал.")
-        await _advance_to_next(message, user_id)
-        return
-    await _prompt_current_factor_field(message, state)
-
-
-async def on_monitoring_factor_field_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    user_id = str(query.from_user.id)
-    state = _pending.get(user_id)
-    if not state or state.get("step") != "factors_wizard":
-        await query.answer()
-        return
-    block_key, _, field = current_field(state["fstate"])
-    field_key, label, kind, options, _ = field
-    if kind != "buttons":
-        await query.answer()
-        return
-    index = int(query.data.split(":", 1)[1])
-    if index < 0 or index >= len(options):
-        await query.answer()
-        return
-    value = options[index]
-    await query.answer()
-    await query.edit_message_text(f"{label}: {value}")
-    record_answer(state["fstate"], block_key, field_key, value)
-    await _advance_factor_wizard(query.message, user_id)
+    await query.edit_message_text(f"✅ Факторы обновлены: {summary}")
+    await _advance_to_next(query.message, user_id)
 
 
 async def on_monitoring_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -415,33 +368,56 @@ async def on_monitoring_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
             text=text,
             created_by=int(user_id),
         )
-        state["step"] = "factors_prompt"
-        await update.effective_message.reply_text(
-            "Обновить блок факторов у этой точки?", reply_markup=_yesno_keyboard("monf_factors")
-        )
+        await _ask_factor_change_prompt(update.effective_message, state)
         return True
 
-    if step == "factors_wizard":
-        block_key, _, field = current_field(state["fstate"])
-        field_key, label, kind, options, _ = field
-        if kind == "buttons":
-            await update.effective_message.reply_text("Пожалуйста, выберите вариант кнопкой выше.")
-            return True
+    if step == "factors_ai_text":
+        competitor = state["current"]
+        latest = get_latest_factors(competitor["id"])
         try:
-            value = parse_field_value(field, text)
-        except ValueError:
-            await update.effective_message.reply_text("Не понял значение, попробуйте ещё раз:")
+            changes = propose_factor_changes(competitor["name"], latest, text)
+        except Exception:
+            await update.effective_message.reply_text("Не получилось обработать описание — пропускаю обновление факторов.")
+            await _advance_to_next(update.effective_message, user_id)
             return True
-        record_answer(state["fstate"], block_key, field_key, value)
-        await _advance_factor_wizard(update.effective_message, user_id)
+
+        if not changes:
+            await update.effective_message.reply_text(
+                "Не нашёл в описании конкретных изменений по факторам формирования — пропускаю."
+            )
+            await _advance_to_next(update.effective_message, user_id)
+            return True
+
+        state["proposed_factor_changes"] = changes
+        state["factor_change_text"] = text
+        state["step"] = "factors_ai_confirm"
+        lines = ["Предлагаю изменить:"]
+        for c in changes:
+            reason = f" ({c['reason']})" if c["reason"] else ""
+            lines.append(f"— {c['label']}: {c['old_value']} → {c['new_value']}{reason}")
+        lines.append("\nПодтвердить?")
+        await update.effective_message.reply_text(
+            "\n".join(lines), reply_markup=_yesno_keyboard("monf_factorconfirm")
+        )
         return True
 
     return False
 
 
+def _assignee_keyboard(market_id: int, managers: list[dict], requester_id: int) -> InlineKeyboardMarkup:
+    buttons = []
+    for m in managers:
+        if m["status"] != "active":
+            continue
+        label = "🙋 Я сам(а)" if m["telegram_user_id"] == requester_id else m["name"]
+        buttons.append([InlineKeyboardButton(label, callback_data=f"monf_assign:{market_id}:{m['telegram_user_id']}")])
+    return InlineKeyboardMarkup(buttons)
+
+
 async def send_monitoring_reminders(bot: Bot) -> None:
     """Ежедневный job (§6): по рынкам, у которых сегодня день мониторинга,
-    шлёт менеджерам задание со списком конкурентов и кнопкой запуска."""
+    шлёт Управляющему задание со списком конкурентов — он выбирает, кто
+    сегодня идёт на мониторинг (сам или кто-то из команды рынка)."""
     weekday = today().isoweekday()
     for market_id in list_markets_scheduled_for_weekday(weekday):
         market = get_market(market_id)
@@ -450,16 +426,50 @@ async def send_monitoring_reminders(bot: Bot) -> None:
         competitors = list_competitors(market_id)
         if not competitors:
             continue
+        managers = get_managers_for_market(market_id)
+        supervisors = [m for m in managers if m["status"] == "active" and m["position"] == "Управляющий"]
+        if not supervisors:
+            continue
         listing = "\n".join(f"— {_competitor_label(c)}" for c in competitors)
         text = (
             "📋 Задание: выполнить мониторинг конкурентов. По каждой точке посчитайте среднее число "
-            f"чеков в день и пришлите.\n\nРынок «{market['name']}»:\n{listing}"
+            f"чеков в день и пришлите.\n\nРынок «{market['name']}»:\n{listing}\n\nКто сегодня идёт на мониторинг?"
         )
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Начать мониторинг", callback_data=f"monf_go:{market_id}")]])
-        for manager in get_managers_for_market(market_id):
-            if manager["status"] != "active":
-                continue
+        for supervisor in supervisors:
+            keyboard = _assignee_keyboard(market_id, managers, supervisor["telegram_user_id"])
             try:
-                await bot.send_message(chat_id=manager["telegram_user_id"], text=text, reply_markup=keyboard)
+                await bot.send_message(chat_id=supervisor["telegram_user_id"], text=text, reply_markup=keyboard)
             except Exception:
                 pass
+
+
+async def on_monitoring_assign_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    requester = query.from_user
+    _, market_id_str, assignee_id_str = query.data.split(":", 2)
+    market_id, assignee_id = int(market_id_str), int(assignee_id_str)
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    await query.answer()
+
+    if assignee_id == requester.id:
+        await query.edit_message_text(f"Идёте сами на мониторинг рынка «{market['name']}».")
+        await _start_flow_for_market(query.message, str(requester.id), market)
+        return
+
+    assignee = get_manager(assignee_id)
+    name = assignee["name"] if assignee else "выбранный сотрудник"
+    await query.edit_message_text(f"Назначил(а) мониторинг рынка «{market['name']}» на {name}.")
+    try:
+        await context.bot.send_message(
+            chat_id=assignee_id,
+            text=(
+                f"📋 Вас назначили на мониторинг конкурентов сегодня.\n\n"
+                f"Рынок «{market['name']}» — нажмите, чтобы начать:"
+            ),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Начать мониторинг", callback_data=f"monf_go:{market_id}")]]),
+        )
+    except Exception:
+        pass
