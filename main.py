@@ -51,6 +51,7 @@ from bot.manager_admin import (
     on_reset_monitoring_command,
     on_reset_monitoring_confirm,
     on_reset_monitoring_market_choice,
+    sync_employee_commands,
 )
 from bot.market_schedule import (
     on_schedule_command,
@@ -95,6 +96,7 @@ from config.settings import (
     WEEKLY_REPORT_TIME,
 )
 from monitoring.db import init_schema as init_monitoring_schema
+from monitoring.managers import list_managers
 from tasks.db import init_schema as init_tasks_schema
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -142,26 +144,25 @@ _ROMAN_COMMANDS = [
     BotCommand("help", "Список команд"),
 ]
 
-_EMPLOYEE_COMMANDS = [
-    BotCommand("mytasks", "Мои задачи в работе"),
-    BotCommand("add_competitor", "Добавить конкурента на рынок"),
-    BotCommand("close_competitor", "Закрыть/открыть конкурента"),
-    BotCommand("schedule", "Настроить дни мониторинга рынка"),
-    BotCommand("monitoring", "Провести мониторинг конкурентов"),
-    BotCommand("dashboard_market", "Дашборд по рынку"),
-    BotCommand("regulations", "Регламенты работы с ботом"),
-]
+_ONBOARDING_COMMANDS = [BotCommand("start", "Пройти онбординг")]
 
 
 async def _set_bot_commands(app) -> None:
-    # Для всех по умолчанию — только кнопка «Мои задачи»
-    await app.bot.set_my_commands(_EMPLOYEE_COMMANDS, scope=BotCommandScopeDefault())
+    # По умолчанию — только /start, пока не пройден онбординг и владелец не
+    # подтвердил доступ (см. bot.manager_admin.sync_employee_commands —
+    # персональное меню появляется только после подтверждения).
+    await app.bot.set_my_commands(_ONBOARDING_COMMANDS, scope=BotCommandScopeDefault())
     # Для владельцев в личке — полный список
     for owner_id in OWNER_TELEGRAM_IDS:
         await app.bot.set_my_commands(
             _ROMAN_COMMANDS,
             scope=BotCommandScopeChat(chat_id=int(owner_id)),
         )
+    # Уже подтверждённым сотрудникам восстанавливаем их персональное меню —
+    # иначе после смены дефолтного списка на /start они бы его потеряли.
+    for manager in list_managers():
+        if manager["status"] == "active":
+            await sync_employee_commands(app.bot, manager["telegram_user_id"])
 
 
 def main() -> None:

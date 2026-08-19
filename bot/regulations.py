@@ -42,12 +42,19 @@ MONITORING_REGULATION = """📗 Регламент 2: мониторинг ко�
 Если что-то пропустили в мониторинге — я спрошу это же в следующий раз, ничего не потеряется."""
 
 
-def get_regulations(role: str | None = None) -> list[str]:
-    """Регламенты, которые выдаются после онбординга. role пока не влияет
-    на контент — все получают одно и то же, но сигнатура уже готова под
-    будущую персонализацию текста по должности (Управляющий/Менеджер/
-    Наставник/Маркетолог)."""
-    return [TASK_TRACKER_REGULATION, MONITORING_REGULATION]
+def get_regulations(role: str | None = None, blocks: list[str] | None = None) -> list[str]:
+    """Регламенты, которые выдаются после того, как владелец подтвердил
+    заявку и выдал блоки. role пока не влияет на контент — все получают
+    одно и то же внутри своего блока, но сигнатура уже готова под будущую
+    персонализацию текста по должности (Управляющий/Менеджер/Наставник/
+    Маркетолог). blocks=None — вернуть оба регламента (используется для
+    владельца, у которого нет записи в manager)."""
+    docs = []
+    if blocks is None or "tasks" in blocks:
+        docs.append(TASK_TRACKER_REGULATION)
+    if blocks is None or "monitoring" in blocks:
+        docs.append(MONITORING_REGULATION)
+    return docs
 
 
 async def _send_long_text(message, text: str, limit: int = 3500) -> None:
@@ -66,16 +73,18 @@ async def _send_long_text(message, text: str, limit: int = 3500) -> None:
         await message.reply_text(chunk)
 
 
-async def send_regulations(message, role: str | None = None) -> None:
-    for doc in get_regulations(role):
+async def send_regulations(message, role: str | None = None, blocks: list[str] | None = None) -> None:
+    for doc in get_regulations(role, blocks):
         await _send_long_text(message, doc)
 
 
 async def on_regulations_command(update, context) -> None:
     """/regulations — перечитать регламенты в любой момент (выдаются
-    автоматически один раз после онбординга, эта команда — просто повтор)."""
-    from monitoring.managers import get_manager
+    автоматически один раз после подтверждения владельцем, эта команда —
+    просто повтор, с учётом выданных блоков)."""
+    from monitoring.managers import get_manager, get_manager_blocks
 
     manager = get_manager(update.effective_user.id)
     role = manager["position"] if manager else None
-    await send_regulations(update.effective_message, role)
+    blocks = get_manager_blocks(update.effective_user.id) if manager else None
+    await send_regulations(update.effective_message, role, blocks)

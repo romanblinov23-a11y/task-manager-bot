@@ -7,7 +7,6 @@ from telegram.ext import ContextTypes
 
 from config.chats import get_chats_for_project, get_project_for_chat
 from config.settings import OWNER_TELEGRAM_IDS, ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
-from bot.regulations import send_regulations
 from monitoring.constants import MANAGER_POSITIONS
 from monitoring.managers import get_manager, is_owner, register_manager
 from monitoring.markets import get_market, list_markets
@@ -402,7 +401,6 @@ async def on_role_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "Как только подтвердят — станут доступны /schedule, /add_competitor и /monitoring."
     )
     await _notify_owners_of_pending(context, int(user_id), pending["real_name"], position, market_name)
-    await send_regulations(query.message, position)
     await _greet_after_onboarding(query.message, int(user_id))
 
 
