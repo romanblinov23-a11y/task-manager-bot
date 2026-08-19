@@ -10,7 +10,7 @@ from bot.competitors import (
     on_add_competitor_factors_choice,
     on_add_competitor_format_choice,
     on_add_competitor_market_choice,
-    on_add_competitor_own_offer,
+    on_add_competitor_own_first_choice,
     on_add_competitor_reading_choice,
 )
 from bot.confirmation import (
@@ -188,7 +188,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_add_competitor_format_choice, pattern=r"^addc_format:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_reading_choice, pattern=r"^addc_reading:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_factors_choice, pattern=r"^addc_factors:"))
-    app.add_handler(CallbackQueryHandler(on_add_competitor_own_offer, pattern=r"^addc_own:"))
+    app.add_handler(CallbackQueryHandler(on_add_competitor_own_first_choice, pattern=r"^addc_ownfirst:"))
     app.add_handler(CallbackQueryHandler(on_schedule_market_choice, pattern=r"^sched_market:"))
     app.add_handler(CallbackQueryHandler(on_schedule_day_toggle, pattern=r"^sched_day:"))
     app.add_handler(CallbackQueryHandler(on_schedule_done, pattern=r"^sched_done:"))

@@ -67,14 +67,30 @@ def _yesno_keyboard(prefix: str) -> InlineKeyboardMarkup:
     )
 
 
+def _own_first_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🏠 Сначала точку Surf", callback_data="addc_ownfirst:surf"),
+                InlineKeyboardButton("🏪 Сначала конкурента", callback_data="addc_ownfirst:competitor"),
+            ]
+        ]
+    )
+
+
 async def _start_competitor_flow(message, user_id: str, market: dict, *, is_own: bool = False) -> None:
     if not is_own and not get_own_competitor(market["id"]):
+        _pending[user_id] = {"step": "own_first_choice", "market_id": market["id"], "market_name": market["name"]}
         await message.reply_text(
             f"ℹ️ На рынке «{market['name']}» ещё не добавлена сама точка Surf «{market['our_point_name']}» — "
-            "без неё нельзя посчитать нашу долю рынка. Можно завести её сейчас или продолжить добавлять "
-            "конкурентов — в конце я ещё раз предложу добавить точку Surf, если вы её пропустите."
+            "без неё нельзя посчитать нашу долю рынка. Что добавляем сначала?",
+            reply_markup=_own_first_keyboard(),
         )
+        return
+    await _start_code_step(message, user_id, market, is_own=is_own)
 
+
+async def _start_code_step(message, user_id: str, market: dict, *, is_own: bool) -> None:
     suggested = next_code(market["id"])
     _pending[user_id] = {
         "step": "code",
@@ -88,6 +104,27 @@ async def _start_competitor_flow(message, user_id: str, market: dict, *, is_own:
     await message.reply_text(
         f"{prefix}Код конкурента (например «{suggested}») — можно использовать предложенный или ввести свой:"
     )
+
+
+async def on_add_competitor_own_first_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user_id = str(query.from_user.id)
+    state = _pending.get(user_id)
+    if not state or state.get("step") != "own_first_choice":
+        await query.answer()
+        return
+    choice = query.data.split(":", 1)[1]
+    market = get_market(state["market_id"])
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    await query.answer()
+    if choice == "surf":
+        await query.edit_message_text("Добавляем точку Surf.")
+        await _start_code_step(query.message, user_id, market, is_own=True)
+    else:
+        await query.edit_message_text("Добавляем конкурента (точку Surf можно будет завести следующим /add_competitor).")
+        await _start_code_step(query.message, user_id, market, is_own=False)
 
 
 async def on_add_competitor_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -125,7 +162,7 @@ async def on_add_competitor_market_choice(update: Update, context: ContextTypes.
     await _start_competitor_flow(query.message, user_id, market)
 
 
-async def _finish_and_maybe_offer_own(message, user_id: str) -> None:
+async def _finish_competitor(message, user_id: str) -> None:
     state = _pending.pop(user_id)
     competitor = create_competitor(
         market_id=state["market_id"],
@@ -143,15 +180,6 @@ async def _finish_and_maybe_offer_own(message, user_id: str) -> None:
 
     kind = "Точка Surf" if state["is_own"] else "Конкурент"
     await message.reply_text(f"✅ {kind} «{state['name']}» ({state['code']}) добавлен(а) на рынке «{state['market_name']}».")
-
-    if not state["is_own"] and not get_own_competitor(state["market_id"]):
-        market = get_market(state["market_id"])
-        _pending[user_id] = {"step": "own_offer", "market_id": state["market_id"], "market_name": state["market_name"]}
-        await message.reply_text(
-            f"Кстати, для рынка «{state['market_name']}» ещё не заведена сама точка Surf «{market['our_point_name']}» — "
-            "без неё нельзя посчитать нашу долю рынка. Добавить её сейчас?",
-            reply_markup=_yesno_keyboard("addc_own"),
-        )
 
 
 async def on_add_competitor_format_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -214,26 +242,7 @@ async def on_add_competitor_factors_choice(update: Update, context: ContextTypes
         await query.message.reply_text(f"{title}: опишите — {hint}.")
     else:
         await query.edit_message_text("Факторы — позже.")
-        await _finish_and_maybe_offer_own(query.message, user_id)
-
-
-async def on_add_competitor_own_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    user_id = str(query.from_user.id)
-    state = _pending.get(user_id)
-    if not state or state.get("step") != "own_offer":
-        await query.answer()
-        return
-    choice = query.data.split(":", 1)[1]
-    await query.answer()
-    if choice == "no":
-        del _pending[user_id]
-        await query.edit_message_text("Хорошо, добавите точку Surf позже через /add_competitor.")
-        return
-
-    market = get_market(state["market_id"])
-    await query.edit_message_text("Добавляем точку Surf.")
-    await _start_competitor_flow(query.message, user_id, market, is_own=True)
+        await _finish_competitor(query.message, user_id)
 
 
 async def on_add_competitor_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -298,7 +307,7 @@ async def on_add_competitor_reply(update: Update, context: ContextTypes.DEFAULT_
             await update.effective_message.reply_text(f"{next_title}: опишите — {next_hint}.")
         else:
             await update.effective_message.reply_text("Факторы записаны.")
-            await _finish_and_maybe_offer_own(update.effective_message, user_id)
+            await _finish_competitor(update.effective_message, user_id)
         return True
 
     return False
