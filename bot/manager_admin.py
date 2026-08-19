@@ -171,7 +171,7 @@ async def _check_supervisor_conflict(query, uid: int) -> bool:
         existing = get_market_supervisor(market["id"], exclude_telegram_user_id=uid)
         if existing:
             await query.answer(
-                f"На рынке «{market['name']}» уже есть Управляющий — {existing['name']}. "
+                f"На проекте «{market['name']}» (он же рынок для мониторинга) уже есть Управляющий — {existing['name']}. "
                 "Сначала смените его роль через /managers, потом назначайте нового.",
                 show_alert=True,
             )
@@ -202,7 +202,7 @@ async def _prompt_new_supervisor_schedule(bot, uid: int) -> None:
         return
     market = markets[0]
     messenger = _ChatMessenger(bot, uid)
-    await messenger.reply_text(f"Вы — Управляющий рынка «{market['name']}». Выберите дни недели для мониторинга конкурентов:")
+    await messenger.reply_text(f"Вы — Управляющий проекта «{market['name']}» (он же рынок для мониторинга). Выберите дни недели для мониторинга конкурентов:")
     await start_schedule_flow(messenger, str(uid), market)
 
 
@@ -317,7 +317,7 @@ async def on_manager_set_market(update: Update, context: ContextTypes.DEFAULT_TY
         existing = get_market_supervisor(market_id, exclude_telegram_user_id=uid)
         if existing:
             await query.answer(
-                f"На рынке «{market['name']}» уже есть Управляющий — {existing['name']}. "
+                f"На проекте «{market['name']}» (он же рынок для мониторинга) уже есть Управляющий — {existing['name']}. "
                 "Сначала смените его роль через /managers.",
                 show_alert=True,
             )

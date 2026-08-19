@@ -90,9 +90,10 @@ def is_market_editor(telegram_user_id: int) -> bool:
 
 
 def get_market_supervisor(market_id: int, exclude_telegram_user_id: int | None = None) -> dict | None:
-    """Активный Управляющий этого рынка, если есть (кроме исключённого
-    пользователя) — у рынка может быть только один Управляющий, используется
-    для проверки перед назначением этой роли."""
+    """Активный Управляющий этого рынка (он же проект — market 1:1 с
+    PROJECTS), если есть, кроме исключённого пользователя. У рынка/проекта
+    может быть только один Управляющий — используется для проверки перед
+    назначением этой роли."""
     for manager in get_managers_for_market(market_id):
         if manager["status"] != "active" or manager["position"] != "Управляющий":
             continue
