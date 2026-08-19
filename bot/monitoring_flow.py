@@ -1,10 +1,22 @@
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from bot.factor_wizard import field_keyboard, field_prompt_text
 from config.timeutil import parse_date, today
 from monitoring.calculations import compute_market_capacity, compute_share, is_sudden_change
 from monitoring.competitors import get_competitor, list_competitors
 from monitoring.constants import MONITORING_CYCLE_DAYS, OBSERVATION_CATEGORIES
+from monitoring.factor_schema import (
+    FACTOR_BLOCKS,
+    advance_factor_cursor,
+    current_field,
+    factor_progress_done,
+    factor_state_init,
+    is_first_field_of_block,
+    parse_field_value,
+    record_answer,
+    serialized_blocks,
+)
 from monitoring.factors import get_latest_factors, save_factors
 from monitoring.managers import get_managers_for_market, get_markets_for_manager, is_active_manager, is_owner
 from monitoring.markets import get_market, list_markets
@@ -14,14 +26,6 @@ from monitoring.schedule import list_markets_scheduled_for_weekday
 
 # user_id (str) -> состояние диалога /monitoring
 _pending: dict[str, dict] = {}
-
-_FACTOR_BLOCKS = [
-    ("product", "Продукт"),
-    ("atmosphere", "Атмосфера/интерьер"),
-    ("service", "Персонализация/сервис"),
-    ("brand_strength", "Сила бренда"),
-    ("labor_market", "Рынок труда"),
-]
 
 
 def _available_markets(user_id: int) -> list[dict]:
@@ -60,10 +64,10 @@ def _category_keyboard() -> InlineKeyboardMarkup:
 
 def _factor_block_keyboard() -> InlineKeyboardMarkup:
     buttons = []
-    for i in range(0, len(_FACTOR_BLOCKS), 2):
-        row = [InlineKeyboardButton(_FACTOR_BLOCKS[i][1], callback_data=f"monf_fblock:{i}")]
-        if i + 1 < len(_FACTOR_BLOCKS):
-            row.append(InlineKeyboardButton(_FACTOR_BLOCKS[i + 1][1], callback_data=f"monf_fblock:{i + 1}"))
+    for i in range(0, len(FACTOR_BLOCKS), 2):
+        row = [InlineKeyboardButton(FACTOR_BLOCKS[i][1], callback_data=f"monf_fblock:{i}")]
+        if i + 1 < len(FACTOR_BLOCKS):
+            row.append(InlineKeyboardButton(FACTOR_BLOCKS[i + 1][1], callback_data=f"monf_fblock:{i + 1}"))
         buttons.append(row)
     return InlineKeyboardMarkup(buttons)
 
@@ -304,15 +308,64 @@ async def on_monitoring_factor_block_choice(update: Update, context: ContextType
         await query.answer()
         return
     index = int(query.data.split(":", 1)[1])
-    if index < 0 or index >= len(_FACTOR_BLOCKS):
+    if index < 0 or index >= len(FACTOR_BLOCKS):
         await query.answer()
         return
-    field, title = _FACTOR_BLOCKS[index]
-    state["factor_field"] = field
-    state["step"] = "factors_block_text"
+    block_key, title, _ = FACTOR_BLOCKS[index]
+    state["step"] = "factors_wizard"
+    state["fstate"] = factor_state_init([block_key])
     await query.answer()
     await query.edit_message_text(f"Блок: {title}")
-    await query.message.reply_text(f"Опишите новое состояние блока «{title}»:")
+    await _prompt_current_factor_field(query.message, state)
+
+
+async def _prompt_current_factor_field(message, state: dict) -> None:
+    fstate = state["fstate"]
+    _, block_title, field = current_field(fstate)
+    await message.reply_text(
+        field_prompt_text(block_title, field, is_first_field_of_block(fstate)),
+        reply_markup=field_keyboard(field, "monf_ffield"),
+    )
+
+
+async def _advance_factor_wizard(message, user_id: str) -> None:
+    state = _pending[user_id]
+    fstate = state["fstate"]
+    advance_factor_cursor(fstate)
+    if factor_progress_done(fstate):
+        competitor = state["current"]
+        latest = get_latest_factors(competitor["id"]) or {}
+        merged = {key: latest.get(key, "") for key, _, _ in FACTOR_BLOCKS}
+        merged.update(serialized_blocks(fstate))
+        save_factors(competitor["id"], **merged)
+        del state["fstate"]
+        await message.reply_text("Записал.")
+        await _advance_to_next(message, user_id)
+        return
+    await _prompt_current_factor_field(message, state)
+
+
+async def on_monitoring_factor_field_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user_id = str(query.from_user.id)
+    state = _pending.get(user_id)
+    if not state or state.get("step") != "factors_wizard":
+        await query.answer()
+        return
+    block_key, _, field = current_field(state["fstate"])
+    field_key, label, kind, options, _ = field
+    if kind != "buttons":
+        await query.answer()
+        return
+    index = int(query.data.split(":", 1)[1])
+    if index < 0 or index >= len(options):
+        await query.answer()
+        return
+    value = options[index]
+    await query.answer()
+    await query.edit_message_text(f"{label}: {value}")
+    record_answer(state["fstate"], block_key, field_key, value)
+    await _advance_factor_wizard(query.message, user_id)
 
 
 async def on_monitoring_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -368,14 +421,19 @@ async def on_monitoring_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return True
 
-    if step == "factors_block_text":
-        competitor = state["current"]
-        latest = get_latest_factors(competitor["id"]) or {}
-        merged = {field: latest.get(field, "") for field, _ in _FACTOR_BLOCKS}
-        merged[state["factor_field"]] = text
-        save_factors(competitor["id"], **merged)
-        await update.effective_message.reply_text("Записал.")
-        await _advance_to_next(update.effective_message, user_id)
+    if step == "factors_wizard":
+        block_key, _, field = current_field(state["fstate"])
+        field_key, label, kind, options, _ = field
+        if kind == "buttons":
+            await update.effective_message.reply_text("Пожалуйста, выберите вариант кнопкой выше.")
+            return True
+        try:
+            value = parse_field_value(field, text)
+        except ValueError:
+            await update.effective_message.reply_text("Не понял значение, попробуйте ещё раз:")
+            return True
+        record_answer(state["fstate"], block_key, field_key, value)
+        await _advance_factor_wizard(update.effective_message, user_id)
         return True
 
     return False

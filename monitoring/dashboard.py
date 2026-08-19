@@ -5,6 +5,7 @@ from config.timeutil import today
 from monitoring.calculations import compute_market_capacity, compute_share, is_anomaly
 from monitoring.competitors import list_competitors
 from monitoring.constants import ANOMALY_WINDOW_READINGS, COMPETITOR_FORMATS, MONITORING_CYCLE_DAYS
+from monitoring.factor_schema import FACTOR_BLOCKS, render_block_lines
 from monitoring.factors import get_latest_factors
 from monitoring.managers import get_managers_for_market
 from monitoring.markets import get_market, list_markets
@@ -14,14 +15,6 @@ from monitoring.readings import get_last_reading_dates_by_creator, get_latest_re
 _OWN_COLOR = "#2E8B7A"
 _COMPETITOR_PALETTE = ["#E07A5F", "#3D5A80", "#F2CC8F", "#81B29A", "#9B5DE5", "#F4845F", "#577590", "#B56576"]
 _FORMAT_PALETTE = ["#3D5A80", "#E07A5F", "#81B29A"]
-
-_FACTOR_FIELDS = [
-    ("product", "Продукт"),
-    ("atmosphere", "Атмосфера/интерьер"),
-    ("service", "Персонализация/сервис"),
-    ("brand_strength", "Сила бренда"),
-    ("labor_market", "Рынок труда"),
-]
 
 _RECOMMENDATIONS = {
     ("competitor", "up"): "Резкий рост у конкурента — стоит посетить точку лично и проверить все факторы формирования (продукт, атмосферу, сервис, бренд, персонал).",
@@ -291,10 +284,15 @@ def _render_factors_profile(series: list[dict]) -> str:
         if not factors:
             cards.append(f'<div class="factor-card"><h3>{c["code"]} — {c["name"]}{own_tag}</h3><div class="factor-row">Факторы ещё не заполнены.</div></div>')
             continue
-        rows = "".join(
-            f'<div class="factor-row"><b>{label}:</b> {factors.get(field) or "—"}</div>' for field, label in _FACTOR_FIELDS
-        )
-        cards.append(f'<div class="factor-card"><h3>{c["code"]} — {c["name"]}{own_tag}</h3>{rows}</div>')
+        block_sections = []
+        for block_key, block_title, _ in FACTOR_BLOCKS:
+            lines = render_block_lines(block_key, factors.get(block_key))
+            if not lines:
+                continue
+            rows = "".join(f'<div class="factor-row"><b>{label}:</b> {value}</div>' for label, value in lines)
+            block_sections.append(f'<div class="factor-block-title">{block_title}</div>{rows}')
+        body = "".join(block_sections) or '<div class="factor-row">Факторы ещё не заполнены.</div>'
+        cards.append(f'<div class="factor-card"><h3>{c["code"]} — {c["name"]}{own_tag}</h3>{body}</div>')
     return "".join(cards)
 
 
@@ -409,6 +407,8 @@ _HTML_TEMPLATE = """<!doctype html>
   .obs-item .meta {{ color: #888; font-size: 12px; margin-bottom: 4px; }}
   .factor-card {{ background: #fff; border-radius: 12px; padding: 14px 18px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }}
   .factor-card h3 {{ margin: 0 0 8px; font-size: 15px; }}
+  .factor-block-title {{ font-size: 12px; font-weight: 600; text-transform: uppercase; color: #888; margin: 10px 0 2px; }}
+  .factor-block-title:first-of-type {{ margin-top: 0; }}
   .factor-row {{ font-size: 13px; margin: 3px 0; color: #333; }}
   .factor-row b {{ color: #555; }}
   .delta-up {{ color: #2E8B7A; }}

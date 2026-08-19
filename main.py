@@ -7,6 +7,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Mess
 from bot.chat_registration import on_register_project
 from bot.competitors import (
     on_add_competitor_command,
+    on_add_competitor_factor_field_choice,
     on_add_competitor_factors_choice,
     on_add_competitor_format_choice,
     on_add_competitor_market_choice,
@@ -55,6 +56,7 @@ from bot.monitoring_flow import (
     on_monitoring_command,
     on_monitoring_date_choice,
     on_monitoring_factor_block_choice,
+    on_monitoring_factor_field_choice,
     on_monitoring_factors_choice,
     on_monitoring_market_choice,
     on_monitoring_obs_choice,
@@ -206,6 +208,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_add_competitor_format_choice, pattern=r"^addc_format:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_reading_choice, pattern=r"^addc_reading:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_factors_choice, pattern=r"^addc_factors:"))
+    app.add_handler(CallbackQueryHandler(on_add_competitor_factor_field_choice, pattern=r"^addc_factor:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_own_first_choice, pattern=r"^addc_ownfirst:"))
     app.add_handler(CallbackQueryHandler(on_close_market_choice, pattern=r"^cc_market:"))
     app.add_handler(CallbackQueryHandler(on_close_competitor_pick, pattern=r"^cc_pick:"))
@@ -221,6 +224,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_monitoring_category_choice, pattern=r"^monf_cat:"))
     app.add_handler(CallbackQueryHandler(on_monitoring_factors_choice, pattern=r"^monf_factors:"))
     app.add_handler(CallbackQueryHandler(on_monitoring_factor_block_choice, pattern=r"^monf_fblock:"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_factor_field_choice, pattern=r"^monf_ffield:"))
     app.add_handler(CallbackQueryHandler(on_dashboard_market_choice, pattern=r"^dash_market:"))
     app.add_handler(CallbackQueryHandler(on_dashboard_aggregate_choice, pattern=r"^dash_all$"))
 

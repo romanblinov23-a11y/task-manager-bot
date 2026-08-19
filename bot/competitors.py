@@ -11,7 +11,18 @@ from monitoring.competitors import (
     next_code,
     reopen_competitor,
 )
+from bot.factor_wizard import field_keyboard, field_prompt_text
 from monitoring.constants import COMPETITOR_FORMATS
+from monitoring.factor_schema import (
+    advance_factor_cursor,
+    current_field,
+    factor_progress_done,
+    factor_state_init,
+    is_first_field_of_block,
+    parse_field_value,
+    record_answer,
+    serialized_blocks,
+)
 from monitoring.factors import save_factors
 from monitoring.managers import get_markets_for_manager, is_active_manager, is_owner
 from monitoring.markets import get_market, list_markets
@@ -19,41 +30,6 @@ from monitoring.readings import record_reading
 
 # user_id (str) -> состояние диалога добавления конкурента
 _pending: dict[str, dict] = {}
-
-_FACTOR_STEPS = [
-    (
-        "factors_product",
-        "product",
-        "Продукт",
-        "смесь/зерно, молоко, оборудование, эспрессо-смесь, Decaf, STM, кофейная линейка, "
-        "авторские напитки, еда, средний чек",
-    ),
-    (
-        "factors_atmosphere",
-        "atmosphere",
-        "Атмосфера/интерьер",
-        "посадочные места, мебель, музыка, свет, декор, фасад, указатели, санузел, чистота",
-    ),
-    (
-        "factors_service",
-        "service",
-        "Персонализация/сервис",
-        "встреча и прощание с гостем, коммуникация при заказе, опрятность, форма, слаженность "
-        "команды, работа с отзывами, рейтинг",
-    ),
-    (
-        "factors_brand",
-        "brand_strength",
-        "Сила бренда",
-        "запросы в Яндекс.Wordstat за месяц, узнаваемость, соцсети",
-    ),
-    (
-        "factors_labor",
-        "labor_market",
-        "Рынок труда",
-        "ставка в час, премии, обучение, смены, питание, штрафы, форма за свой счёт, условия труда, карьерный рост",
-    ),
-]
 
 
 def _available_markets(user_id: int) -> list[dict]:
@@ -245,13 +221,58 @@ async def on_add_competitor_factors_choice(update: Update, context: ContextTypes
     choice = query.data.split(":", 1)[1]
     await query.answer()
     if choice == "now":
-        state["step"] = _FACTOR_STEPS[0][0]
+        state["step"] = "factors_wizard"
+        state["fstate"] = factor_state_init()
         await query.edit_message_text("Заполняем факторы формирования.")
-        _, _, title, hint = _FACTOR_STEPS[0]
-        await query.message.reply_text(f"{title}: опишите — {hint}.")
+        await _prompt_current_factor_field(query.message, state)
     else:
         await query.edit_message_text("Факторы — позже.")
         await _finish_competitor(query.message, user_id)
+
+
+async def _prompt_current_factor_field(message, state: dict) -> None:
+    fstate = state["fstate"]
+    _, block_title, field = current_field(fstate)
+    await message.reply_text(
+        field_prompt_text(block_title, field, is_first_field_of_block(fstate)),
+        reply_markup=field_keyboard(field, "addc_factor"),
+    )
+
+
+async def _advance_factor_wizard(message, user_id: str) -> None:
+    state = _pending[user_id]
+    fstate = state["fstate"]
+    advance_factor_cursor(fstate)
+    if factor_progress_done(fstate):
+        state["factors"] = serialized_blocks(fstate)
+        del state["fstate"]
+        await message.reply_text("Факторы записаны.")
+        await _finish_competitor(message, user_id)
+        return
+    await _prompt_current_factor_field(message, state)
+
+
+async def on_add_competitor_factor_field_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user_id = str(query.from_user.id)
+    state = _pending.get(user_id)
+    if not state or state.get("step") != "factors_wizard":
+        await query.answer()
+        return
+    block_key, _, field = current_field(state["fstate"])
+    field_key, label, kind, options, _ = field
+    if kind != "buttons":
+        await query.answer()
+        return
+    index = int(query.data.split(":", 1)[1])
+    if index < 0 or index >= len(options):
+        await query.answer()
+        return
+    value = options[index]
+    await query.answer()
+    await query.edit_message_text(f"{label}: {value}")
+    record_answer(state["fstate"], block_key, field_key, value)
+    await _advance_factor_wizard(query.message, user_id)
 
 
 async def on_add_competitor_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -306,17 +327,19 @@ async def on_add_competitor_reply(update: Update, context: ContextTypes.DEFAULT_
         )
         return True
 
-    for i, (step_name, field, title, hint) in enumerate(_FACTOR_STEPS):
-        if step != step_name:
-            continue
-        state["factors"][field] = text
-        if i + 1 < len(_FACTOR_STEPS):
-            next_step_name, _, next_title, next_hint = _FACTOR_STEPS[i + 1]
-            state["step"] = next_step_name
-            await update.effective_message.reply_text(f"{next_title}: опишите — {next_hint}.")
-        else:
-            await update.effective_message.reply_text("Факторы записаны.")
-            await _finish_competitor(update.effective_message, user_id)
+    if step == "factors_wizard":
+        block_key, _, field = current_field(state["fstate"])
+        field_key, label, kind, options, _ = field
+        if kind == "buttons":
+            await update.effective_message.reply_text("Пожалуйста, выберите вариант кнопкой выше.")
+            return True
+        try:
+            value = parse_field_value(field, text)
+        except ValueError:
+            await update.effective_message.reply_text("Не понял значение, попробуйте ещё раз:")
+            return True
+        record_answer(state["fstate"], block_key, field_key, value)
+        await _advance_factor_wizard(update.effective_message, user_id)
         return True
 
     return False
