@@ -2,6 +2,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from bot.market_schedule import start_schedule_flow
+from bot.onboarding import list_legacy_employees, request_registration
 from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS, MANAGER_POSITIONS
 from monitoring.db import reset_market_players
 from monitoring.managers import (
@@ -44,13 +45,17 @@ class _ChatMessenger:
         return await self._bot.send_message(chat_id=self._chat_id, text=text, reply_markup=reply_markup)
 
 
-def _manager_list_keyboard(managers: list[dict]) -> InlineKeyboardMarkup:
+def _manager_list_keyboard(managers: list[dict], legacy: list[dict]) -> InlineKeyboardMarkup:
     buttons = []
     for m in managers:
         icon = {"pending": "🕓", "active": "✅", "removed": "🚫"}[m["status"]]
         markets_label = ", ".join(mk["name"] for mk in m["markets"]) or "—"
         buttons.append(
             [InlineKeyboardButton(f"{icon} {m['name']} — {markets_label}", callback_data=f"mgr_select:{m['telegram_user_id']}")]
+        )
+    for e in legacy:
+        buttons.append(
+            [InlineKeyboardButton(f"📨 {e['name']} — не выбрал(а) проект", callback_data=f"mgr_nudge:{e['user_id']}")]
         )
     return InlineKeyboardMarkup(buttons)
 
@@ -121,12 +126,23 @@ def _blocks_keyboard(uid: int, selected: set[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def _list_view_text(legacy: list[dict]) -> str:
+    text = "Сотрудники бота:"
+    if legacy:
+        text += (
+            "\n\n📨 — уже писали боту раньше, но не выбрали проект и роль для мониторинга. "
+            "Нажмите на имя, чтобы прислать им этот вопрос сейчас."
+        )
+    return text
+
+
 async def _reply_manager_list(message) -> None:
     managers = list_managers()
-    if not managers:
-        await message.reply_text("Пока нет ни одного менеджера.")
+    legacy = list_legacy_employees()
+    if not managers and not legacy:
+        await message.reply_text("Пока нет ни одного сотрудника.")
         return
-    await message.reply_text("Менеджеры модуля мониторинга:", reply_markup=_manager_list_keyboard(managers))
+    await message.reply_text(_list_view_text(legacy), reply_markup=_manager_list_keyboard(managers, legacy))
 
 
 async def on_managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -142,10 +158,26 @@ async def on_manager_back_to_list(update: Update, context: ContextTypes.DEFAULT_
         return
     await query.answer()
     managers = list_managers()
-    if not managers:
-        await query.edit_message_text("Пока нет ни одного менеджера.")
+    legacy = list_legacy_employees()
+    if not managers and not legacy:
+        await query.edit_message_text("Пока нет ни одного сотрудника.")
         return
-    await query.edit_message_text("Менеджеры модуля мониторинга:", reply_markup=_manager_list_keyboard(managers))
+    await query.edit_message_text(_list_view_text(legacy), reply_markup=_manager_list_keyboard(managers, legacy))
+
+
+async def on_manager_nudge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    user_id = int(query.data.split(":", 1)[1])
+    await query.answer("Отправляю…")
+    try:
+        await request_registration(context.bot, user_id)
+    except Exception:
+        await query.edit_message_text("Не получилось отправить — возможно, сотрудник ещё ни разу не писал боту в личку.")
+        return
+    await query.edit_message_text(f"📨 Отправил(а) вопрос про проект и роль сотруднику (ID {user_id}).")
 
 
 async def on_manager_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

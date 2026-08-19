@@ -223,13 +223,55 @@ def _role_choice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
-async def _start_project_selection(update: Update, user_id: str) -> None:
+async def _start_project_selection(message, user_id: str, *, intro: str | None = None) -> None:
     markets = list_markets()
     _pending_onboarding[user_id] = {"step": "project"}
-    await update.effective_message.reply_text(
-        "Привет! Я Енисей — бот-менеджер задач и мониторинга конкурентов.\n\n"
-        "В каком проекте ты трудишься?",
-        reply_markup=_project_choice_keyboard(markets),
+    text = intro or "Привет! Я Енисей — бот-менеджер задач и мониторинга конкурентов.\n\n"
+    await message.reply_text(f"{text}В каком проекте ты трудишься?", reply_markup=_project_choice_keyboard(markets))
+
+
+class _DirectMessenger:
+    """Адаптер с интерфейсом .reply_text для отправки НОВОГО сообщения по
+    chat_id — нужен, чтобы владелец мог инициировать выбор проекта/роли у
+    сотрудника, который уже писал боту раньше (есть в known_users.json), но
+    так и не завершил регистрацию в модуле мониторинга (см. request_registration)."""
+
+    def __init__(self, bot, chat_id: int):
+        self._bot = bot
+        self._chat_id = chat_id
+
+    async def reply_text(self, text, reply_markup=None):
+        return await self._bot.send_message(chat_id=self._chat_id, text=text, reply_markup=reply_markup)
+
+
+def list_legacy_employees() -> list[dict]:
+    """Сотрудники, которые уже онбордились для задач (известны боту, есть в
+    known_users.json/список /onboarded), но не завершили выбор проекта/роли
+    для модуля мониторинга — у них нет записи в manager. Владелец видит их
+    в /managers и может донбордить вручную, не дожидаясь, пока они сами
+    снова напишут боту."""
+    result = []
+    for user_id, info in _known_users.items():
+        if not info.get("onboarded"):
+            continue
+        uid = int(user_id)
+        if is_owner(uid) or get_manager(uid) is not None:
+            continue
+        name = info.get("real_name") or info.get("full_name") or (f"@{info['username']}" if info.get("username") else user_id)
+        result.append({"user_id": uid, "name": name})
+    return result
+
+
+async def request_registration(bot, user_id: int) -> None:
+    """Владелец просит сотрудника, который уже писал боту, но не выбрал
+    проект/роль для мониторинга, — пройти этот шаг сейчас. Тот же диалог,
+    что и при обычном /start, только запущен владельцем, а не самим
+    сотрудником при первом сообщении."""
+    messenger = _DirectMessenger(bot, user_id)
+    await _start_project_selection(
+        messenger,
+        str(user_id),
+        intro="Владелец просит выбрать проект и роль для модуля мониторинга конкурентов.\n\n",
     )
 
 
@@ -257,7 +299,7 @@ async def on_employee_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     _save()
 
     if not is_owner(user.id) and get_manager(user.id) is None:
-        await _start_project_selection(update, user_id)
+        await _start_project_selection(update.effective_message, user_id)
         return
 
     if already_contacted:
