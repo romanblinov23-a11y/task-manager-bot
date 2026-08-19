@@ -46,6 +46,7 @@ from bot.manager_admin import (
     on_manager_set_role,
     on_manager_toggle_block,
     on_managers_command,
+    on_regulation_ack,
     on_reset_monitoring_cancel,
     on_reset_monitoring_command,
     on_reset_monitoring_confirm,
@@ -216,6 +217,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_manager_toggle_block, pattern=r"^mgr_toggleblock:"))
     app.add_handler(CallbackQueryHandler(on_manager_blocks_done, pattern=r"^mgr_blocksdone:"))
     app.add_handler(CallbackQueryHandler(on_manager_blocks, pattern=r"^mgr_blocks:"))
+    app.add_handler(CallbackQueryHandler(on_regulation_ack, pattern=r"^reg_ack:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_market_choice, pattern=r"^reset_monitoring_market:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_confirm, pattern=r"^reset_monitoring_confirm:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_cancel, pattern=r"^reset_monitoring_cancel$"))

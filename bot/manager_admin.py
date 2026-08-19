@@ -3,11 +3,13 @@ from telegram.ext import ContextTypes
 
 from bot.market_schedule import start_schedule_flow
 from bot.onboarding import list_legacy_employees, remove_legacy_employee, request_registration
-from bot.regulations import send_regulations
+from bot.regulations import send_next_regulation
 from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS, BLOCK_MONITORING, BLOCK_TASKS, MANAGER_POSITIONS
 from monitoring.db import reset_market_players
 from monitoring.managers import (
+    acknowledge_block,
     approve_manager,
+    get_acknowledged_blocks,
     get_manager,
     get_manager_blocks,
     get_market_supervisor,
@@ -49,8 +51,11 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
     """Меню команд в Telegram, положенное этому сотруднику — зависит от
     выданных блоков и (для блока «Мониторинг») от должности: командами
     редактирования списка конкурентов и расписания пользуется только
-    Управляющий, остальные роли ходят только на сам мониторинг."""
-    blocks = set(get_manager_blocks(manager["telegram_user_id"]))
+    Управляющий, остальные роли ходят только на сам мониторинг. Блок
+    открывается в меню только после того, как выдан владельцем И сотрудник
+    подтвердил, что прочитал его регламент (см. send_next_regulation)."""
+    uid = manager["telegram_user_id"]
+    blocks = set(get_manager_blocks(uid)) & set(get_acknowledged_blocks(uid))
     commands: list[BotCommand] = []
     if BLOCK_TASKS in blocks:
         commands.append(BotCommand("mytasks", "Мои задачи в работе"))
@@ -293,11 +298,12 @@ async def _check_supervisor_conflict(query, uid: int) -> bool:
 
 
 async def _notify_approved(bot, manager: dict, uid: int) -> None:
-    cmd_names = [c.command for c in _commands_for_manager(manager) if c.command != "regulations"]
-    if cmd_names:
-        text = f"✅ Владелец подтвердил твою заявку! Теперь доступны: {', '.join(f'/{c}' for c in cmd_names)}."
+    blocks = get_manager_blocks(uid)
+    if blocks:
+        labels = ", ".join(BLOCK_LABELS[b] for b in blocks)
+        text = f"✅ Рома подтвердил твою заявку! Теперь тебе доступны опции: {labels}."
     else:
-        text = "✅ Владелец подтвердил твою заявку, но пока без выданных блоков — уточни у владельца."
+        text = "✅ Рома подтвердил твою заявку, но пока без выданных блоков — уточни у Ромы."
     try:
         await bot.send_message(chat_id=uid, text=text)
     except Exception:
@@ -504,9 +510,9 @@ async def on_manager_blocks_done(update: Update, context: ContextTypes.DEFAULT_T
         await query.answer("Сессия неактуальна", show_alert=True)
         return
 
-    selected = pending["selected"]
+    selected = [b for b in AVAILABLE_BLOCKS if b in pending["selected"]]
     mode = pending.get("mode", "edit")
-    set_manager_blocks(uid, list(selected))
+    set_manager_blocks(uid, selected)
     del _pending_blocks[owner_id]
 
     if mode == "approve":
@@ -517,9 +523,7 @@ async def on_manager_blocks_done(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(f"✅ Доступ подтверждён для {manager['name']} (ID {uid}). Блоки: {blocks_label}.")
         await _notify_approved(context.bot, manager, uid)
         await sync_employee_commands(context.bot, uid)
-        await send_regulations(_ChatMessenger(context.bot, uid), manager["position"], list(selected))
-        if manager["position"] == "Управляющий":
-            await _prompt_new_supervisor_schedule(context.bot, uid)
+        await send_next_regulation(_ChatMessenger(context.bot, uid), uid)
         return
 
     manager = get_manager(uid)
@@ -533,6 +537,38 @@ async def on_manager_blocks_done(update: Update, context: ContextTypes.DEFAULT_T
         await context.bot.send_message(chat_id=uid, text=f"Владелец изменил доступные тебе блоки бота: {blocks_label}.")
     except Exception:
         pass
+    await send_next_regulation(_ChatMessenger(context.bot, uid), uid)
+
+
+async def on_regulation_ack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Сотрудник подтвердил, что прочитал регламент своего блока (кнопка
+    под текстом регламента). Открывает команды этого блока в личном меню и
+    отправляет следующий регламент, если выдан ещё один блок, который пока
+    не подтверждён. Когда подтверждать больше нечего — сообщает, что всё
+    открыто, и (для Управляющего с блоком «Мониторинг») сразу предлагает
+    выбрать дни недели для мониторинга."""
+    query = update.callback_query
+    uid = query.from_user.id
+    block_key = query.data.split(":", 1)[1]
+    await query.answer("Принято")
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    acknowledge_block(uid, block_key)
+    await sync_employee_commands(context.bot, uid)
+    sent_next = await send_next_regulation(_ChatMessenger(context.bot, uid), uid)
+    if sent_next:
+        return
+
+    await context.bot.send_message(
+        chat_id=uid,
+        text="Готово! Теперь тебе доступны все команды по твоим блокам — посмотри меню (кнопка ☰ рядом с полем ввода).",
+    )
+    manager = get_manager(uid)
+    if manager and manager["position"] == "Управляющий" and BLOCK_MONITORING in get_manager_blocks(uid):
+        await _prompt_new_supervisor_schedule(context.bot, uid)
 
 
 async def on_manager_remove(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

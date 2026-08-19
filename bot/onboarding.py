@@ -395,11 +395,10 @@ async def on_role_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     del _pending_onboarding[user_id]
 
     await query.message.reply_text(
-        f"Заявка отправлена владельцу: «{position}» на проекте «{market_name}». "
-        "Как только подтвердят — станут доступны /schedule, /add_competitor и /monitoring."
+        f"Заявка отправлена Роме: «{position}» на проекте «{market_name}». "
+        "Как только подтвердит — расскажу подробнее, как я работаю."
     )
     await _notify_owners_of_pending(context, int(user_id), pending["real_name"], position, market_name)
-    await _greet_after_onboarding(query.message, int(user_id))
 
 
 def _approval_keyboard(telegram_user_id: int) -> InlineKeyboardMarkup:

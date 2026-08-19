@@ -114,6 +114,7 @@ def init_schema() -> None:
         conn.executescript(_SCHEMA)
         _ensure_column(conn, "manager", "status", "status TEXT NOT NULL DEFAULT 'pending'")
         _ensure_column(conn, "manager", "blocks", "blocks TEXT NOT NULL DEFAULT 'tasks,monitoring'")
+        _ensure_column(conn, "manager", "blocks_ack", "blocks_ack TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "competitor", "closed_at", "closed_at TEXT")
         # Разовая чистка: remove_manager раньше делал soft-delete (status =
         # 'removed'), теперь удаляет запись полностью — доступ возвращается

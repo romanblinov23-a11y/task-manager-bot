@@ -66,6 +66,30 @@ def set_manager_blocks(telegram_user_id: int, blocks: list[str]) -> None:
         conn.close()
 
 
+def get_acknowledged_blocks(telegram_user_id: int) -> list[str]:
+    """Блоки, регламент которых сотрудник подтвердил прочитанным (кнопка
+    «✅ Ознакомился»). Команды блока открываются в личном меню только после
+    этого — см. bot.manager_admin.sync_employee_commands."""
+    manager = get_manager(telegram_user_id)
+    if not manager or not manager.get("blocks_ack"):
+        return []
+    return [b for b in manager["blocks_ack"].split(",") if b]
+
+
+def acknowledge_block(telegram_user_id: int, block_key: str) -> None:
+    acked = set(get_acknowledged_blocks(telegram_user_id))
+    acked.add(block_key)
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE manager SET blocks_ack = ? WHERE telegram_user_id = ?",
+            (",".join(sorted(acked)), telegram_user_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _has_monitoring_block(manager: dict | None) -> bool:
     if not manager or manager["status"] != "active":
         return False
