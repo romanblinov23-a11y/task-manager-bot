@@ -2,7 +2,9 @@ import pytest
 
 from monitoring.markets import create_market, list_market_names
 from tasks.comments import append_comment
+from tasks.db import get_connection
 from tasks.log import append_log_entry, get_log_entries
+from tasks.retention import purge_closed_tasks
 from tasks.tasks import create_task, generate_task_id, get_all_tasks, get_task, update_task
 
 
@@ -85,3 +87,39 @@ def test_append_comment_rejects_unknown_author():
     tid = create_task(project, source="chat", task_text="Задача", category="Сервис")
     with pytest.raises(ValueError):
         append_comment(project, tid, "неизвестно кто", "текст")
+
+
+def test_purge_closed_tasks_removes_only_tasks_closed_before_this_month():
+    project = _project()
+
+    old_tid = create_task(project, source="chat", task_text="Старая закрытая", category="Сервис")
+    update_task(project, old_tid, status="выполнена", closed_at="2000-01-15 10:00:00")
+    append_log_entry(project, old_tid, "завершение", old_value="в работе", new_value="выполнена")
+    append_comment(project, old_tid, "сотрудник", "готово")
+
+    current_tid = create_task(project, source="chat", task_text="Свежая закрытая", category="Сервис")
+    update_task(project, current_tid, status="выполнена", closed_at="2999-01-15 10:00:00")
+
+    open_tid = create_task(project, source="chat", task_text="Ещё в работе", category="Сервис")
+    update_task(project, open_tid, status="в работе")
+
+    never_closed_tid = create_task(project, source="chat", task_text="Без closed_at", category="Сервис")
+    update_task(project, never_closed_tid, status="выполнена")
+
+    purged = purge_closed_tasks()
+
+    assert purged == 1
+    assert get_task(project, old_tid) is None
+    assert get_log_entries(project) == []
+    conn = get_connection()
+    try:
+        comments = conn.execute(
+            "SELECT * FROM task_comment WHERE project = ? AND task_id = ?", (project, old_tid)
+        ).fetchall()
+    finally:
+        conn.close()
+    assert comments == []
+
+    assert get_task(project, current_tid) is not None
+    assert get_task(project, open_tid) is not None
+    assert get_task(project, never_closed_tid) is not None

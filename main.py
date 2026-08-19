@@ -26,6 +26,7 @@ from bot.confirmation import (
 )
 from bot.daily_report import send_daily_report
 from bot.dashboard_cmd import on_dashboard_aggregate_choice, on_dashboard_command, on_dashboard_market_choice
+from bot.dashboard_tasks_cmd import on_dashboard_tasks_command
 from bot.handlers import on_group_message
 from bot.manager_admin import (
     on_add_project_command,
@@ -104,6 +105,7 @@ from config.settings import (
 from monitoring.db import init_schema as init_monitoring_schema
 from monitoring.managers import list_managers
 from tasks.db import init_schema as init_tasks_schema
+from tasks.retention import purge_closed_tasks
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -126,6 +128,12 @@ async def _monitoring_reminder_job(context) -> None:
     await send_monitoring_reminders(context.bot)
 
 
+async def _task_retention_job(context) -> None:
+    purged = purge_closed_tasks()
+    if purged:
+        logging.getLogger(__name__).info("Retention: удалено %d задач, закрытых до этого месяца", purged)
+
+
 def _parse_time(value: str, tzinfo) -> dt_time:
     hour, minute = (int(part) for part in value.split(":"))
     return dt_time(hour=hour, minute=minute, tzinfo=tzinfo)
@@ -136,6 +144,7 @@ _ROMAN_COMMANDS = [
     BotCommand("employee", "Задачи сотрудника по всем проектам"),
     BotCommand("stuck", "Подвисшие задачи"),
     BotCommand("needhelp", "Задачи, где нужна помощь"),
+    BotCommand("dashboard_tasks", "Полная аналитика по задачам (все проекты)"),
     BotCommand("weekly", "Еженедельная аналитика по запросу"),
     BotCommand("managers", "Сотрудники бота и привязки чатов"),
     BotCommand("add_project", "Добавить проект/точку Surf"),
@@ -194,6 +203,7 @@ def main() -> None:
     app.add_handler(CommandHandler("schedule", on_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("monitoring", on_monitoring_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("dashboard_market", on_dashboard_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("dashboard_tasks", on_dashboard_tasks_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, on_group_message))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))
@@ -264,6 +274,7 @@ def main() -> None:
         days=(_WEEKDAYS[WEEKLY_REPORT_DAY.lower()],),
     )
     app.job_queue.run_daily(_monitoring_reminder_job, time=_parse_time(MONITORING_REMINDER_TIME, TZ))
+    app.job_queue.run_daily(_task_retention_job, time=_parse_time(STATUS_CHECK_TIME, TZ))
 
     app.run_polling()
 
