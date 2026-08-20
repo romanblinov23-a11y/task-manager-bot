@@ -357,6 +357,11 @@ async def on_monitoring_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not parsed:
             await update.effective_message.reply_text("Не понял дату. Попробуйте, например, 15.08.2026:")
             return True
+        if parsed > today().isoformat():
+            await update.effective_message.reply_text(
+                f"Дата снятия «{text}» — в будущем, так не может быть. Введите дату ещё раз:"
+            )
+            return True
         await _save_reading_and_continue(update.effective_message, user_id, parsed)
         return True
 

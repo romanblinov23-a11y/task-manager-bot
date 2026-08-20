@@ -1,5 +1,7 @@
 import json
 from datetime import date, datetime, timedelta
+from functools import lru_cache
+from pathlib import Path
 
 from config.projects import CATEGORIES, STATUSES
 from config.settings import STALE_DAYS
@@ -7,6 +9,17 @@ from config.timeutil import fmt_date, now_naive, today
 from monitoring.markets import list_market_names
 from tasks.log import get_log_entries
 from tasks.tasks import get_all_tasks
+
+_CHART_JS_PATH = Path(__file__).resolve().parent.parent / "monitoring" / "vendor" / "chart.umd.min.js"
+
+
+@lru_cache(maxsize=1)
+def _chart_js() -> str:
+    """Chart.js встроен прямо в файл дашборда, а не грузится с CDN — иначе
+    графики выходят пустыми при открытии .html в системном просмотрщике
+    Telegram на мобильных (сторонние скрипты там часто блокируются)."""
+    return _CHART_JS_PATH.read_text()
+
 
 _STATUS_COLORS = {"новая": "#3D5A80", "в работе": "#F2CC8F", "выполнена": "#81B29A", "просрочена": "#E07A5F"}
 _CATEGORY_PALETTE = ["#3D5A80", "#E07A5F", "#81B29A", "#F2CC8F", "#9B5DE5", "#F4845F", "#577590", "#B56576"]
@@ -312,7 +325,9 @@ _HTML_TEMPLATE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <title>{title}</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script>
+{chart_js}
+</script>
 <style>
   body {{ font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 24px; background: #f7f7f8; color: #1a1a1a; }}
   h1 {{ font-size: 22px; margin-bottom: 4px; }}
@@ -389,7 +404,7 @@ _HTML_TEMPLATE = """<!doctype html>
 <h2>10. Задачи, где нужна помощь</h2>
 {needs_help_html}
 
-<div class="cdn-note">Графики интерактивны (наведите курсор на точки) — для их отображения нужен доступ в интернет (библиотека графиков подгружается с CDN).</div>
+<div class="cdn-note">Графики интерактивны — наведите курсор на точки.</div>
 
 <script>
 const statusLabels = {status_labels};
@@ -496,6 +511,7 @@ def generate_tasks_dashboard() -> tuple[str, str]:
     throughput_labels, throughput_created, throughput_closed = _weekly_throughput(tasks)
 
     html = _HTML_TEMPLATE.format(
+        chart_js=_chart_js(),
         title="Дашборд трекера задач",
         subtitle=f"Все проекты. Обновлено {today().isoformat()}.",
         open_count=open_count,

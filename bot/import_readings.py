@@ -1,7 +1,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from config.timeutil import parse_date
+from config.timeutil import parse_date, today
 from monitoring.competitors import list_competitors
 from monitoring.managers import is_owner
 from monitoring.markets import get_market, list_markets
@@ -101,6 +101,9 @@ def _parse_paste(text: str, competitors: list[dict]) -> tuple[list[dict], list[d
         reading_at = parse_date(date_raw)
         if not reading_at:
             errors.append({"line_no": i, "raw": line, "reason": f"не смог понять дату «{date_raw}»"})
+            continue
+        if reading_at > today().isoformat():
+            errors.append({"line_no": i, "raw": line, "reason": f"дата «{date_raw}» в будущем — проверьте год"})
             continue
 
         try:

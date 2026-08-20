@@ -1,5 +1,7 @@
 import json
 from datetime import date, timedelta
+from functools import lru_cache
+from pathlib import Path
 
 from config.timeutil import today
 from monitoring.calculations import compute_market_capacity, compute_share, is_anomaly
@@ -11,6 +13,18 @@ from monitoring.managers import get_managers_for_market
 from monitoring.markets import get_market, list_markets
 from monitoring.observations import get_observations
 from monitoring.readings import get_last_reading_dates_by_creator, get_latest_reading, get_readings
+
+_CHART_JS_PATH = Path(__file__).resolve().parent / "vendor" / "chart.umd.min.js"
+
+
+@lru_cache(maxsize=1)
+def _chart_js() -> str:
+    """Chart.js встроен прямо в файл дашборда, а не грузится с CDN — при
+    открытии .html-документа в Telegram (особенно на мобильных, через
+    системный просмотрщик) сторонние скрипты часто блокируются, и графики
+    на CDN-версии выходили пустыми."""
+    return _CHART_JS_PATH.read_text()
+
 
 _OWN_COLOR = "#C1622D"
 _COMPETITOR_PALETTE = ["#A97155", "#6B8E4E", "#D4A24C", "#8C6E54", "#C97B63", "#7A9E7E", "#B0846A", "#9C8265"]
@@ -462,7 +476,12 @@ def _render_freshness_section(rows: list[dict], ok_count: int, total: int) -> st
         c = r["competitor"]
         badge = '<span class="badge overdue">просрочено</span>' if r["overdue"] else '<span class="badge ok">в порядке</span>'
         last = r["last_date"] or "нет данных"
-        days = f'{r["days_since"]} дн. назад' if r["days_since"] is not None else "—"
+        if r["days_since"] is None:
+            days = "—"
+        elif r["days_since"] < 0:
+            days = "⚠️ дата в будущем"
+        else:
+            days = f'{r["days_since"]} дн. назад'
         body.append(f"<tr><td>{c['code']} — {c['name']}</td><td>{last}</td><td>{days}</td><td>{badge}</td></tr>")
     table = (
         "<table><thead><tr><th>Точка</th><th>Последнее снятие</th><th>Давность</th><th>Статус</th></tr></thead>"
@@ -608,7 +627,9 @@ _HTML_TEMPLATE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <title>{title}</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script>
+{chart_js}
+</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@500;600;700&family=PT+Sans:wght@400;700&display=swap">
 <style>
 {base_style}
@@ -697,7 +718,7 @@ _HTML_TEMPLATE = """<!doctype html>
 <h2>Сводная таблица</h2>
 {summary_html}
 
-<div class="cdn-note">Графики интерактивны (наведите курсор на точки) — для их отображения нужен доступ в интернет (библиотека графиков подгружается с CDN).</div>
+<div class="cdn-note">Графики интерактивны — наведите курсор на точки.</div>
 
 <script>
 const rawLabels = {raw_labels};
@@ -849,6 +870,7 @@ def generate_market_dashboard(market_id: int) -> tuple[str, str]:
 
     html = _HTML_TEMPLATE.format(
         base_style=_BASE_STYLE_CSS,
+        chart_js=_chart_js(),
         title=f"Дашборд рынка «{market['name']}»",
         subtitle=f"Наша точка: {market['our_point_name']}. Обновлено {today().isoformat()}.",
         insufficient_data_banner=insufficient_banner,
@@ -968,7 +990,9 @@ _AGGREGATE_TEMPLATE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <title>Дашборд — все рынки</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script>
+{chart_js}
+</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@500;600;700&family=PT+Sans:wght@400;700&display=swap">
 <style>
 {base_style}
@@ -988,7 +1012,7 @@ _AGGREGATE_TEMPLATE = """<!doctype html>
 <h2>Сравнение рынков</h2>
 {table_html}
 
-<div class="cdn-note">Для детальной аналитики (тренды, аномалии, причины, факторы, наблюдения) по конкретному рынку используйте /dashboard_market и выберите рынок. Для отображения графиков нужен доступ в интернет.</div>
+<div class="cdn-note">Для детальной аналитики (тренды, аномалии, причины, факторы, наблюдения) по конкретному рынку используйте /dashboard_market и выберите рынок.</div>
 
 <script>
 const marketLabels = {market_labels};
@@ -1026,6 +1050,7 @@ def generate_aggregate_dashboard() -> tuple[str, str]:
 
     html = _AGGREGATE_TEMPLATE.format(
         base_style=_BASE_STYLE_CSS,
+        chart_js=_chart_js(),
         today=today().isoformat(),
         hero_cards=_render_aggregate_hero(rows),
         table_html=_render_aggregate_table(rows),
