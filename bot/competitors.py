@@ -10,6 +10,7 @@ from monitoring.competitors import (
     list_competitors,
     next_code,
     reopen_competitor,
+    set_own_competitor,
 )
 from bot.factor_wizard import field_keyboard, field_prompt_text
 from monitoring.constants import COMPETITOR_FORMATS
@@ -63,6 +64,12 @@ def _own_first_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def _own_name_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("✅ Да, это она", callback_data="addc_ownnameconfirm:yes"), InlineKeyboardButton("✏️ Ввести заново", callback_data="addc_ownnameconfirm:retry")]]
+    )
+
+
 async def _start_competitor_flow(message, user_id: str, market: dict, *, is_own: bool = False) -> None:
     if not is_own and not get_own_competitor(market["id"]):
         _pending[user_id] = {"step": "own_first_choice", "market_id": market["id"], "market_name": market["name"]}
@@ -110,6 +117,24 @@ async def on_add_competitor_own_first_choice(update: Update, context: ContextTyp
     else:
         await query.edit_message_text("Добавляем конкурента (точку Surf можно будет завести следующим /add_competitor).")
         await _start_code_step(query.message, user_id, market, is_own=False)
+
+
+async def on_add_competitor_own_name_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user_id = str(query.from_user.id)
+    state = _pending.get(user_id)
+    if not state or state.get("step") != "own_name_confirm":
+        await query.answer()
+        return
+    choice = query.data.split(":", 1)[1]
+    await query.answer()
+    if choice == "retry":
+        state["step"] = "name"
+        await query.edit_message_text("Хорошо, введите название точки Surf ещё раз:")
+        return
+    state["step"] = "address"
+    await query.edit_message_text(f"Точка Surf: «{state['name']}».")
+    await query.message.reply_text("Адрес:")
 
 
 async def on_add_competitor_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -302,6 +327,18 @@ async def on_add_competitor_reply(update: Update, context: ContextTypes.DEFAULT_
             await update.effective_message.reply_text("Название не может быть пустым. Введите ещё раз:")
             return True
         state["name"] = text
+        if state["is_own"]:
+            market = get_market(state["market_id"])
+            expected = market["our_point_name"] if market else ""
+            state["step"] = "own_name_confirm"
+            hint = ""
+            if expected and expected.strip().lower() != text.strip().lower():
+                hint = f"\n⚠️ На рынке ожидалась точка «{expected}», а введено «{text}» — точно она же?"
+            await update.effective_message.reply_text(
+                f"Подтвердите: это НАША точка Surf — «{text}».{hint}",
+                reply_markup=_own_name_confirm_keyboard(),
+            )
+            return True
         state["step"] = "address"
         await update.effective_message.reply_text("Адрес:")
         return True
@@ -453,3 +490,105 @@ async def on_close_competitor_confirm(update: Update, context: ContextTypes.DEFA
         await query.edit_message_text(f"🟢 «{competitor['name']}» ({competitor['code']}) снова активен(на).")
     else:
         await query.edit_message_text("Отменено.")
+
+
+def _own_point_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"ownpt_market:{m['id']}")] for m in markets])
+
+
+def _own_point_pick_keyboard(competitors: list[dict]) -> InlineKeyboardMarkup:
+    buttons = []
+    for c in competitors:
+        icon = "⭐" if c["is_own"] else "▫️"
+        label = f"{icon} {c['code']} — {c['name']}" + (" (закрыт)" if c["status"] == "closed" else "")
+        buttons.append([InlineKeyboardButton(label, callback_data=f"ownpt_pick:{c['id']}")])
+    return InlineKeyboardMarkup(buttons)
+
+
+async def _show_own_point_picker(message, market: dict) -> None:
+    competitors = list_competitors(market["id"], include_closed=True)
+    if not competitors:
+        await message.reply_text(f"На рынке «{market['name']}» ещё нет ни одной точки.")
+        return
+    await message.reply_text(
+        f"Рынок «{market['name']}». Какая точка на самом деле наша (Surf)? ⭐ — отмечена как наша сейчас.",
+        reply_markup=_own_point_pick_keyboard(competitors),
+    )
+
+
+async def on_set_own_point_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/set_own_point — исправить, если флаг «наша точка» случайно достался
+    не той точке во время /add_competitor (не было способа поправить это,
+    кроме прямого доступа к базе)."""
+    user = update.effective_user
+    if not is_market_editor(user.id):
+        await update.effective_message.reply_text("Список конкурентов может менять только владелец или Управляющий.")
+        return
+
+    markets = _available_markets(user.id)
+    if not markets:
+        await update.effective_message.reply_text("Нет доступных рынков — сначала пройдите онбординг через /start.")
+        return
+
+    if len(markets) == 1:
+        await _show_own_point_picker(update.effective_message, markets[0])
+        return
+
+    await update.effective_message.reply_text(
+        "По какому рынку?", reply_markup=_own_point_market_pick_keyboard(markets)
+    )
+
+
+async def on_set_own_point_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(f"Рынок: {market['name']}")
+    await _show_own_point_picker(query.message, market)
+
+
+async def on_set_own_point_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    competitor_id = int(query.data.split(":", 1)[1])
+    competitor = get_competitor(competitor_id)
+    if not competitor:
+        await query.answer("Не найден", show_alert=True)
+        return
+    if competitor["is_own"]:
+        await query.answer("Уже отмечена как наша точка", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(
+        f"Сделать «{competitor['name']}» ({competitor['code']}) нашей точкой Surf? Текущая точка (если была) "
+        "потеряет этот статус — история снятий и наблюдений всех точек не тронется.",
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("✅ Да, это наша точка", callback_data=f"ownpt_confirm:{competitor_id}"),
+                    InlineKeyboardButton("Отмена", callback_data="ownpt_cancel"),
+                ]
+            ]
+        ),
+    )
+
+
+async def on_set_own_point_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    competitor_id = int(query.data.split(":", 1)[1])
+    competitor = get_competitor(competitor_id)
+    if not competitor:
+        await query.answer("Не найден", show_alert=True)
+        return
+    await query.answer("Готово")
+    set_own_competitor(competitor["market_id"], competitor_id)
+    await query.edit_message_text(f"⭐ «{competitor['name']}» ({competitor['code']}) теперь отмечена как наша точка Surf.")
+
+
+async def on_set_own_point_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Отменено.")

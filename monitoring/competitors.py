@@ -96,3 +96,18 @@ def reopen_competitor(competitor_id: int) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def set_own_competitor(market_id: int, competitor_id: int) -> None:
+    """Переназначает, какая точка на рынке — наша (Surf): снимает флаг
+    is_own со всех точек рынка и ставит его на выбранную. Единственный
+    способ исправить ситуацию, если во время /add_competitor флаг случайно
+    достался не той точке — раньше это можно было поправить только прямым
+    запросом к базе (см. /set_own_point)."""
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE competitor SET is_own = 0 WHERE market_id = ?", (market_id,))
+        conn.execute("UPDATE competitor SET is_own = 1 WHERE id = ? AND market_id = ?", (competitor_id, market_id))
+        conn.commit()
+    finally:
+        conn.close()

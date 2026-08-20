@@ -12,11 +12,17 @@ from bot.competitors import (
     on_add_competitor_format_choice,
     on_add_competitor_market_choice,
     on_add_competitor_own_first_choice,
+    on_add_competitor_own_name_confirm,
     on_add_competitor_reading_choice,
     on_close_competitor_command,
     on_close_competitor_confirm,
     on_close_competitor_pick,
     on_close_market_choice,
+    on_set_own_point_cancel,
+    on_set_own_point_command,
+    on_set_own_point_confirm,
+    on_set_own_point_market_choice,
+    on_set_own_point_pick,
 )
 from bot.confirmation import (
     on_confirmation_callback,
@@ -157,6 +163,7 @@ _ROMAN_COMMANDS = [
     BotCommand("import_readings", "Импорт исторических снятий по рынку"),
     BotCommand("add_competitor", "Добавить конкурента на рынок"),
     BotCommand("close_competitor", "Закрыть/открыть конкурента"),
+    BotCommand("set_own_point", "Исправить, какая точка на рынке наша"),
     BotCommand("schedule", "Настроить дни мониторинга рынка"),
     BotCommand("monitoring", "Провести мониторинг конкурентов"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
@@ -207,6 +214,7 @@ def main() -> None:
     app.add_handler(CommandHandler("import_readings", on_import_readings_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("add_competitor", on_add_competitor_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("close_competitor", on_close_competitor_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("set_own_point", on_set_own_point_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("schedule", on_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("monitoring", on_monitoring_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("dashboard_market", on_dashboard_command, filters=filters.ChatType.PRIVATE))
@@ -258,9 +266,14 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_add_competitor_factors_choice, pattern=r"^addc_factors:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_factor_field_choice, pattern=r"^addc_factor:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_own_first_choice, pattern=r"^addc_ownfirst:"))
+    app.add_handler(CallbackQueryHandler(on_add_competitor_own_name_confirm, pattern=r"^addc_ownnameconfirm:"))
     app.add_handler(CallbackQueryHandler(on_close_market_choice, pattern=r"^cc_market:"))
     app.add_handler(CallbackQueryHandler(on_close_competitor_pick, pattern=r"^cc_pick:"))
     app.add_handler(CallbackQueryHandler(on_close_competitor_confirm, pattern=r"^cc_confirm:"))
+    app.add_handler(CallbackQueryHandler(on_set_own_point_market_choice, pattern=r"^ownpt_market:"))
+    app.add_handler(CallbackQueryHandler(on_set_own_point_pick, pattern=r"^ownpt_pick:"))
+    app.add_handler(CallbackQueryHandler(on_set_own_point_confirm, pattern=r"^ownpt_confirm:"))
+    app.add_handler(CallbackQueryHandler(on_set_own_point_cancel, pattern=r"^ownpt_cancel$"))
     app.add_handler(CallbackQueryHandler(on_schedule_market_choice, pattern=r"^sched_market:"))
     app.add_handler(CallbackQueryHandler(on_schedule_day_toggle, pattern=r"^sched_day:"))
     app.add_handler(CallbackQueryHandler(on_schedule_done, pattern=r"^sched_done:"))
