@@ -15,12 +15,15 @@ from config.projects import CATEGORIES
 from config.settings import ROMAN_TELEGRAM_ID
 from config.timeutil import fmt_date, parse_date
 from tasks.comments import append_comment
-from tasks.tasks import create_task
+from tasks.tasks import create_task, update_task
 
 # confirmation_id -> {"task": dict, "project": str, "source": str, ...}
 _pending: dict[str, dict] = {}
 # user_id -> (confirmation_id, field) — ожидаем текстовый ввод конкретного поля
 _awaiting_field_edit: dict[int, tuple[str, str]] = {}
+# telegram_id исполнителя -> {"project":, "task_id":} — ждём срок для только
+# что созданной задачи без дедлайна (см. _ask_assignee_for_deadline)
+_awaiting_deadline: dict[int, dict] = {}
 
 
 def _assignee_onboarding_info(assignee: str, project: str | None, buffer_hints: dict) -> str:
@@ -261,10 +264,67 @@ async def _confirm_task(query, confirmation_id: str, entry: dict) -> None:
 
     _pending.pop(confirmation_id, None)
     await query.edit_message_text(_build_card_text(entry) + f"\n\n✅ Добавлено как {task_id}.")
-    await query.message.reply_text(f"✅ Задача {task_id} добавлена в таблицу «{project}».")
+
+    reply_note = f"✅ Задача {task_id} добавлена в таблицу «{project}»."
+    if not task.get("deadline") and not telegram_id:
+        reply_note += (
+            " ⚠️ Без срока и без известного исполнителя — спросить срок будет не у кого, "
+            "проставьте вручную, иначе цикл проверки статусов её не подхватит."
+        )
+    await query.message.reply_text(reply_note)
 
     if telegram_id:
-        await _notify_assignee(query.get_bot(), telegram_id, project, task)
+        if task.get("deadline"):
+            await _notify_assignee(query.get_bot(), telegram_id, project, task)
+        else:
+            await _ask_assignee_for_deadline(query.get_bot(), telegram_id, project, task_id, task["task_text"])
+
+
+async def _ask_assignee_for_deadline(bot: Bot, telegram_id: int, project: str, task_id: str, task_text: str) -> None:
+    """Задача создана без срока — без него цикл проверки статусов
+    (bot/status_cycle.py: _is_due) никогда её не подхватит, поэтому вместо
+    обычного уведомления сразу спрашиваем срок у исполнителя."""
+    _awaiting_deadline[telegram_id] = {"project": project, "task_id": task_id}
+    await bot.send_message(
+        chat_id=telegram_id,
+        text=(
+            f"📌 Тебе назначена новая задача:\n«{task_text}»\n\n"
+            f"Проект: {project}\n\n"
+            "Срок не указан — когда нужно сделать? Ответь датой (например, 15.09.2026 или «через неделю»)."
+        ),
+    )
+
+
+async def on_deadline_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Ловит ответ исполнителя на вопрос о сроке для задачи, созданной без
+    дедлайна (см. _ask_assignee_for_deadline). Возвращает True, если
+    сообщение обработано — по конвенции остальных claim-хендлеров
+    в on_private_text."""
+    user_id = update.effective_user.id
+    state = _awaiting_deadline.get(user_id)
+    if not state:
+        return False
+
+    text = update.effective_message.text.strip() if update.effective_message.text else ""
+    iso = parse_date(text)
+    if not iso:
+        await update.effective_message.reply_text(
+            f"Не понял дату «{text}». Попробуйте в формате ДД.ММ.ГГГГ или «через неделю»."
+        )
+        return True
+
+    del _awaiting_deadline[user_id]
+    project, task_id = state["project"], state["task_id"]
+    update_task(project, task_id, deadline_original=iso, deadline_current=iso)
+    await update.effective_message.reply_text(f"Записал срок: {fmt_date(iso)}. Буду напоминать, когда подойдёт время.")
+    try:
+        await context.bot.send_message(
+            chat_id=ROMAN_TELEGRAM_ID,
+            text=f"📅 {get_display_name(user_id)} указал(а) срок для {task_id} («{project}»): {fmt_date(iso)}.",
+        )
+    except Exception:
+        pass
+    return True
 
 
 async def _notify_assignee(bot: Bot, telegram_id: int, project: str, task: dict) -> None:

@@ -2,7 +2,7 @@ from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from bot.competitors import on_add_competitor_reply
-from bot.confirmation import on_edit_reply, send_confirmation_cards
+from bot.confirmation import on_deadline_reply, on_edit_reply, send_confirmation_cards
 from bot.import_readings import on_import_readings_reply
 from bot.manager_admin import on_manager_admin_reply
 from bot.monitoring_flow import on_monitoring_reply
@@ -51,6 +51,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     включая Романа — он тоже может быть исполнителем задачи, и его ответ
     на статус-вопрос не должен попасть в обработку как новая задача."""
     if await on_employee_reply(update, context):
+        return
+
+    if await on_deadline_reply(update, context):
         return
 
     if await on_manager_admin_reply(update, context):
@@ -152,6 +155,7 @@ async def on_project_selected(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     task = pending.pop(0)
     source = task.pop("_source", "manual")
+    task["project_unclear"] = False
     await query.edit_message_text(f"Проект: {project}")
     await send_confirmation_cards(context.bot, [task], project=project, source=source)
 
