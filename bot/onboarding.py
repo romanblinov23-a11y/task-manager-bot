@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 from config.chats import get_chats_for_project, get_project_for_chat
 from config.settings import OWNER_TELEGRAM_IDS, ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
 from monitoring.constants import MANAGER_POSITIONS
-from monitoring.managers import get_manager, is_owner, register_manager
+from monitoring.managers import get_manager, is_owner, list_managers, register_manager
 from monitoring.markets import get_market, list_markets
 from tasks.tasks import get_all_tasks, update_task
 
@@ -78,13 +78,39 @@ def _name_matches(candidate: str, user: dict) -> bool:
     return False
 
 
+def _manager_candidates_for_project(project: str, assignee_name: str) -> list[dict]:
+    """Активные менеджеры этого проекта (модуль мониторинга), чьё имя
+    совпадает с assignee_name — сотрудники, которые онбордились личным
+    диалогом с ботом (/start → проект → имя → роль → подтверждение
+    владельцем), никогда не попадают в _seen_in_chats (та запись пишется
+    только при сообщении в привязанной группе), поэтому find_homonyms без
+    этого источника их не находит, даже будучи полностью подтверждённым
+    менеджером с блоком «Задачи»."""
+    candidates = []
+    for manager in list_managers():
+        if manager["status"] != "active":
+            continue
+        if not any(m["name"] == project for m in manager["markets"]):
+            continue
+        uid = manager["telegram_user_id"]
+        synthetic_user = {"real_name": manager["name"], "username": get_username(uid) or ""}
+        if _name_matches(assignee_name, synthetic_user):
+            candidates.append(
+                {"user_id": uid, "full_name": manager["name"], "username": synthetic_user["username"]}
+            )
+    return candidates
+
+
 def find_homonyms(project: str, assignee_name: str) -> list[dict]:
-    """Все онбордившиеся сотрудники, видимые в чатах этого проекта, чьё имя
-    совпадает с assignee_name. Если их больше одного — коллизия одинаковых
-    имён, которую нельзя разрешать автоматически (см. обсуждение раздела 9.1
-    в чате с Романом 2026-06-29)."""
+    """Все сотрудники этого проекта, чьё имя совпадает с assignee_name —
+    из двух источников: кто писал в привязанных группах (_seen_in_chats) и
+    активные менеджеры модуля мониторинга, привязанные к этому проекту
+    (см. _manager_candidates_for_project). Если кандидатов больше одного —
+    коллизия одинаковых имён, которую нельзя разрешать автоматически (см.
+    обсуждение раздела 9.1 в чате с Романом 2026-06-29)."""
     project_chats = set(get_chats_for_project(project))
     candidates = []
+    seen_ids: set[int] = set()
     for user_id, chats in _seen_in_chats.items():
         if not project_chats.intersection(chats):
             continue
@@ -99,6 +125,13 @@ def find_homonyms(project: str, assignee_name: str) -> list[dict]:
                     "username": user.get("username") or "",
                 }
             )
+            seen_ids.add(int(user_id))
+
+    for candidate in _manager_candidates_for_project(project, assignee_name):
+        if candidate["user_id"] not in seen_ids:
+            candidates.append(candidate)
+            seen_ids.add(candidate["user_id"])
+
     return candidates
 
 
@@ -136,8 +169,19 @@ def _try_match_and_backfill(user_id: int) -> list[tuple[str, str]]:
 
 def find_telegram_id_for_assignee(project: str, assignee_name: str) -> int | None:
     """Используется при создании новой задачи, чтобы сразу проставить
-    assignee_telegram_id, если сотрудник уже онбордился ранее."""
-    return _resolved.get(f"{project}|{_normalize(assignee_name)}")
+    assignee_telegram_id, если сотрудник уже онбордился ранее. _resolved
+    заполняется только для тех, кого видели в привязанной группе — если
+    там пусто, дополнительно проверяем активных менеджеров проекта
+    (см. _manager_candidates_for_project) и резолвим, только если
+    кандидат ровно один — при коллизии имён вызывающий код (find_homonyms)
+    должен был перехватить это раньше и спросить владельца явно."""
+    resolved = _resolved.get(f"{project}|{_normalize(assignee_name)}")
+    if resolved:
+        return resolved
+    candidates = _manager_candidates_for_project(project, assignee_name)
+    if len(candidates) == 1:
+        return candidates[0]["user_id"]
+    return None
 
 
 def is_onboarded(user_id: int) -> bool:
