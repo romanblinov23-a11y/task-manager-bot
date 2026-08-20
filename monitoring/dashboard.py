@@ -635,27 +635,32 @@ _HTML_TEMPLATE = """<!doctype html>
   <div class="chart-wrap"><canvas id="shareNowChart"></canvas></div>
 </div>
 
-<h2><span class="fig">Figure 04</span>Доля рынка во времени</h2>
-<div class="period-toggle">
-  <button class="toggle-btn" data-period="1m">Месяц</button>
-  <button class="toggle-btn" data-period="3m">3 месяца</button>
-  <button class="toggle-btn active" data-period="all">Всё время</button>
-</div>
-<div class="chart-wrap"><canvas id="shareTrendChart"></canvas></div>
-
 <div class="grid-2">
+  <div>
+    <h2><span class="fig">Figure 04</span>Доля рынка во времени</h2>
+    <div class="period-toggle">
+      <button class="toggle-btn" data-period="1m">Месяц</button>
+      <button class="toggle-btn" data-period="3m">3 месяца</button>
+      <button class="toggle-btn active" data-period="all">Всё время</button>
+    </div>
+    <div class="chart-wrap"><canvas id="shareTrendChart"></canvas></div>
+  </div>
   <div>
     <h2>Распределение по формату</h2>
     {format_html}
   </div>
+</div>
+
+<div class="grid-2">
   <div>
     <h2>Рейтинг точек</h2>
     {ranking_html}
   </div>
+  <div>
+    <h2>Явные изменения, возможные причины и рекомендации</h2>
+    {anomalies_html}
+  </div>
 </div>
-
-<h2>Явные изменения, возможные причины и рекомендации</h2>
-{anomalies_html}
 
 <h2>Профили конкурентов (факторы формирования)</h2>
 {factors_html}
