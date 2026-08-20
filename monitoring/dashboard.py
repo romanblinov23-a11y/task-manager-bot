@@ -184,7 +184,7 @@ def _dataset_for(series_item: dict, timeline: list[dict], color: str) -> dict:
 
 def _raw_dataset_for(series_item: dict, timeline: list[dict], color: str) -> dict:
     """Ряд сырого показателя (чек/день, без нормировки в %) конкурента по
-    датам timeline — для Figure 01, хронологии всех точек рынка разом."""
+    датам timeline — для Раздела 1, хронологии всех точек рынка разом."""
     competitor = series_item["competitor"]
     data = []
     for point in timeline:
@@ -626,17 +626,17 @@ _HTML_TEMPLATE = """<!doctype html>
 
 <div class="grid-2">
   <div>
-    <h2><span class="fig">Figure 01</span>Хронология показателей всех точек рынка</h2>
+    <h2><span class="fig">Раздел 1</span>Хронология показателей всех точек рынка</h2>
     <div class="chart-wrap"><canvas id="rawTimelineChart"></canvas></div>
   </div>
   <div>
-    <h2><span class="fig">Figure 02</span>Точка Surf — сводка периода</h2>
+    <h2><span class="fig">Раздел 2</span>Точка Surf — сводка периода</h2>
     <div class="narrative">{own_narrative}</div>
     {own_summary_html}
   </div>
 </div>
 
-<h2><span class="fig">Figure 03</span>Ёмкость рынка и доля сейчас</h2>
+<h2><span class="fig">Раздел 3</span>Ёмкость рынка и доля сейчас</h2>
 <div class="grid-2">
   <div class="chart-wrap"><canvas id="capacityChart"></canvas></div>
   <div class="chart-wrap"><canvas id="shareNowChart"></canvas></div>
@@ -644,7 +644,7 @@ _HTML_TEMPLATE = """<!doctype html>
 
 <div class="grid-2">
   <div>
-    <h2><span class="fig">Figure 04</span>Доля рынка во времени</h2>
+    <h2><span class="fig">Раздел 4</span>Доля рынка во времени</h2>
     <div class="period-toggle">
       <button class="toggle-btn" data-period="1m">Месяц</button>
       <button class="toggle-btn" data-period="3m">3 месяца</button>
