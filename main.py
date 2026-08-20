@@ -90,13 +90,12 @@ from bot.onboarding import on_force_onboard, on_help, on_project_choice, on_role
 from bot.private import on_private_document, on_private_text, on_project_selected
 from bot.regulations import on_regulations_command
 from bot.queries import (
-    on_employee_command,
     on_mytasks_command,
     on_needhelp_command,
-    on_status_command,
     on_stuck_command,
 )
 from bot.status_cycle import on_status_button, run_status_check
+from bot.task_manage import on_employee_command, on_status_command, on_task_manage_callback
 from bot.weekly_report import on_weekly_command, send_weekly_report
 from config.settings import (
     DAILY_REPORT_TIME,
@@ -276,6 +275,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_monitoring_factor_confirm, pattern=r"^monf_factorconfirm:"))
     app.add_handler(CallbackQueryHandler(on_dashboard_market_choice, pattern=r"^dash_market:"))
     app.add_handler(CallbackQueryHandler(on_dashboard_aggregate_choice, pattern=r"^dash_all$"))
+    app.add_handler(CallbackQueryHandler(on_task_manage_callback, pattern=r"^tmg:"))
 
     app.job_queue.run_daily(_status_check_job, time=_parse_time(STATUS_CHECK_TIME, TZ))
     app.job_queue.run_daily(_daily_report_job, time=_parse_time(DAILY_REPORT_TIME, TZ))

@@ -15,64 +15,12 @@ def _is_roman(update: Update) -> bool:
     return str(update.effective_user.id) == str(ROMAN_TELEGRAM_ID)
 
 
-def _task_line(task: dict, *, show_project: str | None = None) -> str:
+def task_line(task: dict, *, show_project: str | None = None) -> str:
     project_part = f"[{show_project}] " if show_project else ""
     deadline = fmt_date(task.get("deadline_current"))
     help_mark = " 🆘" if task.get("needs_help") == "да" else ""
     assignee = task.get("assignee") or "—"
     return f"{project_part}{task['task_id']} «{task['task_text']}» — {task.get('status')}, срок {deadline}, исполнитель: {assignee}{help_mark}"
-
-
-async def on_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/status <проект> — открытые задачи проекта прямо сейчас."""
-    if not _is_roman(update):
-        return
-
-    projects = list_market_names()
-    if not context.args:
-        await update.effective_message.reply_text(
-            "Укажите проект: /status <название>\nДоступные: " + ", ".join(projects)
-        )
-        return
-
-    project = " ".join(context.args)
-    if project not in projects:
-        await update.effective_message.reply_text(f"Неизвестный проект «{project}». Доступные: " + ", ".join(projects))
-        return
-
-    tasks = [t for t in get_all_tasks(project) if t.get("status") != "выполнена"]
-    if not tasks:
-        await update.effective_message.reply_text(f"В проекте «{project}» нет открытых задач.")
-        return
-
-    lines = [f"📋 Открытые задачи — {project}"] + [_task_line(t) for t in tasks]
-    await update.effective_message.reply_text("\n".join(lines))
-
-
-async def on_employee_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/employee <имя> — все задачи сотрудника по всем проектам."""
-    if not _is_roman(update):
-        return
-
-    if not context.args:
-        await update.effective_message.reply_text("Укажите имя: /employee <имя>")
-        return
-
-    raw_name = " ".join(context.args)
-    name_norm = raw_name.strip().lower()
-
-    found = []
-    for project in list_market_names():
-        for task in get_all_tasks(project):
-            if (task.get("assignee") or "").strip().lower() == name_norm:
-                found.append((project, task))
-
-    if not found:
-        await update.effective_message.reply_text(f"Не нашёл задач на «{raw_name}».")
-        return
-
-    lines = [f"📋 Задачи — {raw_name}"] + [_task_line(t, show_project=p) for p, t in found]
-    await update.effective_message.reply_text("\n".join(lines))
 
 
 def _count_transfers(project: str) -> dict[str, int]:
@@ -114,7 +62,7 @@ async def on_stuck_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 reasons.append(f"{stale_days} дн. без обновления")
 
             if reasons:
-                lines.append(f"{_task_line(task, show_project=project)} ({', '.join(reasons)})")
+                lines.append(f"{task_line(task, show_project=project)} ({', '.join(reasons)})")
                 found_any = True
 
     if not found_any:
@@ -133,7 +81,7 @@ async def on_needhelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     for project in list_market_names():
         for task in get_all_tasks(project):
             if task.get("needs_help") == "да" and task.get("status") != "выполнена":
-                lines.append(_task_line(task, show_project=project))
+                lines.append(task_line(task, show_project=project))
                 found_any = True
 
     if not found_any:

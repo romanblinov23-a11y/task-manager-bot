@@ -8,6 +8,7 @@ from bot.manager_admin import on_manager_admin_reply
 from bot.monitoring_flow import on_monitoring_reply
 from bot.onboarding import on_employee_message
 from bot.status_cycle import on_employee_reply
+from bot.task_manage import on_task_manage_reply
 from config.settings import ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
 from config.timeutil import now as tz_now
 from monitoring.markets import list_market_names
@@ -73,6 +74,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if await on_edit_reply(update, context):
+        return
+
+    if await on_task_manage_reply(update, context):
         return
 
     message = update.effective_message

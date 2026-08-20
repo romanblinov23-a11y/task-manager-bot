@@ -103,6 +103,22 @@ async def run_status_check(bot: Bot) -> None:
         )
 
 
+async def ask_task_status_now(bot: Bot, project: str, task: dict) -> str:
+    """Владелец запросил статус конкретной задачи прямо сейчас, не дожидаясь
+    планового ежедневного цикла (см. bot.task_manage). Переиспользует ту же
+    очередь вопросов, что и run_status_check, так что ответ разбирает тот
+    же on_employee_reply. Возвращает короткий код результата."""
+    telegram_id_str = task.get("assignee_telegram_id")
+    if not telegram_id_str:
+        return "no_telegram_id"
+    telegram_id = int(telegram_id_str)
+    if not is_onboarded(telegram_id):
+        return "not_onboarded"
+    update_task(project, task["task_id"], last_status_check=_now())
+    await _enqueue_question(bot, telegram_id, project, task)
+    return "asked"
+
+
 def _status_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Сделал", callback_data="status:done"),
