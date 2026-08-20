@@ -131,38 +131,71 @@ def _filter_timeline(timeline: list[dict], days: int) -> list[dict]:
     return [p for p in timeline if p["date"] >= cutoff]
 
 
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    hex_color = hex_color.lstrip("#")
+    r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _line_style(is_own: bool, color: str) -> dict:
+    """Своя точка (Surf) — фокус графика: полный цвет, линия вдвое толще,
+    заметные точки на срезах. Конкуренты — тоньше и полупрозрачнее, без
+    точек, чтобы не спорили за внимание с нашей линией."""
+    if is_own:
+        return {
+            "borderColor": color,
+            "backgroundColor": color,
+            "pointBackgroundColor": color,
+            "borderWidth": 4,
+            "pointRadius": 2,
+            "pointHoverRadius": 5,
+        }
+    return {
+        "borderColor": _hex_to_rgba(color, 0.55),
+        "backgroundColor": _hex_to_rgba(color, 0.55),
+        "borderWidth": 1.5,
+        "pointRadius": 0,
+        "pointHoverRadius": 3,
+    }
+
+
+def _ordered_for_charts(series: list[dict]) -> list[dict]:
+    """Рисуем свою точку последней в массиве datasets — в Chart.js более
+    поздние datasets перекрывают более ранние на пересечениях линий, так
+    наша точка всегда поверх конкурентов, а не под ними."""
+    return sorted(series, key=lambda s: bool(s["competitor"]["is_own"]))
+
+
 def _dataset_for(series_item: dict, timeline: list[dict], color: str) -> dict:
     """Ряд % доли рынка конкурента по датам timeline."""
-    competitor_id = series_item["competitor"]["id"]
+    competitor = series_item["competitor"]
     data = []
     for point in timeline:
-        share = point["shares"].get(competitor_id)
+        share = point["shares"].get(competitor["id"])
         data.append(round(share, 1) if share is not None else None)
     return {
-        "label": series_item["competitor"]["name"],
+        "label": competitor["name"],
         "data": data,
-        "borderColor": color,
-        "backgroundColor": color,
         "spanGaps": False,
         "tension": 0.2,
+        **_line_style(bool(competitor["is_own"]), color),
     }
 
 
 def _raw_dataset_for(series_item: dict, timeline: list[dict], color: str) -> dict:
     """Ряд сырого показателя (чек/день, без нормировки в %) конкурента по
     датам timeline — для Figure 01, хронологии всех точек рынка разом."""
-    competitor_id = series_item["competitor"]["id"]
+    competitor = series_item["competitor"]
     data = []
     for point in timeline:
-        value = point["values"].get(competitor_id)
+        value = point["values"].get(competitor["id"])
         data.append(round(value, 1) if value is not None else None)
     return {
-        "label": series_item["competitor"]["name"],
+        "label": competitor["name"],
         "data": data,
-        "borderColor": color,
-        "backgroundColor": color,
         "spanGaps": False,
         "tension": 0.2,
+        **_line_style(bool(competitor["is_own"]), color),
     }
 
 
@@ -671,10 +704,46 @@ const formatLabels = {format_labels};
 const formatData = {format_data};
 const formatColors = {format_colors};
 
+const lineEndLabelsPlugin = {{
+  id: 'lineEndLabels',
+  afterDraw(chart) {{
+    const ctx = chart.ctx;
+    const entries = [];
+    chart.data.datasets.forEach((dataset, i) => {{
+      const meta = chart.getDatasetMeta(i);
+      if (meta.hidden) return;
+      let lastIndex = dataset.data.length - 1;
+      while (lastIndex >= 0 && (dataset.data[lastIndex] === null || dataset.data[lastIndex] === undefined)) lastIndex--;
+      if (lastIndex < 0) return;
+      const point = meta.data[lastIndex];
+      if (!point) return;
+      entries.push({{ label: dataset.label, x: point.x, y: point.y, color: dataset.borderColor, own: dataset.borderWidth >= 3 }});
+    }});
+    entries.sort((a, b) => a.y - b.y);
+    const minGap = 15;
+    for (let i = 1; i < entries.length; i++) {{
+      if (entries[i].y - entries[i - 1].y < minGap) entries[i].y = entries[i - 1].y + minGap;
+    }}
+    ctx.save();
+    ctx.textBaseline = 'middle';
+    entries.forEach(e => {{
+      ctx.font = (e.own ? 'bold 12px' : '11px') + ' "PT Sans", -apple-system, sans-serif';
+      ctx.fillStyle = e.color;
+      ctx.fillText(e.label, e.x + 8, e.y);
+    }});
+    ctx.restore();
+  }}
+}};
+
 new Chart(document.getElementById('rawTimelineChart'), {{
   type: 'line',
   data: {{ labels: rawLabels, datasets: rawDatasets }},
-  options: {{ scales: {{ y: {{ beginAtZero: true, title: {{ display: true, text: 'Чек/день' }} }} }} }}
+  plugins: [lineEndLabelsPlugin],
+  options: {{
+    layout: {{ padding: {{ right: 130 }} }},
+    plugins: {{ legend: {{ display: false }} }},
+    scales: {{ y: {{ beginAtZero: true, title: {{ display: true, text: 'Чек/день' }} }} }}
+  }}
 }});
 
 new Chart(document.getElementById('capacityChart'), {{
@@ -699,7 +768,12 @@ if (formatLabels.length) {{
 const shareTrendChart = new Chart(document.getElementById('shareTrendChart'), {{
   type: 'line',
   data: shareTrendData['all'],
-  options: {{ scales: {{ y: {{ beginAtZero: true, max: 100, title: {{ display: true, text: 'Доля, %' }} }} }} }}
+  plugins: [lineEndLabelsPlugin],
+  options: {{
+    layout: {{ padding: {{ right: 130 }} }},
+    plugins: {{ legend: {{ display: false }} }},
+    scales: {{ y: {{ beginAtZero: true, max: 100, title: {{ display: true, text: 'Доля, %' }} }} }}
+  }}
 }});
 document.querySelectorAll('.toggle-btn').forEach(btn => {{
   btn.addEventListener('click', () => {{
@@ -736,11 +810,13 @@ def generate_market_dashboard(market_id: int) -> tuple[str, str]:
     timeline_3m = _filter_timeline(timeline, 90)
     timeline_1m = _filter_timeline(timeline, 30)
 
+    ordered_series = _ordered_for_charts(series)
+
     def datasets_for(tl):
-        return [_dataset_for(s, tl, colors[s["competitor"]["id"]]) for s in series]
+        return [_dataset_for(s, tl, colors[s["competitor"]["id"]]) for s in ordered_series]
 
     def raw_datasets_for(tl):
-        return [_raw_dataset_for(s, tl, colors[s["competitor"]["id"]]) for s in series]
+        return [_raw_dataset_for(s, tl, colors[s["competitor"]["id"]]) for s in ordered_series]
 
     now_point = timeline[-1] if timeline else {"shares": {}}
     share_now_labels = [s["competitor"]["name"] for s in series]
