@@ -12,9 +12,9 @@ from monitoring.markets import get_market, list_markets
 from monitoring.observations import get_observations
 from monitoring.readings import get_last_reading_dates_by_creator, get_latest_reading, get_readings
 
-_OWN_COLOR = "#2E8B7A"
-_COMPETITOR_PALETTE = ["#E07A5F", "#3D5A80", "#F2CC8F", "#81B29A", "#9B5DE5", "#F4845F", "#577590", "#B56576"]
-_FORMAT_PALETTE = ["#3D5A80", "#E07A5F", "#81B29A"]
+_OWN_COLOR = "#C1622D"
+_COMPETITOR_PALETTE = ["#A97155", "#6B8E4E", "#D4A24C", "#8C6E54", "#C97B63", "#7A9E7E", "#B0846A", "#9C8265"]
+_FORMAT_PALETTE = ["#C1622D", "#6B8E4E", "#D4A24C"]
 
 _RECOMMENDATIONS = {
     ("competitor", "up"): "Резкий рост у конкурента — стоит посетить точку лично и проверить все факторы формирования (продукт, атмосферу, сервис, бренд, персонал).",
@@ -132,11 +132,30 @@ def _filter_timeline(timeline: list[dict], days: int) -> list[dict]:
 
 
 def _dataset_for(series_item: dict, timeline: list[dict], color: str) -> dict:
+    """Ряд % доли рынка конкурента по датам timeline."""
     competitor_id = series_item["competitor"]["id"]
     data = []
     for point in timeline:
         share = point["shares"].get(competitor_id)
         data.append(round(share, 1) if share is not None else None)
+    return {
+        "label": series_item["competitor"]["name"],
+        "data": data,
+        "borderColor": color,
+        "backgroundColor": color,
+        "spanGaps": False,
+        "tension": 0.2,
+    }
+
+
+def _raw_dataset_for(series_item: dict, timeline: list[dict], color: str) -> dict:
+    """Ряд сырого показателя (чек/день, без нормировки в %) конкурента по
+    датам timeline — для Figure 01, хронологии всех точек рынка разом."""
+    competitor_id = series_item["competitor"]["id"]
+    data = []
+    for point in timeline:
+        value = point["values"].get(competitor_id)
+        data.append(round(value, 1) if value is not None else None)
     return {
         "label": series_item["competitor"]["name"],
         "data": data,
@@ -229,7 +248,77 @@ def _manager_activity_rows(market_id: int) -> list[dict]:
     return rows
 
 
-# ---------- HTML-рендеринг новых блоков ----------
+def _hero_stats(timeline: list[dict], active_competitors: list[dict], own_competitor: dict | None) -> dict:
+    dates = [p["date"] for p in timeline]
+    return {
+        "period_from": dates[0] if dates else None,
+        "period_to": dates[-1] if dates else None,
+        "snapshots": len(timeline),
+        "points_total": len(active_competitors),
+        "own_count": 1 if own_competitor else 0,
+    }
+
+
+def _own_point_summary(series: list[dict], timeline: list[dict], timeline_3m: list[dict]) -> dict | None:
+    own_item = next((s for s in series if s["competitor"]["is_own"]), None)
+    if not own_item:
+        return None
+
+    own_id = own_item["competitor"]["id"]
+    cutoff_3m = timeline_3m[0]["date"] if timeline_3m else None
+    readings_3m = [r for r in own_item["readings"] if cutoff_3m and r["reading_at"] >= cutoff_3m]
+    avg_3m = sum(r["avg_checks_per_day"] for r in readings_3m) / len(readings_3m) if readings_3m else None
+
+    now_point = timeline[-1] if timeline else None
+    current_value = now_point["values"].get(own_id) if now_point else None
+    current_share = now_point["shares"].get(own_id) if now_point else None
+    share_start = timeline_3m[0]["shares"].get(own_id) if timeline_3m else None
+    share_delta = (current_share - share_start) if (current_share is not None and share_start is not None) else None
+
+    return {
+        "competitor": own_item["competitor"],
+        "readings_count": len(readings_3m),
+        "avg_3m": avg_3m,
+        "current_value": current_value,
+        "current_share": current_share,
+        "share_delta": share_delta,
+    }
+
+
+def _own_narrative(wow: dict | None, own_summary: dict | None) -> str:
+    if not own_summary:
+        return "На этом рынке пока не добавлена наша точка (Surf) — как читать раздел появится после первых снятий."
+    parts = []
+    if own_summary["current_share"] is not None:
+        if own_summary["share_delta"] is not None:
+            direction = "выросла" if own_summary["share_delta"] >= 0 else "снизилась"
+            parts.append(
+                f"Доля точки Surf за последние 3 месяца {direction} на {abs(own_summary['share_delta']):.1f} п.п. "
+                f"и сейчас составляет {own_summary['current_share']:.1f}%."
+            )
+        else:
+            parts.append(f"Текущая доля точки Surf на рынке — {own_summary['current_share']:.1f}%.")
+    else:
+        parts.append("Пока нет снятий по своей точке, чтобы оценить долю рынка.")
+    if wow:
+        direction = "выросла" if wow["direction"] == "up" else "снизилась"
+        parts.append(f"Ёмкость рынка в целом {direction} на {abs(wow['delta_pct']):.1f}% к предыдущему снятию.")
+    return " ".join(parts)
+
+
+# ---------- HTML-рендеринг блоков ----------
+
+
+def _render_hero_cards(hero: dict, capacity_now: float, wow_card_html: str) -> str:
+    period_cell = f"{hero['period_from']} → {hero['period_to']}" if hero["period_from"] else "—"
+    return (
+        f'<div class="card"><div class="value">{period_cell}</div><div class="label">Период наблюдений</div></div>'
+        f'<div class="card"><div class="value">{hero["snapshots"]}</div><div class="label">Снятий (срезов рынка)</div></div>'
+        f'<div class="card"><div class="value">{hero["points_total"]}</div><div class="label">Точек на рынке</div></div>'
+        f'<div class="card"><div class="value">{hero["own_count"]} из {hero["points_total"] or 0}</div><div class="label">Наша точка</div></div>'
+        f'<div class="card"><div class="value">{capacity_now:g}</div><div class="label">Ёмкость рынка, чек/день</div></div>'
+        f"{wow_card_html}"
+    )
 
 
 def _render_wow_card(wow: dict | None) -> str:
@@ -240,6 +329,24 @@ def _render_wow_card(wow: dict | None) -> str:
     return (
         f'<div class="card"><div class="value {cls}">{arrow} {abs(wow["delta_pct"]):.1f}%</div>'
         '<div class="label">Изменение ёмкости к пред. снятию</div></div>'
+    )
+
+
+def _render_own_summary(own_summary: dict | None) -> str:
+    if not own_summary:
+        return ""
+    c = own_summary["competitor"]
+    avg_cell = f"{own_summary['avg_3m']:.1f} чек/день" if own_summary["avg_3m"] is not None else "—"
+    current_cell = f"{own_summary['current_value']:g} чек/день" if own_summary["current_value"] is not None else "—"
+    share_cell = f"{own_summary['current_share']:.1f}%" if own_summary["current_share"] is not None else "—"
+    return (
+        "<table><tbody>"
+        f"<tr><td>Точка</td><td>{c['code']} — {c['name']}</td></tr>"
+        f"<tr><td>Снятий за 3 месяца</td><td>{own_summary['readings_count']}</td></tr>"
+        f"<tr><td>Средний показатель за 3 месяца</td><td>{avg_cell}</td></tr>"
+        f"<tr><td>Последнее снятие</td><td>{current_cell}</td></tr>"
+        f"<tr><td>Текущая доля рынка</td><td>{share_cell}</td></tr>"
+        "</tbody></table>"
     )
 
 
@@ -264,7 +371,7 @@ def _render_ranking_table(rows: list[dict]) -> str:
             delta_html = f'<span class="delta-down">▼ {abs(r["delta"])}</span>'
         else:
             delta_html = "="
-        own_tag = " (наша точка)" if c["is_own"] else ""
+        own_tag = ' <span class="own-tag">(наша точка)</span>' if c["is_own"] else ""
         body.append(
             f"<tr><td>{r['place']}</td><td>{c['code']} — {c['name']}{own_tag}</td>"
             f"<td>{r['share']:g}%</td><td>{delta_html}</td></tr>"
@@ -280,7 +387,7 @@ def _render_factors_profile(series: list[dict]) -> str:
     for s in series:
         c = s["competitor"]
         factors = get_latest_factors(c["id"])
-        own_tag = " (наша точка)" if c["is_own"] else ""
+        own_tag = ' <span class="own-tag">(наша точка)</span>' if c["is_own"] else ""
         if not factors:
             cards.append(f'<div class="factor-card"><h3>{c["code"]} — {c["name"]}{own_tag}</h3><div class="factor-row">Факторы ещё не заполнены.</div></div>')
             continue
@@ -293,7 +400,7 @@ def _render_factors_profile(series: list[dict]) -> str:
             block_sections.append(f'<div class="factor-block-title">{block_title}</div>{rows}')
         body = "".join(block_sections) or '<div class="factor-row">Факторы ещё не заполнены.</div>'
         cards.append(f'<div class="factor-card"><h3>{c["code"]} — {c["name"]}{own_tag}</h3>{body}</div>')
-    return "".join(cards)
+    return f'<div class="card-grid">{"".join(cards)}</div>'
 
 
 def _render_observations_feed(market_id: int, series: list[dict], limit: int = 50) -> str:
@@ -310,7 +417,7 @@ def _render_observations_feed(market_id: int, series: list[dict], limit: int = 5
             f'<div class="obs-item"><div class="meta">{o["observed_at"][:10]} · {label} · {o["category"]}</div>{text}</div>'
         )
     more_note = f'<div class="notice">Показаны последние {limit} из {len(obs)} наблюдений.</div>' if len(obs) > limit else ""
-    return "".join(items) + more_note
+    return f'<div class="feed">{"".join(items)}</div>{more_note}'
 
 
 def _render_freshness_section(rows: list[dict], ok_count: int, total: int) -> str:
@@ -359,7 +466,7 @@ def _render_summary_table(series: list[dict], timeline: list[dict]) -> str:
         c = s["competitor"]
         value = now_point["values"].get(c["id"])
         share = now_point["shares"].get(c["id"])
-        own_tag = " (наша точка)" if c["is_own"] else ""
+        own_tag = ' <span class="own-tag">(наша точка)</span>' if c["is_own"] else ""
         status = "закрыт" if c["status"] == "closed" else "активен"
         value_cell = f"{value:g} чек/день" if value is not None else "нет данных"
         share_cell = f"{share:.1f}%" if share is not None else "—"
@@ -371,154 +478,6 @@ def _render_summary_table(series: list[dict], timeline: list[dict]) -> str:
         "<table><thead><tr><th>Код</th><th>Название</th><th>Формат</th><th>Показатель</th>"
         f"<th>Доля</th><th>Статус</th></tr></thead><tbody>{''.join(body)}</tbody></table>"
     )
-
-
-_HTML_TEMPLATE = """<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<title>{title}</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<style>
-  body {{ font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 24px; background: #f7f7f8; color: #1a1a1a; }}
-  h1 {{ font-size: 22px; margin-bottom: 4px; }}
-  h2 {{ font-size: 16px; margin-top: 32px; }}
-  .subtitle {{ color: #666; margin-bottom: 24px; }}
-  .cards {{ display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }}
-  .card {{ background: #fff; border-radius: 12px; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); min-width: 180px; }}
-  .card .value {{ font-size: 24px; font-weight: 600; }}
-  .card .label {{ color: #666; font-size: 13px; }}
-  .chart-wrap {{ background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 8px; }}
-  canvas {{ max-height: 360px; }}
-  .notice {{ background: #fff8e1; border: 1px solid #f0d97a; border-radius: 8px; padding: 12px 16px; margin: 16px 0; font-size: 14px; }}
-  .anomaly {{ background: #fff; border-left: 4px solid #E07A5F; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }}
-  .anomaly.up {{ border-left-color: #2E8B7A; }}
-  .anomaly .meta {{ color: #666; font-size: 13px; margin-bottom: 6px; }}
-  .anomaly .rec {{ margin-top: 8px; font-size: 14px; }}
-  .anomaly .causes {{ margin-top: 6px; font-size: 13px; color: #444; }}
-  .cdn-note {{ color: #999; font-size: 12px; margin-top: 40px; }}
-  table {{ width: 100%; border-collapse: collapse; font-size: 14px; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }}
-  th, td {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid #eee; }}
-  th {{ color: #666; font-weight: 600; font-size: 12px; text-transform: uppercase; }}
-  .badge {{ display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }}
-  .badge.ok {{ background: #e3f4ee; color: #1f6f5c; }}
-  .badge.overdue {{ background: #fdeceb; color: #a13c30; }}
-  .obs-item {{ background: #fff; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }}
-  .obs-item .meta {{ color: #888; font-size: 12px; margin-bottom: 4px; }}
-  .factor-card {{ background: #fff; border-radius: 12px; padding: 14px 18px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }}
-  .factor-card h3 {{ margin: 0 0 8px; font-size: 15px; }}
-  .factor-block-title {{ font-size: 12px; font-weight: 600; text-transform: uppercase; color: #888; margin: 10px 0 2px; }}
-  .factor-block-title:first-of-type {{ margin-top: 0; }}
-  .factor-row {{ font-size: 13px; margin: 3px 0; color: #333; }}
-  .factor-row b {{ color: #555; }}
-  .delta-up {{ color: #2E8B7A; }}
-  .delta-down {{ color: #E07A5F; }}
-</style>
-</head>
-<body>
-<h1>{title}</h1>
-<div class="subtitle">{subtitle}</div>
-
-{insufficient_data_banner}
-
-<div class="cards">
-  <div class="card"><div class="value">{capacity_now:g}</div><div class="label">Ёмкость рынка, чек/день (≈{capacity_week:g} чек/нед.)</div></div>
-  {wow_card}
-</div>
-
-<h2>1. Ёмкость рынка во времени</h2>
-<div class="chart-wrap"><canvas id="capacityChart"></canvas></div>
-
-<h2>2. Доля рынка по каждому конкуренту (последний период)</h2>
-<div class="chart-wrap"><canvas id="shareNowChart"></canvas></div>
-
-<h2>Распределение по формату</h2>
-{format_html}
-
-<h2>3. Тенденция доли — за всё время</h2>
-<div class="chart-wrap"><canvas id="shareAllChart"></canvas></div>
-
-<h2>4. Тенденция доли — последние 3 месяца</h2>
-<div class="chart-wrap"><canvas id="share3mChart"></canvas></div>
-
-<h2>5. Тенденция доли — последний месяц</h2>
-<div class="chart-wrap"><canvas id="share1mChart"></canvas></div>
-
-<h2>Рейтинг точек и его динамика</h2>
-{ranking_html}
-
-<h2>6. Явные изменения, возможные причины и рекомендации</h2>
-{anomalies_html}
-
-<h2>Профили конкурентов (факторы формирования)</h2>
-{factors_html}
-
-<h2>Лента наблюдений</h2>
-{observations_html}
-
-<h2>Свежесть данных / здоровье мониторинга</h2>
-{freshness_html}
-
-<h2>Закрывшиеся точки</h2>
-{closed_html}
-
-<h2>Активность менеджеров рынка</h2>
-{manager_activity_html}
-
-<h2>Сводная таблица</h2>
-{summary_html}
-
-<div class="cdn-note">Графики интерактивны (наведите курсор на точки) — для их отображения нужен доступ в интернет (библиотека графиков подгружается с CDN).</div>
-
-<script>
-const capacityLabels = {capacity_labels};
-const capacityData = {capacity_data};
-const shareLabelsAll = {share_labels_all};
-const shareDatasetsAll = {share_datasets_all};
-const shareLabels3m = {share_labels_3m};
-const shareDatasets3m = {share_datasets_3m};
-const shareLabels1m = {share_labels_1m};
-const shareDatasets1m = {share_datasets_1m};
-const shareNowLabels = {share_now_labels};
-const shareNowData = {share_now_data};
-const shareNowColors = {share_now_colors};
-const formatLabels = {format_labels};
-const formatData = {format_data};
-const formatColors = {format_colors};
-
-new Chart(document.getElementById('capacityChart'), {{
-  type: 'line',
-  data: {{ labels: capacityLabels, datasets: [{{ label: 'Ёмкость рынка (чек/день)', data: capacityData, borderColor: '#3D5A80', backgroundColor: '#3D5A80', tension: 0.2 }}] }},
-  options: {{ plugins: {{ legend: {{ display: false }} }}, scales: {{ y: {{ beginAtZero: true }} }} }}
-}});
-
-new Chart(document.getElementById('shareNowChart'), {{
-  type: 'bar',
-  data: {{ labels: shareNowLabels, datasets: [{{ label: 'Доля, %', data: shareNowData, backgroundColor: shareNowColors }}] }},
-  options: {{ plugins: {{ legend: {{ display: false }} }}, scales: {{ y: {{ beginAtZero: true, max: 100 }} }} }}
-}});
-
-if (formatLabels.length) {{
-  new Chart(document.getElementById('formatChart'), {{
-    type: 'pie',
-    data: {{ labels: formatLabels, datasets: [{{ data: formatData, backgroundColor: formatColors }}] }}
-  }});
-}}
-
-function shareLineChart(id, labels, datasets) {{
-  new Chart(document.getElementById(id), {{
-    type: 'line',
-    data: {{ labels: labels, datasets: datasets }},
-    options: {{ scales: {{ y: {{ beginAtZero: true, max: 100, title: {{ display: true, text: 'Доля, %' }} }} }} }}
-  }});
-}}
-shareLineChart('shareAllChart', shareLabelsAll, shareDatasetsAll);
-shareLineChart('share3mChart', shareLabels3m, shareDatasets3m);
-shareLineChart('share1mChart', shareLabels1m, shareDatasets1m);
-</script>
-</body>
-</html>
-"""
 
 
 def _render_anomalies_html(competitor_anomalies: list[dict], market_anomalies: list[dict]) -> str:
@@ -543,7 +502,217 @@ def _render_anomalies_html(competitor_anomalies: list[dict], market_anomalies: l
             f'{a["date"]}: {a["value"]:g} чек/день (норма {a["norm"]:g})</div>'
             f'<div class="rec">{a["recommendation"]}</div>{causes_html}</div>'
         )
-    return "".join(blocks)
+    return f'<div class="card-grid">{"".join(blocks)}</div>'
+
+
+_HTML_TEMPLATE = """<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>{title}</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@500;600;700&family=PT+Sans:wght@400;700&display=swap">
+<style>
+  :root {{
+    --bg: #FAF6F1;
+    --surface: #FFFDFB;
+    --border: #EDE2D6;
+    --text: #3B2E27;
+    --text-muted: #8A7A6D;
+    --accent: #C1622D;
+    --accent-soft: #F3E4D3;
+    --positive: #6B8E4E;
+    --positive-soft: #EAF1E3;
+    --negative: #B5533C;
+    --negative-soft: #FBEAE3;
+  }}
+  * {{ box-sizing: border-box; }}
+  body {{ font-family: "PT Sans", -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 24px; background: var(--bg); color: var(--text); font-variant-numeric: tabular-nums; }}
+  h1, h2, h3 {{ font-family: "Golos Text", "PT Sans", -apple-system, sans-serif; text-wrap: balance; }}
+  h1 {{ font-size: 24px; font-weight: 700; margin-bottom: 4px; }}
+  h2 {{ font-size: 17px; font-weight: 600; margin-top: 36px; margin-bottom: 12px; }}
+  h2 .fig {{ color: var(--accent); font-weight: 700; margin-right: 6px; }}
+  h3 {{ font-size: 14px; font-weight: 600; margin: 0 0 8px; }}
+  .subtitle {{ color: var(--text-muted); margin-bottom: 20px; }}
+  .cards {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }}
+  .card {{ background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px 18px; min-width: 160px; box-shadow: 0 2px 6px rgba(120, 72, 32, .05); }}
+  .card .value {{ font-size: 20px; font-weight: 700; font-family: "Golos Text", sans-serif; }}
+  .card .label {{ color: var(--text-muted); font-size: 12px; margin-top: 2px; }}
+  .grid-2 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; margin-bottom: 8px; align-items: start; }}
+  .card-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }}
+  .chart-wrap {{ background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-bottom: 8px; box-shadow: 0 2px 6px rgba(120, 72, 32, .05); }}
+  canvas {{ max-height: 320px; }}
+  .notice {{ background: var(--accent-soft); border: 1px solid #E8C68A; border-radius: 12px; padding: 12px 16px; margin: 12px 0; font-size: 14px; }}
+  .narrative {{ font-size: 14px; line-height: 1.6; margin-bottom: 10px; color: var(--text); }}
+  .anomaly {{ background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--negative); border-radius: 12px; padding: 12px 16px; box-shadow: 0 2px 6px rgba(120, 72, 32, .05); }}
+  .anomaly.up {{ border-left-color: var(--positive); }}
+  .anomaly .meta {{ color: var(--text-muted); font-size: 13px; margin-bottom: 6px; }}
+  .anomaly .rec {{ margin-top: 8px; font-size: 14px; }}
+  .anomaly .causes {{ margin-top: 6px; font-size: 13px; color: var(--text); }}
+  .cdn-note {{ color: var(--text-muted); font-size: 12px; margin-top: 40px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }}
+  th, td {{ text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }}
+  tr:last-child td {{ border-bottom: none; }}
+  th {{ color: var(--text-muted); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }}
+  .badge {{ display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }}
+  .badge.ok {{ background: var(--positive-soft); color: #4C6B3C; }}
+  .badge.overdue {{ background: var(--negative-soft); color: var(--negative); }}
+  .feed {{ max-width: 640px; }}
+  .obs-item {{ background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; margin-bottom: 8px; font-size: 14px; }}
+  .obs-item .meta {{ color: var(--text-muted); font-size: 12px; margin-bottom: 4px; }}
+  .factor-card {{ background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px 18px; box-shadow: 0 2px 6px rgba(120, 72, 32, .05); }}
+  .factor-block-title {{ font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--accent); margin: 10px 0 2px; }}
+  .factor-block-title:first-of-type {{ margin-top: 0; }}
+  .factor-row {{ font-size: 13px; margin: 3px 0; color: var(--text); }}
+  .factor-row b {{ color: var(--text-muted); }}
+  .delta-up {{ color: var(--positive); }}
+  .delta-down {{ color: var(--negative); }}
+  .own-tag {{ color: var(--accent); font-weight: 600; }}
+  .period-toggle {{ display: flex; gap: 8px; margin-bottom: 12px; }}
+  .toggle-btn {{ font-family: "PT Sans", sans-serif; border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 6px 16px; font-size: 13px; cursor: pointer; color: var(--text-muted); transition: background .15s, color .15s, border-color .15s; }}
+  .toggle-btn:hover {{ border-color: var(--accent); color: var(--accent); }}
+  .toggle-btn.active {{ background: var(--accent); color: #fff; border-color: var(--accent); }}
+</style>
+</head>
+<body>
+<h1>{title}</h1>
+<div class="subtitle">{subtitle}</div>
+
+{insufficient_data_banner}
+
+<div class="cards">
+  {hero_cards}
+</div>
+
+<div class="grid-2">
+  <div>
+    <h2><span class="fig">Figure 01</span>Хронология показателей всех точек рынка</h2>
+    <div class="chart-wrap"><canvas id="rawTimelineChart"></canvas></div>
+  </div>
+  <div>
+    <h2><span class="fig">Figure 02</span>Точка Surf — сводка периода</h2>
+    <div class="narrative">{own_narrative}</div>
+    {own_summary_html}
+  </div>
+</div>
+
+<h2><span class="fig">Figure 03</span>Ёмкость рынка и доля сейчас</h2>
+<div class="grid-2">
+  <div class="chart-wrap"><canvas id="capacityChart"></canvas></div>
+  <div class="chart-wrap"><canvas id="shareNowChart"></canvas></div>
+</div>
+
+<h2><span class="fig">Figure 04</span>Доля рынка во времени</h2>
+<div class="period-toggle">
+  <button class="toggle-btn" data-period="1m">Месяц</button>
+  <button class="toggle-btn" data-period="3m">3 месяца</button>
+  <button class="toggle-btn active" data-period="all">Всё время</button>
+</div>
+<div class="chart-wrap"><canvas id="shareTrendChart"></canvas></div>
+
+<div class="grid-2">
+  <div>
+    <h2>Распределение по формату</h2>
+    {format_html}
+  </div>
+  <div>
+    <h2>Рейтинг точек</h2>
+    {ranking_html}
+  </div>
+</div>
+
+<h2>Явные изменения, возможные причины и рекомендации</h2>
+{anomalies_html}
+
+<h2>Профили конкурентов (факторы формирования)</h2>
+{factors_html}
+
+<h2>Лента наблюдений</h2>
+{observations_html}
+
+<div class="grid-2">
+  <div>
+    <h2>Свежесть данных / здоровье мониторинга</h2>
+    {freshness_html}
+  </div>
+  <div>
+    <h2>Активность менеджеров рынка</h2>
+    {manager_activity_html}
+  </div>
+</div>
+
+<div class="grid-2">
+  <div>
+    <h2>Закрывшиеся точки</h2>
+    {closed_html}
+  </div>
+  <div></div>
+</div>
+
+<h2>Сводная таблица</h2>
+{summary_html}
+
+<div class="cdn-note">Графики интерактивны (наведите курсор на точки) — для их отображения нужен доступ в интернет (библиотека графиков подгружается с CDN).</div>
+
+<script>
+const rawLabels = {raw_labels};
+const rawDatasets = {raw_datasets};
+const capacityLabels = {capacity_labels};
+const capacityData = {capacity_data};
+const shareTrendData = {{
+  '1m': {{ labels: {share_labels_1m}, datasets: {share_datasets_1m} }},
+  '3m': {{ labels: {share_labels_3m}, datasets: {share_datasets_3m} }},
+  'all': {{ labels: {share_labels_all}, datasets: {share_datasets_all} }},
+}};
+const shareNowLabels = {share_now_labels};
+const shareNowData = {share_now_data};
+const shareNowColors = {share_now_colors};
+const formatLabels = {format_labels};
+const formatData = {format_data};
+const formatColors = {format_colors};
+
+new Chart(document.getElementById('rawTimelineChart'), {{
+  type: 'line',
+  data: {{ labels: rawLabels, datasets: rawDatasets }},
+  options: {{ scales: {{ y: {{ beginAtZero: true, title: {{ display: true, text: 'Чек/день' }} }} }} }}
+}});
+
+new Chart(document.getElementById('capacityChart'), {{
+  type: 'line',
+  data: {{ labels: capacityLabels, datasets: [{{ label: 'Ёмкость рынка (чек/день)', data: capacityData, borderColor: '#3D5A80', backgroundColor: '#3D5A80', tension: 0.2 }}] }},
+  options: {{ plugins: {{ legend: {{ display: false }} }}, scales: {{ y: {{ beginAtZero: true }} }} }}
+}});
+
+new Chart(document.getElementById('shareNowChart'), {{
+  type: 'bar',
+  data: {{ labels: shareNowLabels, datasets: [{{ label: 'Доля, %', data: shareNowData, backgroundColor: shareNowColors }}] }},
+  options: {{ plugins: {{ legend: {{ display: false }} }}, scales: {{ y: {{ beginAtZero: true, max: 100 }} }} }}
+}});
+
+if (formatLabels.length) {{
+  new Chart(document.getElementById('formatChart'), {{
+    type: 'pie',
+    data: {{ labels: formatLabels, datasets: [{{ data: formatData, backgroundColor: formatColors }}] }}
+  }});
+}}
+
+const shareTrendChart = new Chart(document.getElementById('shareTrendChart'), {{
+  type: 'line',
+  data: shareTrendData['all'],
+  options: {{ scales: {{ y: {{ beginAtZero: true, max: 100, title: {{ display: true, text: 'Доля, %' }} }} }} }}
+}});
+document.querySelectorAll('.toggle-btn').forEach(btn => {{
+  btn.addEventListener('click', () => {{
+    document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    shareTrendChart.data = shareTrendData[btn.dataset.period];
+    shareTrendChart.update();
+  }});
+}});
+</script>
+</body>
+</html>
+"""
 
 
 def generate_market_dashboard(market_id: int) -> tuple[str, str]:
@@ -551,6 +720,7 @@ def generate_market_dashboard(market_id: int) -> tuple[str, str]:
     series = _load_competitor_series(market_id)
     timeline = _build_capacity_timeline(series)
     active_competitors = list_competitors(market_id)
+    own_competitor = next((c for c in active_competitors if c["is_own"]), None)
 
     distinct_dates = sorted({p["date"] for p in timeline})
     insufficient_banner = ""
@@ -569,6 +739,9 @@ def generate_market_dashboard(market_id: int) -> tuple[str, str]:
     def datasets_for(tl):
         return [_dataset_for(s, tl, colors[s["competitor"]["id"]]) for s in series]
 
+    def raw_datasets_for(tl):
+        return [_raw_dataset_for(s, tl, colors[s["competitor"]["id"]]) for s in series]
+
     now_point = timeline[-1] if timeline else {"shares": {}}
     share_now_labels = [s["competitor"]["name"] for s in series]
     share_now_data = [round(now_point["shares"].get(s["competitor"]["id"], 0) or 0, 1) for s in series]
@@ -582,13 +755,17 @@ def generate_market_dashboard(market_id: int) -> tuple[str, str]:
     freshness_rows, freshness_ok = _freshness_rows(active_competitors)
     closed_competitors = [c for c in list_competitors(market_id, include_closed=True) if c["status"] == "closed"]
 
+    wow = _wow_delta(timeline)
+    own_summary = _own_point_summary(series, timeline, timeline_3m)
+    hero = _hero_stats(timeline, active_competitors, own_competitor)
+
     html = _HTML_TEMPLATE.format(
         title=f"Дашборд рынка «{market['name']}»",
         subtitle=f"Наша точка: {market['our_point_name']}. Обновлено {today().isoformat()}.",
         insufficient_data_banner=insufficient_banner,
-        capacity_now=capacity_now,
-        capacity_week=capacity_now * 7,
-        wow_card=_render_wow_card(_wow_delta(timeline)),
+        hero_cards=_render_hero_cards(hero, capacity_now, _render_wow_card(wow)),
+        own_narrative=_own_narrative(wow, own_summary),
+        own_summary_html=_render_own_summary(own_summary),
         format_html=_render_format_section(format_counts),
         ranking_html=_render_ranking_table(_ranking_rows(series, timeline)),
         factors_html=_render_factors_profile(series),
@@ -597,6 +774,8 @@ def generate_market_dashboard(market_id: int) -> tuple[str, str]:
         closed_html=_render_closed_section(closed_competitors),
         manager_activity_html=_render_manager_activity(_manager_activity_rows(market_id)),
         summary_html=_render_summary_table(series, timeline),
+        raw_labels=json.dumps([p["date"] for p in timeline], ensure_ascii=False),
+        raw_datasets=json.dumps(raw_datasets_for(timeline), ensure_ascii=False),
         capacity_labels=json.dumps([p["date"] for p in timeline], ensure_ascii=False),
         capacity_data=json.dumps([round(p["capacity"], 1) for p in timeline]),
         share_labels_all=json.dumps([p["date"] for p in timeline], ensure_ascii=False),
@@ -640,9 +819,9 @@ def generate_aggregate_dashboard() -> tuple[str, str]:
 <title>Дашборд — все рынки</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
-  body {{ font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 24px; background: #f7f7f8; color: #1a1a1a; }}
+  body {{ font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 24px; background: #fafafa; color: #1a1a1a; }}
   h1 {{ font-size: 22px; }}
-  .chart-wrap {{ background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); max-width: 720px; }}
+  .chart-wrap {{ background: #fff; border: 1px solid #e5e5e7; border-radius: 10px; padding: 16px; max-width: 720px; }}
   .cdn-note {{ color: #999; font-size: 12px; margin-top: 24px; }}
 </style>
 </head>
