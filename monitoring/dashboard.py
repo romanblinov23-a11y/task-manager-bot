@@ -538,15 +538,8 @@ def _render_anomalies_html(competitor_anomalies: list[dict], market_anomalies: l
     return f'<div class="card-grid">{"".join(blocks)}</div>'
 
 
-_HTML_TEMPLATE = """<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<title>{title}</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@500;600;700&family=PT+Sans:wght@400;700&display=swap">
-<style>
-  :root {{
+_BASE_STYLE_CSS = """
+  :root {
     --bg: #FAF6F1;
     --surface: #FFFDFB;
     --border: #EDE2D6;
@@ -558,53 +551,67 @@ _HTML_TEMPLATE = """<!doctype html>
     --positive-soft: #EAF1E3;
     --negative: #B5533C;
     --negative-soft: #FBEAE3;
-  }}
-  * {{ box-sizing: border-box; }}
-  body {{ font-family: "PT Sans", -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 24px; background: var(--bg); color: var(--text); font-variant-numeric: tabular-nums; }}
-  h1, h2, h3 {{ font-family: "Golos Text", "PT Sans", -apple-system, sans-serif; text-wrap: balance; }}
-  h1 {{ font-size: 24px; font-weight: 700; margin-bottom: 4px; }}
-  h2 {{ font-size: 17px; font-weight: 600; margin-top: 36px; margin-bottom: 12px; }}
-  h2 .fig {{ color: var(--accent); font-weight: 700; margin-right: 6px; }}
-  h3 {{ font-size: 14px; font-weight: 600; margin: 0 0 8px; }}
-  .subtitle {{ color: var(--text-muted); margin-bottom: 20px; }}
-  .cards {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }}
-  .card {{ background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px 18px; min-width: 160px; box-shadow: 0 2px 6px rgba(120, 72, 32, .05); }}
-  .card .value {{ font-size: 20px; font-weight: 700; font-family: "Golos Text", sans-serif; }}
-  .card .label {{ color: var(--text-muted); font-size: 12px; margin-top: 2px; }}
-  .grid-2 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; margin-bottom: 8px; align-items: start; }}
-  .card-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }}
-  .chart-wrap {{ background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-bottom: 8px; box-shadow: 0 2px 6px rgba(120, 72, 32, .05); }}
-  canvas {{ max-height: 320px; }}
-  .notice {{ background: var(--accent-soft); border: 1px solid #E8C68A; border-radius: 12px; padding: 12px 16px; margin: 12px 0; font-size: 14px; }}
-  .narrative {{ font-size: 14px; line-height: 1.6; margin-bottom: 10px; color: var(--text); }}
-  .anomaly {{ background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--negative); border-radius: 12px; padding: 12px 16px; box-shadow: 0 2px 6px rgba(120, 72, 32, .05); }}
-  .anomaly.up {{ border-left-color: var(--positive); }}
-  .anomaly .meta {{ color: var(--text-muted); font-size: 13px; margin-bottom: 6px; }}
-  .anomaly .rec {{ margin-top: 8px; font-size: 14px; }}
-  .anomaly .causes {{ margin-top: 6px; font-size: 13px; color: var(--text); }}
-  .cdn-note {{ color: var(--text-muted); font-size: 12px; margin-top: 40px; }}
-  table {{ width: 100%; border-collapse: collapse; font-size: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }}
-  th, td {{ text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }}
-  tr:last-child td {{ border-bottom: none; }}
-  th {{ color: var(--text-muted); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }}
-  .badge {{ display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }}
-  .badge.ok {{ background: var(--positive-soft); color: #4C6B3C; }}
-  .badge.overdue {{ background: var(--negative-soft); color: var(--negative); }}
-  .feed {{ max-width: 640px; }}
-  .obs-item {{ background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; margin-bottom: 8px; font-size: 14px; }}
-  .obs-item .meta {{ color: var(--text-muted); font-size: 12px; margin-bottom: 4px; }}
-  .factor-card {{ background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px 18px; box-shadow: 0 2px 6px rgba(120, 72, 32, .05); }}
-  .factor-block-title {{ font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--accent); margin: 10px 0 2px; }}
-  .factor-block-title:first-of-type {{ margin-top: 0; }}
-  .factor-row {{ font-size: 13px; margin: 3px 0; color: var(--text); }}
-  .factor-row b {{ color: var(--text-muted); }}
-  .delta-up {{ color: var(--positive); }}
-  .delta-down {{ color: var(--negative); }}
-  .own-tag {{ color: var(--accent); font-weight: 600; }}
-  .period-toggle {{ display: flex; gap: 8px; margin-bottom: 12px; }}
-  .toggle-btn {{ font-family: "PT Sans", sans-serif; border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 6px 16px; font-size: 13px; cursor: pointer; color: var(--text-muted); transition: background .15s, color .15s, border-color .15s; }}
-  .toggle-btn:hover {{ border-color: var(--accent); color: var(--accent); }}
-  .toggle-btn.active {{ background: var(--accent); color: #fff; border-color: var(--accent); }}
+  }
+  * { box-sizing: border-box; }
+  body { font-family: "PT Sans", -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 24px; background: var(--bg); color: var(--text); font-variant-numeric: tabular-nums; }
+  h1, h2, h3 { font-family: "Golos Text", "PT Sans", -apple-system, sans-serif; text-wrap: balance; }
+  h1 { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+  h2 { font-size: 17px; font-weight: 600; margin-top: 36px; margin-bottom: 12px; }
+  h2 .fig { color: var(--accent); font-weight: 700; margin-right: 6px; }
+  h3 { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+  .subtitle { color: var(--text-muted); margin-bottom: 20px; }
+  .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px 18px; min-width: 160px; box-shadow: 0 2px 6px rgba(120, 72, 32, .05); }
+  .card .value { font-size: 20px; font-weight: 700; font-family: "Golos Text", sans-serif; }
+  .card .label { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; margin-bottom: 8px; align-items: start; }
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .chart-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-bottom: 8px; box-shadow: 0 2px 6px rgba(120, 72, 32, .05); }
+  canvas { max-height: 320px; }
+  .notice { background: var(--accent-soft); border: 1px solid #E8C68A; border-radius: 12px; padding: 12px 16px; margin: 12px 0; font-size: 14px; }
+  .narrative { font-size: 14px; line-height: 1.6; margin-bottom: 10px; color: var(--text); }
+  .anomaly { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--negative); border-radius: 12px; padding: 12px 16px; box-shadow: 0 2px 6px rgba(120, 72, 32, .05); }
+  .anomaly.up { border-left-color: var(--positive); }
+  .anomaly .meta { color: var(--text-muted); font-size: 13px; margin-bottom: 6px; }
+  .anomaly .rec { margin-top: 8px; font-size: 14px; }
+  .anomaly .causes { margin-top: 6px; font-size: 13px; color: var(--text); }
+  .cdn-note { color: var(--text-muted); font-size: 12px; margin-top: 40px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  th { color: var(--text-muted); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .badge.ok { background: var(--positive-soft); color: #4C6B3C; }
+  .badge.overdue { background: var(--negative-soft); color: var(--negative); }
+  .feed { max-width: 640px; }
+  .obs-item { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; margin-bottom: 8px; font-size: 14px; }
+  .obs-item .meta { color: var(--text-muted); font-size: 12px; margin-bottom: 4px; }
+  .factor-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px 18px; box-shadow: 0 2px 6px rgba(120, 72, 32, .05); }
+  .factor-block-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--accent); margin: 10px 0 2px; }
+  .factor-block-title:first-of-type { margin-top: 0; }
+  .factor-row { font-size: 13px; margin: 3px 0; color: var(--text); }
+  .factor-row b { color: var(--text-muted); }
+  .delta-up { color: var(--positive); }
+  .delta-down { color: var(--negative); }
+  .own-tag { color: var(--accent); font-weight: 600; }
+  .period-toggle { display: flex; gap: 8px; margin-bottom: 12px; }
+  .toggle-btn { font-family: "PT Sans", sans-serif; border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 6px 16px; font-size: 13px; cursor: pointer; color: var(--text-muted); transition: background .15s, color .15s, border-color .15s; }
+  .toggle-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .toggle-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .market-name { font-weight: 600; }
+  .attention-row { background: var(--negative-soft); }
+"""
+
+
+_HTML_TEMPLATE = """<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>{title}</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@500;600;700&family=PT+Sans:wght@400;700&display=swap">
+<style>
+{base_style}
 </style>
 </head>
 <body>
@@ -841,6 +848,7 @@ def generate_market_dashboard(market_id: int) -> tuple[str, str]:
     hero = _hero_stats(timeline, active_competitors, own_competitor)
 
     html = _HTML_TEMPLATE.format(
+        base_style=_BASE_STYLE_CSS,
         title=f"Дашборд рынка «{market['name']}»",
         subtitle=f"Наша точка: {market['our_point_name']}. Обновлено {today().isoformat()}.",
         insufficient_data_banner=insufficient_banner,
@@ -878,47 +886,152 @@ def generate_market_dashboard(market_id: int) -> tuple[str, str]:
     return filename, html
 
 
-def generate_aggregate_dashboard() -> tuple[str, str]:
-    """Упрощённый сводный дашборд владельца по всем рынкам сразу: ёмкость
-    каждого рынка на последнюю дату — детальные аномалии и тренды по
-    конкурентам смотрятся через дашборд конкретного рынка."""
-    markets = list_markets()
-    rows = []
-    for market in markets:
-        series = _load_competitor_series(market["id"])
-        timeline = _build_capacity_timeline(series)
-        capacity_now = timeline[-1]["capacity"] if timeline else 0.0
-        rows.append((market["name"], capacity_now))
+def _market_summary_row(market: dict) -> dict:
+    series = _load_competitor_series(market["id"])
+    timeline = _build_capacity_timeline(series)
+    active_competitors = list_competitors(market["id"])
+    own_competitor = next((c for c in active_competitors if c["is_own"]), None)
 
-    labels = json.dumps([r[0] for r in rows], ensure_ascii=False)
-    data = json.dumps([round(r[1], 1) for r in rows])
+    capacity_now = timeline[-1]["capacity"] if timeline else 0.0
+    now_point = timeline[-1] if timeline else {"shares": {}}
+    own_share = now_point["shares"].get(own_competitor["id"]) if own_competitor else None
+    wow = _wow_delta(timeline)
 
-    html = f"""<!doctype html>
+    _, freshness_ok = _freshness_rows(active_competitors)
+
+    recent_cutoff = (today() - timedelta(days=MONITORING_CYCLE_DAYS)).isoformat()
+    competitor_anomalies = _detect_competitor_anomalies(series, market["id"])
+    market_anomalies = _detect_market_anomalies(timeline)
+    recent_anomalies = [a for a in competitor_anomalies if a["date"] >= recent_cutoff]
+    recent_anomalies += [a for a in market_anomalies if a["date"] >= recent_cutoff]
+
+    return {
+        "market": market,
+        "capacity_now": capacity_now,
+        "own_competitor": own_competitor,
+        "own_share": own_share,
+        "wow": wow,
+        "points_total": len(active_competitors),
+        "freshness_ok": freshness_ok,
+        "recent_anomalies_count": len(recent_anomalies),
+    }
+
+
+def _render_aggregate_hero(rows: list[dict]) -> str:
+    markets_total = len(rows)
+    points_total = sum(r["points_total"] for r in rows)
+    needs_attention = sum(1 for r in rows if r["freshness_ok"] < r["points_total"])
+    anomalies_total = sum(r["recent_anomalies_count"] for r in rows)
+    return (
+        f'<div class="card"><div class="value">{markets_total}</div><div class="label">Рынков под наблюдением</div></div>'
+        f'<div class="card"><div class="value">{points_total}</div><div class="label">Точек всего</div></div>'
+        f'<div class="card"><div class="value">{needs_attention}</div><div class="label">Рынков с просроченным мониторингом</div></div>'
+        f'<div class="card"><div class="value">{anomalies_total}</div><div class="label">Аномалий за последние {MONITORING_CYCLE_DAYS} дней</div></div>'
+    )
+
+
+def _render_aggregate_table(rows: list[dict]) -> str:
+    if not rows:
+        return '<div class="notice">Пока нет ни одного рынка.</div>'
+    body = []
+    for r in rows:
+        market = r["market"]
+        own_cell = r["own_competitor"]["name"] if r["own_competitor"] else "не добавлена"
+        share_cell = f"{r['own_share']:.1f}%" if r["own_share"] is not None else "—"
+        if r["wow"]:
+            arrow = "▲" if r["wow"]["direction"] == "up" else "▼"
+            cls = "delta-up" if r["wow"]["direction"] == "up" else "delta-down"
+            wow_cell = f'<span class="{cls}">{arrow} {abs(r["wow"]["delta_pct"]):.1f}%</span>'
+        else:
+            wow_cell = "—"
+        overdue = r["freshness_ok"] < r["points_total"]
+        freshness_cell = (
+            f'<span class="badge overdue">{r["freshness_ok"]}/{r["points_total"]}</span>'
+            if overdue
+            else f'<span class="badge ok">{r["freshness_ok"]}/{r["points_total"]}</span>'
+        )
+        anomalies_cell = r["recent_anomalies_count"] or "—"
+        row_class = ' class="attention-row"' if overdue else ""
+        body.append(
+            f"<tr{row_class}><td class=\"market-name\">{market['name']}</td><td>{own_cell}</td><td>{share_cell}</td>"
+            f"<td>{wow_cell}</td><td>{r['capacity_now']:g} чек/день</td><td>{r['points_total']}</td>"
+            f"<td>{freshness_cell}</td><td>{anomalies_cell}</td></tr>"
+        )
+    return (
+        "<table><thead><tr><th>Рынок</th><th>Наша точка</th><th>Доля</th><th>Δ к пред. снятию</th>"
+        f"<th>Ёмкость</th><th>Точек</th><th>Свежесть</th><th>Аномалий</th></tr></thead><tbody>{''.join(body)}</tbody></table>"
+    )
+
+
+_AGGREGATE_TEMPLATE = """<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
 <title>Дашборд — все рынки</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@500;600;700&family=PT+Sans:wght@400;700&display=swap">
 <style>
-  body {{ font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; padding: 24px; background: #fafafa; color: #1a1a1a; }}
-  h1 {{ font-size: 22px; }}
-  .chart-wrap {{ background: #fff; border: 1px solid #e5e5e7; border-radius: 10px; padding: 16px; max-width: 720px; }}
-  .cdn-note {{ color: #999; font-size: 12px; margin-top: 24px; }}
+{base_style}
 </style>
 </head>
 <body>
-<h1>Ёмкость рынков — сводно на {today().isoformat()}</h1>
-<div class="chart-wrap"><canvas id="marketsChart"></canvas></div>
-<div class="cdn-note">Для детальной аналитики (тенденции, аномалии, причины, факторы, наблюдения) по конкретному рынку используйте /dashboard_market и выберите рынок. Для отображения графика нужен доступ в интернет.</div>
+<h1>Все рынки</h1>
+<div class="subtitle">Сводно на {today}.</div>
+
+<div class="cards">
+  {hero_cards}
+</div>
+
+<h2>Наша доля по рынкам</h2>
+<div class="chart-wrap"><canvas id="shareByMarketChart"></canvas></div>
+
+<h2>Сравнение рынков</h2>
+{table_html}
+
+<div class="cdn-note">Для детальной аналитики (тренды, аномалии, причины, факторы, наблюдения) по конкретному рынку используйте /dashboard_market и выберите рынок. Для отображения графиков нужен доступ в интернет.</div>
+
 <script>
-new Chart(document.getElementById('marketsChart'), {{
+const marketLabels = {market_labels};
+const shareData = {share_data};
+const capacityData = {capacity_data};
+
+new Chart(document.getElementById('shareByMarketChart'), {{
   type: 'bar',
-  data: {{ labels: {labels}, datasets: [{{ label: 'Ёмкость, чек/день', data: {data}, backgroundColor: '#3D5A80' }}] }},
-  options: {{ plugins: {{ legend: {{ display: false }} }}, scales: {{ y: {{ beginAtZero: true }} }} }}
+  data: {{
+    labels: marketLabels,
+    datasets: [
+      {{ label: 'Наша доля, %', data: shareData, backgroundColor: '#C1622D', yAxisID: 'y' }},
+      {{ label: 'Ёмкость рынка, чек/день', data: capacityData, backgroundColor: '#D4A24C', yAxisID: 'y1' }}
+    ]
+  }},
+  options: {{
+    scales: {{
+      y: {{ beginAtZero: true, max: 100, position: 'left', title: {{ display: true, text: 'Доля, %' }} }},
+      y1: {{ beginAtZero: true, position: 'right', grid: {{ drawOnChartArea: false }}, title: {{ display: true, text: 'Чек/день' }} }}
+    }}
+  }}
 }});
 </script>
 </body>
 </html>
 """
+
+
+def generate_aggregate_dashboard() -> tuple[str, str]:
+    """Сводный дашборд владельца по всем рынкам сразу: доля и ёмкость
+    каждого рынка, изменение к предыдущему снятию, здоровье мониторинга и
+    число недавних аномалий — детальные тренды и причины смотрятся через
+    дашборд конкретного рынка."""
+    rows = [_market_summary_row(market) for market in list_markets()]
+
+    html = _AGGREGATE_TEMPLATE.format(
+        base_style=_BASE_STYLE_CSS,
+        today=today().isoformat(),
+        hero_cards=_render_aggregate_hero(rows),
+        table_html=_render_aggregate_table(rows),
+        market_labels=json.dumps([r["market"]["name"] for r in rows], ensure_ascii=False),
+        share_data=json.dumps([round(r["own_share"], 1) if r["own_share"] is not None else 0 for r in rows]),
+        capacity_data=json.dumps([round(r["capacity_now"], 1) for r in rows]),
+    )
     filename = f"dashboard_all_markets_{today().isoformat()}.html"
     return filename, html
