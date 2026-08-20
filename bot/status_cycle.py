@@ -42,8 +42,8 @@ def _is_due(task: dict, today: date) -> bool:
 
 
 async def run_status_check(bot: Bot) -> None:
-    """APScheduler job — раздел 4 PROJECT_SPEC.md. Проверяет все три
-    таблицы на задачи с подошедшим/просроченным deadline_current и
+    """APScheduler job — раздел 4 PROJECT_SPEC.md. Проверяет все проекты
+    на задачи с подошедшим/просроченным deadline_current и
     запускает опрос исполнителя в личке.
 
     Три случая для задачи с подошедшим сроком:

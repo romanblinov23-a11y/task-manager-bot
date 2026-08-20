@@ -136,7 +136,7 @@ def find_homonyms(project: str, assignee_name: str) -> list[dict]:
 
 
 def _try_match_and_backfill(user_id: int) -> list[tuple[str, str]]:
-    """Сопоставляет онбордившегося сотрудника с именами assignee в таблицах
+    """Сопоставляет онбордившегося сотрудника с именами assignee в задачах
     проектов, где его видели в группе, и проставляет assignee_telegram_id
     на уже существующих задачах (раздел 4, 9.1 PROJECT_SPEC.md). При
     коллизии одинаковых имён автоматическое назначение пропускается — его
@@ -225,7 +225,7 @@ def get_onboarded_employees() -> list[dict]:
 
 def record_group_member(chat_id: int, user: User | None) -> None:
     """Пассивно запоминает, кто писал в группе — нужно для последующего
-    сопоставления Telegram-аккаунта с именем в таблице при онбординге.
+    сопоставления Telegram-аккаунта с именем в задаче при онбординге.
     Для Романа сразу ставим onboarded=True и real_name из ROMAN_CHAT_NAME,
     чтобы задачи на него резолвились через нормальный механизм сопоставления
     (а не через хардкод по вариантам имени, который путает однофамильцев)."""
@@ -479,7 +479,7 @@ async def _greet_after_onboarding(message, user_id: int) -> None:
     matched = _try_match_and_backfill(user_id)
     if matched:
         await message.reply_text(
-            "Вижу, что на тебя уже есть задача в таблице — буду писать сюда, если "
+            "Вижу, что на тебя уже есть задача — буду писать сюда, если "
             "понадобится спросить про статус или сроки."
         )
     else:

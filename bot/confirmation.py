@@ -265,7 +265,7 @@ async def _confirm_task(query, confirmation_id: str, entry: dict) -> None:
     _pending.pop(confirmation_id, None)
     await query.edit_message_text(_build_card_text(entry) + f"\n\n✅ Добавлено как {task_id}.")
 
-    reply_note = f"✅ Задача {task_id} добавлена в таблицу «{project}»."
+    reply_note = f"✅ Задача {task_id} добавлена в проект «{project}»."
     if not task.get("deadline") and not telegram_id:
         reply_note += (
             " ⚠️ Без срока и без известного исполнителя — спросить срок будет не у кого, "
