@@ -1,9 +1,10 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from config.settings import ROMAN_TELEGRAM_ID
+from config.settings import ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
 from config.timeutil import fmt_date, parse_date
 from config.timeutil import now as tz_now
+from monitoring.managers import is_owner
 from monitoring.markets import get_market, get_market_by_name, list_market_names
 from tasks.comments import append_comment
 from tasks.log import append_log_entry
@@ -12,6 +13,10 @@ from tasks.tasks import get_all_tasks, get_task, update_task
 # telegram_user_id (str) сотрудника -> {"action": "deadline_date"|"deadline_reason"|
 # "close_reason"|"help_reason", "market_id": int, "task_id": str, "new_deadline"?: str}
 _pending: dict[str, dict] = {}
+
+# telegram_user_id (str) владельца -> {"action": "help_message", "market_id": int, "task_id": str} —
+# владелец ответил "🤝 Помочь сотруднику" на 🆘-уведомление и сейчас пишет текст помощи.
+_owner_pending: dict[str, dict] = {}
 
 
 def _now() -> str:
@@ -92,6 +97,22 @@ async def _notify_owner(bot, text: str) -> None:
         pass
 
 
+def _owner_help_keyboard(market_id: int, task_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🤝 Помочь сотруднику", callback_data=f"myt:ownerhelp:{market_id}:{task_id}")],
+            [InlineKeyboardButton("🙋 Забрать себе", callback_data=f"myt:ownertake:{market_id}:{task_id}")],
+        ]
+    )
+
+
+async def _notify_owner_help(bot, market_id: int, task_id: str, text: str) -> None:
+    try:
+        await bot.send_message(chat_id=ROMAN_TELEGRAM_ID, text=text, reply_markup=_owner_help_keyboard(market_id, task_id))
+    except Exception:
+        pass
+
+
 async def on_mytasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/mytasks — сотрудник видит свои активные задачи по всем проектам и
     может ими управлять: перенести срок, отметить прогресс, попросить
@@ -110,6 +131,38 @@ async def on_mytasks_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer()
         text, keyboard = _mytasks_view(user_id)
         await query.edit_message_text(text, reply_markup=keyboard)
+        return
+
+    if action in ("ownerhelp", "ownertake"):
+        if not is_owner(user_id):
+            await query.answer()
+            return
+        market_id, task_id = int(parts[2]), parts[3]
+        market = get_market(market_id)
+        task = get_task(market["name"], task_id) if market else None
+        if not task:
+            await query.answer("Задача не найдена", show_alert=True)
+            return
+        project = market["name"]
+
+        if action == "ownerhelp":
+            _owner_pending[str(user_id)] = {"action": "help_message", "market_id": market_id, "task_id": task_id}
+            await query.answer()
+            await query.message.reply_text(f"Что написать сотруднику по задаче «{task['task_text']}»?")
+            return
+
+        await query.answer("Забираю…")
+        old_assignee_id = task.get("assignee_telegram_id")
+        update_task(project, task_id, assignee=ROMAN_CHAT_NAME, assignee_telegram_id=str(ROMAN_TELEGRAM_ID), needs_help="нет")
+        if old_assignee_id:
+            try:
+                await context.bot.send_message(
+                    chat_id=int(old_assignee_id),
+                    text=f"ℹ️ Задачу «{task['task_text']}» теперь ведёт {ROMAN_CHAT_NAME}.",
+                )
+            except Exception:
+                pass
+        await query.message.reply_text(f"✅ Задача «{task['task_text']}» теперь на тебе.")
         return
 
     market_id, task_id = int(parts[2]), parts[3]
@@ -165,12 +218,51 @@ async def on_mytasks_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
 
 
+async def _handle_owner_help_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, state: dict) -> bool:
+    market = get_market(state["market_id"])
+    task_id = state["task_id"]
+    task = get_task(market["name"], task_id) if market else None
+    if not task:
+        del _owner_pending[str(user_id)]
+        await update.effective_message.reply_text("Задача больше недоступна.")
+        return True
+    project = market["name"]
+    text = (update.effective_message.text or "").strip()
+    if not text:
+        await update.effective_message.reply_text("Напишите текст сообщения сотруднику:")
+        return True
+
+    del _owner_pending[str(user_id)]
+    old_status = task.get("status", "")
+    update_task(project, task_id, status="в работе", needs_help="нет")
+    append_log_entry(project, task_id, "смена_статуса", old_value=old_status, new_value="в работе", reason_comment=f"{ROMAN_CHAT_NAME}: {text}")
+    append_comment(project, task_id, "Роман", text, related_status="в работе")
+
+    assignee_id = task.get("assignee_telegram_id")
+    if assignee_id:
+        try:
+            await context.bot.send_message(
+                chat_id=int(assignee_id),
+                text=f"💬 {ROMAN_CHAT_NAME} по задаче «{task['task_text']}»: {text}\n\nСтатус — «в работе».",
+            )
+        except Exception:
+            pass
+
+    await update.effective_message.reply_text(f"✅ Отправил сотруднику. Статус задачи «{task['task_text']}» — «в работе».")
+    return True
+
+
 async def on_mytasks_manage_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Забирает текстовый ввод для управления своими задачами из /mytasks
     (перенос срока, комментарий к закрытию, запрос помощи). Возвращает True,
     если сообщение обработано — по конвенции остальных claim-хендлеров в
     on_private_text."""
     user_id = update.effective_user.id
+
+    owner_state = _owner_pending.get(str(user_id))
+    if owner_state:
+        return await _handle_owner_help_reply(update, context, user_id, owner_state)
+
     state = _pending.get(str(user_id))
     if not state:
         return False
@@ -240,7 +332,12 @@ async def on_mytasks_manage_reply(update: Update, context: ContextTypes.DEFAULT_
             update_task(project, task_id, needs_help="да")
             append_log_entry(project, task_id, "запрос_помощи", old_value=old_needs_help, new_value="да", reason_comment=text)
         append_comment(project, task_id, "сотрудник", text, related_status=task.get("status", ""))
-        await _notify_owner(context.bot, f"🆘 Просьба о помощи по задаче «{task['task_text']}» ({project}).\nКомментарий: {text}")
+        await _notify_owner_help(
+            context.bot,
+            state["market_id"],
+            task_id,
+            f"🆘 Просьба о помощи по задаче «{task['task_text']}» ({project}).\nКомментарий: {text}",
+        )
         updated = get_task(project, task_id)
         await update.effective_message.reply_text(
             f"✅ Передал Роме, что нужна помощь.\n\n{_task_card_text(project, updated)}",

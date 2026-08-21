@@ -1,23 +1,22 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from bot.onboarding import find_homonyms, find_telegram_id_for_assignee
+from bot.onboarding import get_display_name, get_onboarded_employees
 from bot.queries import task_line
 from bot.status_cycle import ask_task_status_now
 from config.settings import ROMAN_TELEGRAM_ID
 from config.timeutil import fmt_date, parse_date
 from monitoring.markets import get_market, get_market_by_name, list_markets, list_market_names
+from tasks.comments import append_comment
 from tasks.log import append_log_entry
 from tasks.tasks import get_all_tasks, get_task, move_task, update_task
 
 # telegram_user_id (str) владельца -> список имён для последнего показа /employee (по индексу в кнопках)
 _employee_options: dict[str, list[str]] = {}
 
-# telegram_user_id (str) владельца -> {"field": "deadline"|"assignee", "market_id": int, "task_id": str}
+# telegram_user_id (str) владельца -> {"field": "deadline"|"delegate_comment", "market_id": int, "task_id": str,
+# "target_id"?: int, "target_name"?: str}
 _awaiting_edit: dict[str, dict] = {}
-
-# telegram_user_id (str) владельца -> {"candidates": [...], "market_id": int, "task_id": str}
-_pending_assignee_candidates: dict[str, dict] = {}
 
 
 def _is_roman(update: Update) -> bool:
@@ -135,7 +134,7 @@ def _task_card_keyboard(market_id: int, task_id: str) -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton("📅 Срок", callback_data=f"tmg:deadline:{market_id}:{task_id}"),
-                InlineKeyboardButton("👤 Исполнитель", callback_data=f"tmg:assignee:{market_id}:{task_id}"),
+                InlineKeyboardButton("🤝 Делегировать", callback_data=f"tmg:delegate:{market_id}:{task_id}"),
             ],
             [
                 InlineKeyboardButton("📨 Запросить статус", callback_data=f"tmg:askstatus:{market_id}:{task_id}"),
@@ -144,6 +143,22 @@ def _task_card_keyboard(market_id: int, task_id: str) -> InlineKeyboardMarkup:
             [InlineKeyboardButton("↩️ К списку", callback_data=f"tmg:openproj:{market_id}")],
         ]
     )
+
+
+def _employee_label(employee: dict) -> str:
+    return employee["real_name"] or employee["full_name"] or (f"@{employee['username']}" if employee["username"] else str(employee["user_id"]))
+
+
+def _delegate_pick_keyboard(market_id: int, task_id: str) -> InlineKeyboardMarkup | None:
+    employees = get_onboarded_employees()
+    if not employees:
+        return None
+    buttons = [
+        [InlineKeyboardButton(_employee_label(e), callback_data=f"tmg:delegatepick:{market_id}:{task_id}:{e['user_id']}")]
+        for e in employees
+    ]
+    buttons.append([InlineKeyboardButton("↩️ Отмена", callback_data=f"tmg:task:{market_id}:{task_id}")])
+    return InlineKeyboardMarkup(buttons)
 
 
 async def _show_task_card(query, market_id: int, task_id: str) -> None:
@@ -158,19 +173,22 @@ async def _show_task_card(query, market_id: int, task_id: str) -> None:
     await query.edit_message_text(_task_card_text(market["name"], task), reply_markup=_task_card_keyboard(market_id, task_id))
 
 
-async def _apply_assignee_change(bot, reply_target, market_id: int, task_id: str, name: str, telegram_id: int | None) -> None:
+async def _apply_delegation(bot, reply_target, market_id: int, task_id: str, target_id: int, target_name: str, comment: str) -> None:
     market = get_market(market_id)
     project = market["name"]
-    update_task(project, task_id, assignee=name, assignee_telegram_id=str(telegram_id) if telegram_id else "")
+    update_task(project, task_id, assignee=target_name, assignee_telegram_id=str(target_id))
+    append_comment(project, task_id, "Роман", comment, related_status=get_task(project, task_id).get("status", ""))
     task = get_task(project, task_id)
-    if telegram_id:
-        try:
-            await bot.send_message(
-                chat_id=telegram_id, text=f"📌 Тебе назначена задача «{task['task_text']}» (проект «{project}»)."
-            )
-        except Exception:
-            pass
-    await reply_target(_task_card_text(project, task), reply_markup=_task_card_keyboard(market_id, task_id))
+    try:
+        await bot.send_message(
+            chat_id=target_id,
+            text=f"📌 Тебе делегирована задача «{task['task_text']}» (проект «{project}»).\nКомментарий: {comment}",
+        )
+    except Exception:
+        pass
+    await reply_target(
+        f"✅ Делегировано: {target_name}.\n\n{_task_card_text(project, task)}", reply_markup=_task_card_keyboard(market_id, task_id)
+    )
 
 
 async def on_task_manage_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -217,12 +235,29 @@ async def on_task_manage_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(f"Новый срок для {task_id} (например, 15.09.2026 или «через неделю»):")
         return
 
-    if action == "assignee":
+    if action == "delegate":
         market_id, task_id = int(parts[2]), parts[3]
-        owner_id = str(query.from_user.id)
-        _awaiting_edit[owner_id] = {"field": "assignee", "market_id": market_id, "task_id": task_id}
         await query.answer()
-        await query.edit_message_text(f"Новый исполнитель для {task_id} — введите имя:")
+        keyboard = _delegate_pick_keyboard(market_id, task_id)
+        if not keyboard:
+            await query.message.reply_text("Пока нет ни одного онбордившегося сотрудника, чтобы делегировать.")
+            return
+        await query.edit_message_text(f"Кому делегировать {task_id}?", reply_markup=keyboard)
+        return
+
+    if action == "delegatepick":
+        market_id, task_id, target_id = int(parts[2]), parts[3], int(parts[4])
+        owner_id = str(query.from_user.id)
+        target_name = get_display_name(target_id)
+        _awaiting_edit[owner_id] = {
+            "field": "delegate_comment",
+            "market_id": market_id,
+            "task_id": task_id,
+            "target_id": target_id,
+            "target_name": target_name,
+        }
+        await query.answer()
+        await query.edit_message_text(f"Комментарий для {target_name} — почему делегируете {task_id}?")
         return
 
     if action == "askstatus":
@@ -266,21 +301,6 @@ async def on_task_manage_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("Переношу…")
         new_task_id = move_task(market["name"], task_id, new_market["name"])
         await query.edit_message_text(f"✅ Задача перенесена: {task_id} → «{new_market['name']}» / {new_task_id}.")
-        return
-
-    if action == "pickassignee":
-        idx = int(parts[2])
-        owner_id = str(query.from_user.id)
-        state = _pending_assignee_candidates.pop(owner_id, None)
-        if not state or idx >= len(state["candidates"]):
-            await query.answer("Устарело", show_alert=True)
-            return
-        chosen = state["candidates"][idx]
-        await query.answer()
-        name = chosen["full_name"] or chosen["username"] or str(chosen["user_id"])
-        await _apply_assignee_change(
-            context.bot, query.edit_message_text, state["market_id"], state["task_id"], name, chosen["user_id"]
-        )
         return
 
     await query.answer()
@@ -337,33 +357,14 @@ async def on_task_manage_reply(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return True
 
-    if state["field"] == "assignee":
+    if state["field"] == "delegate_comment":
         if not text:
-            await update.effective_message.reply_text("Имя не может быть пустым, введите ещё раз:")
+            await update.effective_message.reply_text("Комментарий не может быть пустым, напишите ещё раз:")
             _awaiting_edit[owner_id] = state
             return True
 
-        candidates = find_homonyms(project, text)
-        if len(candidates) > 1:
-            _pending_assignee_candidates[owner_id] = {
-                "candidates": candidates,
-                "market_id": state["market_id"],
-                "task_id": task_id,
-            }
-            buttons = [
-                [
-                    InlineKeyboardButton(
-                        c["full_name"] or c["username"] or str(c["user_id"]), callback_data=f"tmg:pickassignee:{i}"
-                    )
-                ]
-                for i, c in enumerate(candidates)
-            ]
-            await update.effective_message.reply_text(f"Нашёл несколько «{text}» — кто из них?", reply_markup=InlineKeyboardMarkup(buttons))
-            return True
-
-        telegram_id = find_telegram_id_for_assignee(project, text)
-        await _apply_assignee_change(
-            context.bot, update.effective_message.reply_text, state["market_id"], task_id, text, telegram_id
+        await _apply_delegation(
+            context.bot, update.effective_message.reply_text, state["market_id"], task_id, state["target_id"], state["target_name"], text
         )
         return True
 
