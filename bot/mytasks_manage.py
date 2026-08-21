@@ -31,6 +31,11 @@ def _find_my_tasks(user_id: int) -> list[tuple[str, dict]]:
     return found
 
 
+def _short_title(task_text: str, limit: int = 40) -> str:
+    text = task_text.strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
 def _mytasks_view(user_id: int) -> tuple[str, InlineKeyboardMarkup | None]:
     found = _find_my_tasks(user_id)
     if not found:
@@ -45,7 +50,11 @@ def _mytasks_view(user_id: int) -> tuple[str, InlineKeyboardMarkup | None]:
         lines.append(f"\n• [{project}] {task['task_text']}\n  Срок: {deadline} | Статус: {status}{help_mark}")
         market = get_market_by_name(project)
         buttons.append(
-            [InlineKeyboardButton(f"⚙️ {task['task_id']} — {project}", callback_data=f"myt:task:{market['id']}:{task['task_id']}")]
+            [
+                InlineKeyboardButton(
+                    f"⚙️ {_short_title(task['task_text'])}", callback_data=f"myt:task:{market['id']}:{task['task_id']}"
+                )
+            ]
         )
     lines.append("\n\nНажми на задачу ниже, чтобы перенести срок, отметить прогресс или попросить помощи.")
     return "\n".join(lines), InlineKeyboardMarkup(buttons)
