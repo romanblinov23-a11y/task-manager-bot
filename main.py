@@ -4,7 +4,7 @@ from datetime import time as dt_time
 from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
-from bot.chat_registration import on_register_project
+from bot.chat_registration import on_register_project, on_register_project_choice
 from bot.competitors import (
     on_add_competitor_command,
     on_add_competitor_factor_field_choice,
@@ -222,6 +222,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, on_group_message))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))
+    app.add_handler(CallbackQueryHandler(on_register_project_choice, pattern=r"^regchat:"))
     app.add_handler(CallbackQueryHandler(on_confirmation_callback, pattern=r"^confirm:"))
     app.add_handler(CallbackQueryHandler(on_edit_field_selected, pattern=r"^edit_field:"))
     app.add_handler(CallbackQueryHandler(on_set_category, pattern=r"^set_cat:"))

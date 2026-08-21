@@ -1,16 +1,22 @@
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from config.chats import register_chat
 from monitoring.managers import is_owner
-from monitoring.markets import list_market_names
+from monitoring.markets import get_market, list_markets
+
+
+def _project_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(m["name"], callback_data=f"regchat:{m['id']}")] for m in markets]
+    )
 
 
 async def on_register_project(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Самообслуживание для онбординга чата: владелец вызывает эту команду
-    внутри рабочей группы, чтобы привязать её к проекту без правки .env
-    и перезапуска бота. Посмотреть/сменить/отвязать привязки существующих
-    чатов можно в /managers → «💬 Чаты»."""
+    внутри рабочей группы и выбирает проект кнопкой — без ввода названия
+    вручную. Посмотреть/сменить/отвязать привязки существующих чатов можно
+    в /managers → «💬 Чаты»."""
     if not is_owner(update.effective_user.id):
         return
 
@@ -19,13 +25,34 @@ async def on_register_project(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.effective_message.reply_text("Эта команда работает только внутри группового чата.")
         return
 
-    projects = list_market_names()
-    project = " ".join(context.args) if context.args else ""
-    if project not in projects:
-        await update.effective_message.reply_text(
-            "Укажите проект: /register_project <название>\nДоступные: " + ", ".join(projects)
-        )
+    markets = list_markets()
+    if not markets:
+        await update.effective_message.reply_text("Пока нет ни одного проекта — сначала /add_project в личке боту.")
         return
 
-    register_chat(chat.id, project)
-    await update.effective_message.reply_text(f"✅ Этот чат привязан к проекту «{project}».")
+    await update.effective_message.reply_text(
+        "К какому проекту привязать этот чат?", reply_markup=_project_pick_keyboard(markets)
+    )
+
+
+async def on_register_project_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Проект не найден", show_alert=True)
+        return
+
+    chat_id = query.message.chat.id
+    register_chat(chat_id, market["name"])
+    await query.answer()
+    bot_username = context.bot.username
+    await query.edit_message_text(
+        f"👋 Привет! Я бот Енисей, помогаю Роме в этом чате по проекту «{market['name']}».\n\n"
+        f"Тегните меня (@{bot_username}) или ответьте на моё сообщение — соберу из переписки "
+        "договорённости и пришлю задачи на подтверждение."
+    )
