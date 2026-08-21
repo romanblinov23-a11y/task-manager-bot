@@ -90,22 +90,3 @@ async def on_needhelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.effective_message.reply_text("\n".join(lines))
 
 
-async def on_mytasks_command(update, context):
-    """/mytasks — сотрудник видит свои активные задачи по всем проектам."""
-    user_id = str(update.effective_user.id)
-    found = []
-    for project in list_market_names():
-        for task in get_all_tasks(project):
-            if str(task.get("assignee_telegram_id")) == user_id and task.get("status") != "выполнена":
-                found.append((project, task))
-
-    if not found:
-        await update.effective_message.reply_text("У тебя нет активных задач.")
-        return
-
-    lines = ["📋 Твои задачи в работе:"]
-    for project, task in found:
-        deadline = fmt_date(task.get("deadline_current"))
-        status = task.get("status") or "—"
-        lines.append(f"\n• [{project}] {task['task_text']}\n  Срок: {deadline} | Статус: {status}")
-    await update.effective_message.reply_text("\n".join(lines))

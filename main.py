@@ -95,8 +95,8 @@ from bot.monitoring_flow import (
 from bot.onboarding import on_force_onboard, on_help, on_project_choice, on_role_choice, on_start
 from bot.private import on_private_document, on_private_text, on_project_selected
 from bot.regulations import on_regulations_command
+from bot.mytasks_manage import on_mytasks_callback, on_mytasks_command
 from bot.queries import (
-    on_mytasks_command,
     on_needhelp_command,
     on_stuck_command,
 )
@@ -290,6 +290,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_dashboard_market_choice, pattern=r"^dash_market:"))
     app.add_handler(CallbackQueryHandler(on_dashboard_aggregate_choice, pattern=r"^dash_all$"))
     app.add_handler(CallbackQueryHandler(on_task_manage_callback, pattern=r"^tmg:"))
+    app.add_handler(CallbackQueryHandler(on_mytasks_callback, pattern=r"^myt:"))
 
     app.job_queue.run_daily(_status_check_job, time=_parse_time(STATUS_CHECK_TIME, TZ))
     app.job_queue.run_daily(_daily_report_job, time=_parse_time(DAILY_REPORT_TIME, TZ))
