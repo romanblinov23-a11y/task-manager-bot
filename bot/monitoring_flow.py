@@ -4,13 +4,13 @@ from telegram.ext import ContextTypes
 from config.timeutil import parse_date, today
 from monitoring.calculations import compute_market_capacity, compute_share, is_sudden_change
 from monitoring.competitors import get_competitor, list_competitors
-from monitoring.constants import FACTOR_CHANGE_OBSERVATION_CATEGORY, MONITORING_CYCLE_DAYS, OBSERVATION_CATEGORIES
+from monitoring.constants import FACTOR_CHANGE_OBSERVATION_CATEGORY, OBSERVATION_CATEGORIES
 from monitoring.factor_schema import apply_changes_to_factors
 from monitoring.factors import get_latest_factors, save_factors
 from monitoring.managers import get_manager, get_managers_for_market, get_markets_for_manager, is_active_manager, is_owner
 from monitoring.markets import get_market, list_markets
 from monitoring.observations import create_observation
-from monitoring.readings import get_competitors_pending_this_cycle, get_last_market_cycle_date, get_latest_reading, record_reading
+from monitoring.readings import current_cycle_start, get_competitors_pending_this_cycle, get_latest_reading, next_cycle_start, record_reading
 from monitoring.schedule import list_markets_scheduled_for_weekday
 from prompts.factor_update import propose_factor_changes
 
@@ -88,8 +88,7 @@ async def _finish_cycle(message, user_id: str) -> None:
         if not latest:
             continue
         readings[c["id"]] = latest["avg_checks_per_day"]
-        cutoff = today().fromordinal(today().toordinal() - MONITORING_CYCLE_DAYS).isoformat()
-        if latest["reading_at"] < cutoff:
+        if latest["reading_at"] < current_cycle_start():
             stale_ids.add(c["id"])
 
     capacity = compute_market_capacity(readings)
@@ -122,15 +121,9 @@ async def _start_flow_for_market(message, user_id: str, market: dict) -> None:
         return
 
     if not pending_competitors:
-        last_date = get_last_market_cycle_date(market["id"])
-        next_date = "—"
-        if last_date:
-            from datetime import date as _date
-
-            next_date = (_date.fromisoformat(last_date).fromordinal(_date.fromisoformat(last_date).toordinal() + MONITORING_CYCLE_DAYS)).isoformat()
         await message.reply_text(
             f"Мониторинг по рынку «{market['name']}» уже проведён на этой неделе. "
-            f"Следующая проверка возможна с {next_date}."
+            f"Следующая проверка возможна с {next_cycle_start()}."
         )
         return
 

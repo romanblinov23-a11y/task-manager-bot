@@ -1,21 +1,40 @@
+from datetime import timedelta
+
 from config.timeutil import today
-from monitoring.constants import MONITORING_CYCLE_DAYS
 from monitoring.db import get_connection
 
 
-def _cutoff_date() -> str:
-    return today().fromordinal(today().toordinal() - MONITORING_CYCLE_DAYS).isoformat()
+def _week_start(d):
+    return d - timedelta(days=d.weekday())
+
+
+def current_cycle_start() -> str:
+    """Начало текущего цикла мониторинга — понедельник этой календарной
+    недели. Раньше гейт "уже проведён на этой неделе" считался формулой
+    "7 дней с последнего снятия", что было некорректно: если обход рынка в
+    одну неделю прошёл, скажем, в четверг, а в другую — в понедельник, то
+    ближайшая допустимая дата съезжала на день-два вперёд от реального
+    начала новой недели. Понедельник — фиксированная точка отсчёта, не
+    зависящая от того, в какой день недели фактически прошёл предыдущий
+    обход."""
+    return _week_start(today()).isoformat()
+
+
+def next_cycle_start() -> str:
+    """Понедельник следующей календарной недели — дата, с которой станет
+    доступен новый цикл мониторинга."""
+    return (_week_start(today()) + timedelta(days=7)).isoformat()
 
 
 def record_reading(
     competitor_id: int, avg_checks_per_day: float, created_by: int, note: str = "", reading_at: str | None = None
 ) -> dict:
     """Одно снятие на конкурента за цикл мониторинга (§7): если для этого
-    конкурента уже есть снятие моложе MONITORING_CYCLE_DAYS дней — обновляет
-    его, а не создаёт дубль."""
+    конкурента уже есть снятие в рамках текущей календарной недели —
+    обновляет его, а не создаёт дубль."""
     conn = get_connection()
     try:
-        cutoff = _cutoff_date()
+        cutoff = current_cycle_start()
         existing = conn.execute(
             """
             SELECT id FROM daily_avg_reading
@@ -112,25 +131,6 @@ def get_readings(competitor_id: int, limit: int | None = None) -> list[dict]:
         conn.close()
 
 
-def get_last_market_cycle_date(market_id: int) -> str | None:
-    """Дата последнего снятия по любому конкуренту этого рынка — используется
-    для проверки «не чаще раза в неделю» на уровне рынка (§7, §5.3)."""
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            """
-            SELECT MAX(daily_avg_reading.reading_at) AS last_date
-            FROM daily_avg_reading
-            JOIN competitor ON competitor.id = daily_avg_reading.competitor_id
-            WHERE competitor.market_id = ?
-            """,
-            (market_id,),
-        ).fetchone()
-        return row["last_date"] if row else None
-    finally:
-        conn.close()
-
-
 def get_last_reading_dates_by_creator(market_id: int) -> dict[int, str]:
     """Для каждого telegram_user_id, вносившего снятия по конкурентам этого
     рынка — дата его последнего снятия. Используется для показа активности
@@ -153,12 +153,12 @@ def get_last_reading_dates_by_creator(market_id: int) -> dict[int, str]:
 
 
 def get_competitors_pending_this_cycle(market_id: int) -> list[dict]:
-    """Конкуренты (и точка Surf) рынка, у которых нет снятия за последние
-    MONITORING_CYCLE_DAYS дней — это то, что ещё нужно пройти на текущем
+    """Конкуренты (и точка Surf) рынка, у которых нет снятия на текущей
+    календарной неделе — это то, что ещё нужно пройти на текущем
     /monitoring (включая пропущенные в прошлый раз точки, §5.3)."""
     from monitoring.competitors import list_competitors
 
-    cutoff = _cutoff_date()
+    cutoff = current_cycle_start()
     pending = []
     for competitor in list_competitors(market_id):
         latest = get_latest_reading(competitor["id"])
