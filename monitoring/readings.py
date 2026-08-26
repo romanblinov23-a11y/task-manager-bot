@@ -107,6 +107,29 @@ def import_historical_reading(
         conn.close()
 
 
+def update_reading(reading_id: int, *, reading_at: str | None = None, avg_checks_per_day: float | None = None) -> None:
+    """Точечно исправляет уже сохранённое снятие — дату и/или значение.
+    Нужна владельцу, если снятие один раз внесли неверно (например, с
+    датой в будущем — из-за такой записи гейт по календарной неделе
+    считает точку вечно "уже пройденной") и чинить это приходится не через
+    обычный цикл /monitoring, а вручную, см. /fix_reading."""
+    updates = {}
+    if reading_at is not None:
+        updates["reading_at"] = reading_at
+    if avg_checks_per_day is not None:
+        updates["avg_checks_per_day"] = avg_checks_per_day
+    if not updates:
+        return
+    conn = get_connection()
+    try:
+        set_clause = ", ".join(f"{field} = ?" for field in updates)
+        params = [*updates.values(), reading_id]
+        conn.execute(f"UPDATE daily_avg_reading SET {set_clause} WHERE id = ?", params)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_latest_reading(competitor_id: int) -> dict | None:
     conn = get_connection()
     try:
