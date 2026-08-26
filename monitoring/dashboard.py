@@ -251,6 +251,7 @@ def _ranking_rows(series: list[dict], timeline: list[dict]) -> list[dict]:
                 "competitor": s["competitor"],
                 "place": place,
                 "share": round(timeline[-1]["shares"].get(cid, 0), 1),
+                "value": round(timeline[-1]["values"].get(cid, 0) or 0, 1),
                 "prev_place": prev_place,
                 "delta": (prev_place - place) if prev_place is not None else None,
             }
@@ -421,7 +422,7 @@ def _render_ranking_table(rows: list[dict]) -> str:
         own_tag = ' <span class="own-tag">(наша точка)</span>' if c["is_own"] else ""
         body.append(
             f"<tr><td>{r['place']}</td><td>{c['code']} — {c['name']}{own_tag}</td>"
-            f"<td>{r['share']:g}%</td><td>{delta_html}</td></tr>"
+            f"<td>{r['share']:g}% ({r['value']:g} чек/день)</td><td>{delta_html}</td></tr>"
         )
     return (
         "<table><thead><tr><th>Место</th><th>Точка</th><th>Доля</th><th>Δ места</th></tr></thead>"
@@ -732,6 +733,7 @@ const shareTrendData = {{
 }};
 const shareNowLabels = {share_now_labels};
 const shareNowData = {share_now_data};
+const shareNowValues = {share_now_values};
 const shareNowColors = {share_now_colors};
 const formatLabels = {format_labels};
 const formatData = {format_data};
@@ -785,10 +787,36 @@ new Chart(document.getElementById('capacityChart'), {{
   options: {{ plugins: {{ legend: {{ display: false }} }}, scales: {{ y: {{ beginAtZero: true }} }} }}
 }});
 
+const shareNowValueLabelsPlugin = {{
+  id: 'shareNowValueLabels',
+  afterDatasetsDraw(chart) {{
+    const {{ ctx }} = chart;
+    const meta = chart.getDatasetMeta(0);
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = '11px "PT Sans", -apple-system, sans-serif';
+    ctx.fillStyle = '#8A7A6D';
+    meta.data.forEach((bar, i) => {{
+      const value = shareNowValues[i];
+      if (value === undefined || value === null) return;
+      ctx.fillText(`${{value}} чек/день`, bar.x, bar.y - 8);
+    }});
+    ctx.restore();
+  }}
+}};
+
 new Chart(document.getElementById('shareNowChart'), {{
   type: 'bar',
   data: {{ labels: shareNowLabels, datasets: [{{ label: 'Доля, %', data: shareNowData, backgroundColor: shareNowColors }}] }},
-  options: {{ plugins: {{ legend: {{ display: false }} }}, scales: {{ y: {{ beginAtZero: true, max: 100 }} }} }}
+  plugins: [shareNowValueLabelsPlugin],
+  options: {{
+    layout: {{ padding: {{ top: 20 }} }},
+    plugins: {{
+      legend: {{ display: false }},
+      tooltip: {{ callbacks: {{ label: (item) => `Доля: ${{item.formattedValue}}% · ${{shareNowValues[item.dataIndex]}} чек/день` }} }}
+    }},
+    scales: {{ y: {{ beginAtZero: true, max: 100 }} }}
+  }}
 }});
 
 if (formatLabels.length) {{
@@ -851,9 +879,10 @@ def generate_market_dashboard(market_id: int) -> tuple[str, str]:
     def raw_datasets_for(tl):
         return [_raw_dataset_for(s, tl, colors[s["competitor"]["id"]]) for s in ordered_series]
 
-    now_point = timeline[-1] if timeline else {"shares": {}}
+    now_point = timeline[-1] if timeline else {"shares": {}, "values": {}}
     share_now_labels = [s["competitor"]["name"] for s in series]
     share_now_data = [round(now_point["shares"].get(s["competitor"]["id"], 0) or 0, 1) for s in series]
+    share_now_values = [round(now_point["values"].get(s["competitor"]["id"], 0) or 0, 1) for s in series]
     share_now_colors = [colors[s["competitor"]["id"]] for s in series]
 
     competitor_anomalies = _detect_competitor_anomalies(series, market_id)
@@ -897,6 +926,7 @@ def generate_market_dashboard(market_id: int) -> tuple[str, str]:
         share_datasets_1m=json.dumps(datasets_for(timeline_1m), ensure_ascii=False),
         share_now_labels=json.dumps(share_now_labels, ensure_ascii=False),
         share_now_data=json.dumps(share_now_data),
+        share_now_values=json.dumps(share_now_values),
         share_now_colors=json.dumps(share_now_colors),
         format_labels=json.dumps([fmt for fmt, _ in format_items], ensure_ascii=False),
         format_data=json.dumps([n for _, n in format_items]),
