@@ -28,8 +28,20 @@ def _market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"monf_market:{m['id']}")] for m in markets])
 
 
+def _go_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Поехали", callback_data="monf_ready")]])
+
+
+def _picker_keyboard(competitors: list[dict]) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(_competitor_label(c), callback_data=f"monf_pick:{c['id']}")] for c in competitors
+    ]
+    buttons.append([InlineKeyboardButton("✅ Готово, закончить", callback_data="monf_finish")])
+    return InlineKeyboardMarkup(buttons)
+
+
 def _skip_keyboard(competitor_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton("⏭ Пропустить", callback_data=f"monf_skip:{competitor_id}")]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("⏭ Не сейчас, к списку точек", callback_data=f"monf_skip:{competitor_id}")]])
 
 
 def _date_keyboard() -> InlineKeyboardMarkup:
@@ -60,20 +72,27 @@ async def _ask_reading(message, state: dict) -> None:
     competitor = state["current"]
     await message.reply_text(
         f"{_competitor_label(competitor)}\n\n"
-        "Среднее число чеков в день? (напоминание: (последний номер чека − предыдущий) ÷ "
-        "число дней между визитами)",
+        "Сколько чеков в среднем пробивает эта точка в день?\n\n"
+        "Как посчитать: номер последнего чека сейчас минус номер чека на прошлом замере, "
+        "разделить на число дней между визитами.\n"
+        "Например: сейчас чек №3350, на прошлом замере был №3200, между визитами 7 дней "
+        "→ (3350 − 3200) ÷ 7 ≈ 21 чек/день.",
         reply_markup=_skip_keyboard(competitor["id"]),
     )
 
 
-async def _advance_to_next(message, user_id: str) -> None:
+async def _show_picker(message, user_id: str) -> None:
+    """Показывает точки рынка, которые ещё нужно внести в этом цикле —
+    сотрудник сам выбирает, с какой продолжить, вместо фиксированного
+    порядка очереди."""
     state = _pending[user_id]
-    if not state["queue"]:
+    pending = get_competitors_pending_this_cycle(state["market_id"])
+    if not pending:
         await _finish_cycle(message, user_id)
         return
-    state["current"] = state["queue"].pop(0)
-    state["step"] = "reading"
-    await _ask_reading(message, state)
+    state["current"] = None
+    state["step"] = None
+    await message.reply_text("Какую точку вносим?", reply_markup=_picker_keyboard(pending))
 
 
 async def _finish_cycle(message, user_id: str) -> None:
@@ -103,10 +122,6 @@ async def _finish_cycle(message, user_id: str) -> None:
         lines.append(f"{_competitor_label(c)}: {value:g} чек/день, доля {share:.1f}%{flag}")
     lines.append(f"\nЁмкость рынка: {capacity:g} чек/день")
 
-    if state["skipped"]:
-        skipped_labels = ", ".join(state["skipped"])
-        lines.append(f"\nПропущено в этот раз (спросим на следующем /monitoring): {skipped_labels}")
-
     await message.reply_text("\n".join(lines))
 
 
@@ -127,14 +142,11 @@ async def _start_flow_for_market(message, user_id: str, market: dict) -> None:
         )
         return
 
-    _pending[user_id] = {
-        "market_id": market["id"],
-        "market_name": market["name"],
-        "queue": [c["id"] for c in pending_competitors],
-        "skipped": [],
-    }
-    await message.reply_text(f"Начинаем мониторинг рынка «{market['name']}» — точек к проверке: {len(pending_competitors)}.")
-    await _advance_to_next(message, user_id)
+    _pending[user_id] = {"market_id": market["id"], "market_name": market["name"], "current": None, "step": None}
+    await message.reply_text(
+        f"Начинаем мониторинг рынка «{market['name']}» — точек к проверке: {len(pending_competitors)}.",
+        reply_markup=_go_keyboard(),
+    )
 
 
 async def on_monitoring_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -184,6 +196,51 @@ async def on_monitoring_start_button(update: Update, context: ContextTypes.DEFAU
     await _start_flow_for_market(query.message, str(user.id), market)
 
 
+async def on_monitoring_ready(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Кнопка «🚀 Поехали» — показывает список точек рынка на выбор,
+    вместо того чтобы сразу спрашивать про первую по фиксированному порядку."""
+    query = update.callback_query
+    user_id = str(query.from_user.id)
+    if user_id not in _pending:
+        await query.answer()
+        return
+    await query.answer()
+    await query.edit_message_reply_markup(reply_markup=None)
+    await _show_picker(query.message, user_id)
+
+
+async def on_monitoring_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Сотрудник выбрал в списке точку, которую вносит сейчас."""
+    query = update.callback_query
+    user_id = str(query.from_user.id)
+    state = _pending.get(user_id)
+    if not state:
+        await query.answer()
+        return
+    competitor = get_competitor(int(query.data.split(":", 1)[1]))
+    if not competitor:
+        await query.answer("Точка не найдена", show_alert=True)
+        return
+    state["current"] = competitor
+    state["step"] = "reading"
+    await query.answer()
+    await query.edit_message_reply_markup(reply_markup=None)
+    await _ask_reading(query.message, state)
+
+
+async def on_monitoring_finish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Кнопка «✅ Готово, закончить» в списке точек — завершает цикл
+    досрочно, не дожидаясь, пока внесут все точки."""
+    query = update.callback_query
+    user_id = str(query.from_user.id)
+    if user_id not in _pending:
+        await query.answer()
+        return
+    await query.answer()
+    await query.edit_message_reply_markup(reply_markup=None)
+    await _finish_cycle(query.message, user_id)
+
+
 async def on_monitoring_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     user_id = str(query.from_user.id)
@@ -191,10 +248,9 @@ async def on_monitoring_skip(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not state or not state.get("current") or state["current"]["id"] != int(query.data.split(":", 1)[1]):
         await query.answer()
         return
-    await query.answer("Пропущено")
-    state["skipped"].append(_competitor_label(state["current"]))
+    await query.answer("Хорошо, вернёмся к ней позже")
     await query.edit_message_reply_markup(reply_markup=None)
-    await _advance_to_next(query.message, user_id)
+    await _show_picker(query.message, user_id)
 
 
 async def on_monitoring_date_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -275,7 +331,7 @@ async def on_monitoring_factors_choice(update: Update, context: ContextTypes.DEF
     await query.answer()
     if choice == "no":
         await query.edit_message_text("Хорошо.")
-        await _advance_to_next(query.message, user_id)
+        await _show_picker(query.message, user_id)
         return
     state["step"] = "factors_ai_text"
     await query.edit_message_text("Опишите, что изменилось.")
@@ -296,7 +352,7 @@ async def on_monitoring_factor_confirm(update: Update, context: ContextTypes.DEF
 
     if choice == "no" or not changes:
         await query.edit_message_text("Хорошо, факторы не меняю.")
-        await _advance_to_next(query.message, user_id)
+        await _show_picker(query.message, user_id)
         return
 
     competitor = state["current"]
@@ -311,7 +367,7 @@ async def on_monitoring_factor_confirm(update: Update, context: ContextTypes.DEF
         created_by=int(user_id),
     )
     await query.edit_message_text(f"✅ Факторы обновлены: {summary}")
-    await _advance_to_next(query.message, user_id)
+    await _show_picker(query.message, user_id)
 
 
 async def on_monitoring_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -376,14 +432,14 @@ async def on_monitoring_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
             changes = propose_factor_changes(competitor["name"], latest, text)
         except Exception:
             await update.effective_message.reply_text("Не получилось обработать описание — пропускаю обновление факторов.")
-            await _advance_to_next(update.effective_message, user_id)
+            await _show_picker(update.effective_message, user_id)
             return True
 
         if not changes:
             await update.effective_message.reply_text(
                 "Не нашёл в описании конкретных изменений по факторам формирования — пропускаю."
             )
-            await _advance_to_next(update.effective_message, user_id)
+            await _show_picker(update.effective_message, user_id)
             return True
 
         state["proposed_factor_changes"] = changes

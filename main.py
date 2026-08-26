@@ -87,8 +87,11 @@ from bot.monitoring_flow import (
     on_monitoring_date_choice,
     on_monitoring_factor_confirm,
     on_monitoring_factors_choice,
+    on_monitoring_finish,
     on_monitoring_market_choice,
     on_monitoring_obs_choice,
+    on_monitoring_pick,
+    on_monitoring_ready,
     on_monitoring_skip,
     on_monitoring_start_button,
     send_monitoring_reminders,
@@ -285,6 +288,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_schedule_done, pattern=r"^sched_done:"))
     app.add_handler(CallbackQueryHandler(on_monitoring_market_choice, pattern=r"^monf_market:"))
     app.add_handler(CallbackQueryHandler(on_monitoring_start_button, pattern=r"^monf_go:"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_ready, pattern=r"^monf_ready$"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_pick, pattern=r"^monf_pick:"))
+    app.add_handler(CallbackQueryHandler(on_monitoring_finish, pattern=r"^monf_finish$"))
     app.add_handler(CallbackQueryHandler(on_monitoring_assign_choice, pattern=r"^monf_assign:"))
     app.add_handler(CallbackQueryHandler(on_monitoring_skip, pattern=r"^monf_skip:"))
     app.add_handler(CallbackQueryHandler(on_monitoring_date_choice, pattern=r"^monf_date:"))
