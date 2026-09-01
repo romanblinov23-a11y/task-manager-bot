@@ -9,8 +9,8 @@ from bot.onboarding import get_display_name
 from config.settings import ROMAN_TELEGRAM_ID
 from config.timeutil import fmt_date
 from config.timeutil import today as tz_today
-from monitoring.managers import get_market_supervisor, is_owner
-from monitoring.markets import get_market
+from monitoring.managers import get_manager, get_market_supervisor, get_markets_for_manager, is_owner
+from monitoring.markets import get_market, list_markets
 from monitoring.shift_reports import (
     create_or_get_draft,
     get_report,
@@ -312,6 +312,20 @@ async def _finish_collection(bot: Bot, message, user_id: str) -> None:
         await _send_for_supervisor_approval(bot, report_id)
 
 
+async def _begin_collection(bot: Bot, message, user_id: int, market: dict, report_date: str) -> None:
+    report = create_or_get_draft(market["id"], report_date, user_id)
+    _pending[str(user_id)] = {
+        "market_id": market["id"],
+        "market_name": market["name"],
+        "report_date": report_date,
+        "report_id": report["id"],
+        "step_index": 0,
+        "answers": dict(report.get("data") or {}),
+        "is_supervisor_filling": _is_market_supervisor(user_id, market["id"]),
+    }
+    await _ask_current_question(bot, message, str(user_id))
+
+
 async def on_shift_report_fill(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     _, market_id_str, report_date = query.data.split(":", 2)
@@ -323,18 +337,65 @@ async def on_shift_report_fill(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = query.from_user.id
     await query.answer()
     await query.edit_message_reply_markup(reply_markup=None)
+    await _begin_collection(context.bot, query.message, user_id, market, report_date)
 
-    report = create_or_get_draft(market_id, report_date, user_id)
-    _pending[str(user_id)] = {
-        "market_id": market_id,
-        "market_name": market["name"],
-        "report_date": report_date,
-        "report_id": report["id"],
-        "step_index": 0,
-        "answers": dict(report.get("data") or {}),
-        "is_supervisor_filling": _is_market_supervisor(user_id, market_id),
-    }
-    await _ask_current_question(context.bot, query.message, str(user_id))
+
+_STATUS_LABELS = {
+    "awaiting_supervisor": "уже отправлен управляющему на согласование",
+    "awaiting_owner": "уже отправлен Роману на согласование",
+    "approved": "уже согласован, ждёт рассылки",
+    "dispatched": "уже разослан",
+}
+
+
+def _manual_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"shrep_manualmarket:{m['id']}")] for m in markets])
+
+
+async def _start_manual_report(bot: Bot, message, user_id: int, market: dict) -> None:
+    date_iso = tz_today().isoformat()
+    existing = get_report_by_date(market["id"], date_iso)
+    if existing and existing["status"] != "collecting":
+        label = _STATUS_LABELS.get(existing["status"], "уже обработан")
+        await message.reply_text(f"Отчёт по «{market['name']}» за сегодня {label}.")
+        return
+    await _begin_collection(bot, message, user_id, market, date_iso)
+
+
+async def on_shift_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/shift_report — принудительно начать (или продолжить) сегодняшний
+    вечерний отчёт, не дожидаясь автоматического опроса в 22:00. Доступно
+    любому активному менеджеру рынка (не только назначенному по графику) и
+    владельцу — например, если график ещё не загружен, отчёт нужно сдать
+    раньше срока, или сдаёт не тот, кто был по графику."""
+    user = update.effective_user
+    manager = get_manager(user.id)
+    if not is_owner(user.id) and (not manager or manager["status"] != "active"):
+        await update.effective_message.reply_text("Эта команда доступна только подтверждённым владельцем менеджерам.")
+        return
+
+    markets = list_markets() if is_owner(user.id) else get_markets_for_manager(user.id)
+    if not markets:
+        await update.effective_message.reply_text("Нет доступных рынков — сначала пройдите онбординг через /start.")
+        return
+
+    if len(markets) == 1:
+        await _start_manual_report(context.bot, update.effective_message, user.id, markets[0])
+        return
+
+    await update.effective_message.reply_text("По какому рынку вносим отчёт?", reply_markup=_manual_market_pick_keyboard(markets))
+
+
+async def on_shift_report_manual_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(f"Рынок: {market['name']}")
+    await _start_manual_report(context.bot, query.message, query.from_user.id, market)
 
 
 async def on_shift_report_absent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

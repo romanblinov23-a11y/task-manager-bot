@@ -57,7 +57,9 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
     подтвердил, что прочитал его регламент (см. send_next_regulation)."""
     uid = manager["telegram_user_id"]
     blocks = set(get_manager_blocks(uid)) & set(get_acknowledged_blocks(uid))
-    commands: list[BotCommand] = []
+    # Отчёт по смене — не привязан к блокам «Задачи»/«Мониторинг», доступен
+    # любому активному сотруднику вне зависимости от прочих прав.
+    commands: list[BotCommand] = [BotCommand("shift_report", "Внести отчёт по смене принудительно")]
     if BLOCK_TASKS in blocks:
         commands.append(BotCommand("mytasks", "Мои задачи в работе"))
     if BLOCK_MONITORING in blocks:

@@ -113,11 +113,13 @@ from bot.report_chat_registration import (
 from bot.shift_reports import (
     on_shift_report_absent,
     on_shift_report_addendum_reply,
+    on_shift_report_command,
     on_shift_report_edit,
     on_shift_report_edit_cancel,
     on_shift_report_edit_field,
     on_shift_report_edit_reply,
     on_shift_report_fill,
+    on_shift_report_manual_market_choice,
     on_shift_report_more_info,
     on_shift_report_more_info_reply,
     on_shift_report_owner_approve,
@@ -235,6 +237,7 @@ _ROMAN_COMMANDS = [
     BotCommand("dashboard_market", "Дашборд по рынку"),
     BotCommand("set_shift_schedule", "Загрузить график смен на 2 недели"),
     BotCommand("register_report_chat", "Привязать чат к рассылке отчётов смены"),
+    BotCommand("shift_report", "Внести отчёт по смене принудительно"),
     BotCommand("regulations", "Регламенты работы с ботом"),
     BotCommand("help", "Список команд"),
 ]
@@ -290,6 +293,7 @@ def main() -> None:
     app.add_handler(CommandHandler("dashboard_tasks", on_dashboard_tasks_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_shift_schedule", on_set_shift_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("register_report_chat", on_register_report_chat, filters=filters.ChatType.GROUPS))
+    app.add_handler(CommandHandler("shift_report", on_shift_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, on_group_message))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))
@@ -372,6 +376,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_set_shift_schedule_cancel, pattern=r"^shsched_cancel$"))
     app.add_handler(CallbackQueryHandler(on_register_report_chat_market, pattern=r"^shrc_market:"))
     app.add_handler(CallbackQueryHandler(on_register_report_chat_role, pattern=r"^shrc_role:"))
+    app.add_handler(CallbackQueryHandler(on_shift_report_manual_market_choice, pattern=r"^shrep_manualmarket:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_fill, pattern=r"^shrep_fill:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_absent, pattern=r"^shrep_absent:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_supervisor_approve, pattern=r"^shrep_svapprove:"))
