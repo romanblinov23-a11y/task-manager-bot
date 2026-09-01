@@ -115,9 +115,6 @@ _editing: dict[str, dict] = {}
 # telegram_user_id (str) владельца -> {"report_id": int} — ждём текст замечания для управляющего
 _pending_more_info: dict[str, dict] = {}
 
-# telegram_user_id (str) управляющего -> {"report_id": int} — ждём текст дополнения к отчёту
-_awaiting_addendum: dict[str, dict] = {}
-
 
 def _parse_amount(text: str) -> float | None:
     cleaned = text.strip().replace(" ", "").replace(" ", "").replace(",", ".")
@@ -569,6 +566,10 @@ async def on_shift_report_more_info(update: Update, context: ContextTypes.DEFAUL
 
 
 async def on_shift_report_more_info_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Замечание владельца пересылается управляющему вместе с пикером полей
+    (тем же, что у «✏️ Редактировать») — управляющий правит конкретное поле
+    целиком, а не дописывает текст поверх него: так отчёт не отклоняется от
+    шаблона посторонними фразами вроде "Дополнение от управляющего"."""
     owner_id = str(update.effective_user.id)
     state = _pending_more_info.pop(owner_id, None)
     if not state:
@@ -590,33 +591,12 @@ async def on_shift_report_more_info_reply(update: Update, context: ContextTypes.
     await context.bot.send_message(
         chat_id=supervisor["telegram_user_id"],
         text=(
-            f"💬 Рома просит дополнить отчёт по «{market['name']}» за {fmt_date(report['report_date'])}:\n"
-            f"«{note}»\n\nНапиши дополнение одним сообщением:"
+            f"💬 Рома просит поправить отчёт по «{market['name']}» за {fmt_date(report['report_date'])}:\n"
+            f"«{note}»\n\nВыбери, что поправить:"
         ),
+        reply_markup=_edit_field_keyboard(report["id"]),
     )
-    _awaiting_addendum[str(supervisor["telegram_user_id"])] = {"report_id": report["id"]}
-    await update.effective_message.reply_text("Передал управляющему, жду дополнение.")
-    return True
-
-
-async def on_shift_report_addendum_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    user_id = str(update.effective_user.id)
-    state = _awaiting_addendum.pop(user_id, None)
-    if not state:
-        return False
-
-    report = get_report(state["report_id"])
-    if not report:
-        await update.effective_message.reply_text("Отчёт больше недоступен.")
-        return True
-
-    addendum = (update.effective_message.text or "").strip()
-    data = report["data"]
-    existing = data.get("comment_general", "")
-    data["comment_general"] = f"{existing}\n\nДополнение от управляющего: {addendum}" if existing else f"Дополнение от управляющего: {addendum}"
-    save_report_data(report["id"], data)
-    await update.effective_message.reply_text("Спасибо, отправляю Роману.")
-    await _send_for_owner_approval(context.bot, report["id"])
+    await update.effective_message.reply_text("Передал управляющему.")
     return True
 
 
