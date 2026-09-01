@@ -488,6 +488,19 @@ async def _greet_after_onboarding(message, user_id: int) -> None:
         )
 
 
+def find_user_id_by_username(username: str) -> int | None:
+    """Ищет Telegram ID по username среди тех, кого бот уже где-то видел
+    (писали в привязанной группе или в личку боту) — Telegram не отдаёт
+    ботам ID по username напрямую, обойти это нельзя, только через уже
+    накопленный known_users.json."""
+    normalized = username.lstrip("@").strip().lower()
+    user_id = next(
+        (uid for uid, info in _known_users.items() if (info.get("username") or "").lower() == normalized),
+        None,
+    )
+    return int(user_id) if user_id is not None else None
+
+
 async def on_force_onboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Команда Романа в личке: /onboard <username> — принудительно онбордит
     сотрудника без ожидания, что он сам напишет боту. Работает только для
@@ -501,10 +514,8 @@ async def on_force_onboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     username = context.args[0].lstrip("@").strip().lower()
-    user_id = next(
-        (uid for uid, info in _known_users.items() if (info.get("username") or "").lower() == username),
-        None,
-    )
+    user_id_int = find_user_id_by_username(username)
+    user_id = str(user_id_int) if user_id_int is not None else None
 
     if user_id is None:
         await update.effective_message.reply_text(

@@ -9,6 +9,13 @@ from bot.manager_admin import on_manager_admin_reply
 from bot.monitoring_flow import on_monitoring_reply
 from bot.mytasks_manage import on_mytasks_manage_reply
 from bot.onboarding import on_employee_message
+from bot.shift_reports import (
+    on_shift_report_addendum_reply,
+    on_shift_report_edit_reply,
+    on_shift_report_more_info_reply,
+    on_shift_report_reply,
+)
+from bot.shift_schedule_flow import on_set_shift_schedule_reply
 from bot.status_cycle import on_employee_reply
 from bot.task_manage import on_task_manage_reply
 from config.settings import ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
@@ -75,6 +82,21 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if await on_monitoring_reply(update, context):
+        return
+
+    if await on_set_shift_schedule_reply(update, context):
+        return
+
+    if await on_shift_report_reply(update, context):
+        return
+
+    if await on_shift_report_edit_reply(update, context):
+        return
+
+    if await on_shift_report_more_info_reply(update, context):
+        return
+
+    if await on_shift_report_addendum_reply(update, context):
         return
 
     if not _is_roman(update):

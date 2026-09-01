@@ -49,3 +49,12 @@ MAX_CLARIFYING_ROUNDS = int(os.getenv("MAX_CLARIFYING_ROUNDS", "2"))
 MESSAGE_BUFFER_HOURS = int(os.getenv("MESSAGE_BUFFER_HOURS", "3"))
 # Сколько часов контекста брать для экстракции задач при срабатывании триггера
 EXTRACTION_CONTEXT_HOURS = int(os.getenv("EXTRACTION_CONTEXT_HOURS", "2"))
+
+# Ежедневный отчёт по смене (раздел "shift report"): когда просить у
+# управляющего график смен (14-е и последний день месяца), когда начинать
+# собирать отчёт у ответственного менеджера, когда эскалировать управляющему,
+# если отчёт не собран, и когда рассылать готовый отчёт дальше.
+SHIFT_SCHEDULE_REMINDER_TIME = os.getenv("SHIFT_SCHEDULE_REMINDER_TIME", "10:00")
+SHIFT_REPORT_START_TIME = os.getenv("SHIFT_REPORT_START_TIME", "22:00")
+SHIFT_REPORT_ESCALATE_TIME = os.getenv("SHIFT_REPORT_ESCALATE_TIME", "23:30")
+SHIFT_REPORT_DISPATCH_TIME = os.getenv("SHIFT_REPORT_DISPATCH_TIME", "10:00")

@@ -85,6 +85,32 @@ CREATE TABLE IF NOT EXISTS monitoring_schedule (
     weekdays TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 1
 );
+
+CREATE TABLE IF NOT EXISTS shift_schedule (
+    market_id INTEGER NOT NULL REFERENCES market(id),
+    shift_date TEXT NOT NULL,
+    manager_telegram_user_id INTEGER NOT NULL,
+    PRIMARY KEY (market_id, shift_date)
+);
+
+CREATE TABLE IF NOT EXISTS shift_report (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_id INTEGER NOT NULL REFERENCES market(id),
+    report_date TEXT NOT NULL,
+    reporter_telegram_user_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'collecting',
+    data TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT,
+    UNIQUE (market_id, report_date)
+);
+
+CREATE TABLE IF NOT EXISTS report_chat (
+    market_id INTEGER NOT NULL REFERENCES market(id),
+    role TEXT NOT NULL CHECK (role IN ('finance', 'team')),
+    chat_id INTEGER NOT NULL,
+    PRIMARY KEY (market_id, role)
+);
 """
 
 
