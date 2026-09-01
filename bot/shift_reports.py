@@ -130,6 +130,54 @@ def _parse_int(text: str) -> int | None:
     return int(cleaned) if cleaned.isdigit() else None
 
 
+def _format_money(value: float) -> str:
+    """Строгий формат для итогового отчёта: 1 111 111,11 — пробел как
+    разделитель тысяч, запятая как разделитель копеек, всегда два знака
+    после запятой, даже если копейки нулевые."""
+    return f"{value:,.2f}".replace(",", " ").replace(".", ",")
+
+
+def _format_count(value: int) -> str:
+    return f"{value:,}".replace(",", " ")
+
+
+def _money_field(data: dict, key: str) -> str:
+    value = _parse_amount(data.get(key, "") or "")
+    return _format_money(value) if value is not None else "—"
+
+
+def _count_field(data: dict, key: str) -> str:
+    value = _parse_int(data.get(key, "") or "")
+    return _format_count(value) if value is not None else "—"
+
+
+def _validate_reconciliation(answers: dict) -> str | None:
+    """Сверка сумм: наличные+безнал должны совпадать с выручкой до копейки,
+    средний чек должен совпадать с выручкой/гости с точностью до рубля.
+    Вызывается после каждого ответа — срабатывает, только когда все нужные
+    для конкретной проверки поля уже заполнены."""
+    total = _parse_amount(answers.get("revenue_total", "") or "")
+    cash = _parse_amount(answers.get("revenue_cash", "") or "")
+    noncash = _parse_amount(answers.get("revenue_noncash", "") or "")
+    if total is not None and cash is not None and noncash is not None:
+        if abs(round(cash + noncash, 2) - round(total, 2)) > 0.005:
+            return (
+                f"Наличные + Безнал = {_format_money(cash)} + {_format_money(noncash)} = "
+                f"{_format_money(cash + noncash)}, а выручка указана как {_format_money(total)} — не сходится."
+            )
+
+    avg_check = _parse_amount(answers.get("avg_check", "") or "")
+    guests = _parse_int(answers.get("guests", "") or "")
+    if total is not None and avg_check is not None and guests:
+        expected = total / guests
+        if round(expected) != round(avg_check):
+            return (
+                f"При выручке {_format_money(total)} и {guests} гостях средний чек должен быть "
+                f"≈ {_format_money(expected)}, а указано {_format_money(avg_check)} — не сходится."
+            )
+    return None
+
+
 def _validate(kind: str, text: str) -> tuple[str | None, str | None]:
     text = text.strip()
     if kind == "money":
@@ -204,21 +252,21 @@ def render_finance_report(market: dict, report_date: str, data: dict) -> str:
     lines = [
         f"Отчет {fmt_date(report_date)} {weekday}",
         "",
-        f"Выручка: {data.get('revenue_total', '—')}",
+        f"Выручка: {_money_field(data, 'revenue_total')}",
         "",
-        f"Наличные: {data.get('revenue_cash', '—')}",
+        f"Наличные: {_money_field(data, 'revenue_cash')}",
         "",
-        f"Безнал: {data.get('revenue_noncash', '—')}",
+        f"Безнал: {_money_field(data, 'revenue_noncash')}",
         "",
-        f"Средний чек: {data.get('avg_check', '—')}",
+        f"Средний чек: {_money_field(data, 'avg_check')}",
         "",
-        f"Гости: {data.get('guests', '—')}",
+        f"Гости: {_count_field(data, 'guests')}",
         "",
-        f"Срок годности: {data.get('writeoff_expiry', '—')}",
+        f"Срок годности: {_money_field(data, 'writeoff_expiry')}",
         "",
-        f"Комплимент: {data.get('writeoff_compliment', '—')}",
+        f"Комплимент: {_money_field(data, 'writeoff_compliment')}",
         "",
-        f"Питание: {data.get('writeoff_staff_meals', '—')}",
+        f"Питание: {_money_field(data, 'writeoff_staff_meals')}",
         "",
         f"Среднее время отдачи за день: {data.get('avg_service_time', '—')}",
         "",
@@ -439,6 +487,12 @@ async def on_shift_report_reply(update: Update, context: ContextTypes.DEFAULT_TY
         return True
 
     state["answers"][question["key"]] = value
+    recon_error = _validate_reconciliation(state["answers"])
+    if recon_error:
+        save_report_data(state["report_id"], state["answers"])
+        await update.effective_message.reply_text(f"{recon_error}\n\n{question['prompt']}")
+        return True
+
     state["step_index"] += 1
     save_report_data(state["report_id"], state["answers"])
     await _ask_current_question(context.bot, update.effective_message, user_id)
@@ -539,9 +593,16 @@ async def on_shift_report_edit_reply(update: Update, context: ContextTypes.DEFAU
         await update.effective_message.reply_text(error)
         return True
 
-    del _editing[user_id]
     data = report["data"]
-    data[question["key"]] = value
+    candidate = dict(data)
+    candidate[question["key"]] = value
+    recon_error = _validate_reconciliation(candidate)
+    if recon_error:
+        await update.effective_message.reply_text(f"{recon_error}\n\n{question['prompt']}")
+        return True
+
+    del _editing[user_id]
+    data = candidate
     save_report_data(report["id"], data)
     market = get_market(report["market_id"])
     text_out = render_finance_report(market, report["report_date"], data)
