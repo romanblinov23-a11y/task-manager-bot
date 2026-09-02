@@ -112,7 +112,6 @@ from bot.report_chat_registration import (
 )
 from bot.shift_reports import (
     on_shift_report_absent,
-    on_shift_report_addendum_reply,
     on_shift_report_command,
     on_shift_report_edit,
     on_shift_report_edit_cancel,
