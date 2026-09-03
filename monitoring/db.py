@@ -144,6 +144,18 @@ def init_schema() -> None:
         _ensure_column(conn, "manager", "blocks_ack", "blocks_ack TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "competitor", "closed_at", "closed_at TEXT")
         _ensure_column(conn, "report_chat", "mention", "mention TEXT NOT NULL DEFAULT ''")
+        # Разовая миграция данных: блок "Отчёты по смене" появился позже
+        # tasks/monitoring, у уже активных сотрудников его нет в списке —
+        # добавляем, чтобы функция сразу заработала без ручной правки
+        # владельцем через /managers. Новые сотрудники получают его
+        # автоматически через DEFAULT_BLOCKS (см. register_manager).
+        for row in conn.execute("SELECT telegram_user_id, blocks FROM manager WHERE status = 'active'").fetchall():
+            blocks = [b for b in (row["blocks"] or "").split(",") if b]
+            if "reports" not in blocks:
+                blocks.append("reports")
+                conn.execute(
+                    "UPDATE manager SET blocks = ? WHERE telegram_user_id = ?", (",".join(blocks), row["telegram_user_id"])
+                )
         # Разовая чистка: remove_manager раньше делал soft-delete (status =
         # 'removed'), теперь удаляет запись полностью — доступ возвращается
         # только через новый онбординг. На базах, где остались старые

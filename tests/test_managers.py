@@ -11,10 +11,10 @@ from monitoring.managers import (
 from monitoring.markets import create_market
 
 
-def test_register_manager_gets_both_blocks_by_default():
+def test_register_manager_gets_all_blocks_by_default():
     market = create_market("Рынок блоков")
     register_manager(5001, "Тест", "Управляющий", market["id"])
-    assert set(get_manager_blocks(5001)) == {"tasks", "monitoring"}
+    assert set(get_manager_blocks(5001)) == {"tasks", "monitoring", "reports"}
 
 
 def test_is_active_manager_requires_monitoring_block():

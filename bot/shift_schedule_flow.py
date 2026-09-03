@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes
 
 from bot.onboarding import find_user_id_by_username
 from config.timeutil import parse_date
-from monitoring.managers import get_market_supervisor, get_markets_for_manager, is_market_editor, is_owner
+from monitoring.managers import get_market_supervisor, get_markets_for_manager, is_owner, is_reports_editor
 from monitoring.markets import get_market, list_markets
 from monitoring.shift_schedule import set_shift_schedule
 
@@ -53,8 +53,10 @@ async def on_set_shift_schedule_command(update: Update, context: ContextTypes.DE
     на 2 недели вперёд. Тот же диалог запускается автоматически 14-го и в
     последний день месяца (см. send_shift_schedule_requests)."""
     user = update.effective_user
-    if not is_market_editor(user.id):
-        await update.effective_message.reply_text("Загружать график смен может только владелец или Управляющий.")
+    if not is_reports_editor(user.id):
+        await update.effective_message.reply_text(
+            "Загружать график смен может только владелец или Управляющий с выданным блоком «Отчёты по смене»."
+        )
         return
 
     markets = _available_markets(user.id)
@@ -174,7 +176,7 @@ async def send_shift_schedule_requests(bot: Bot) -> None:
     просит у управляющего каждого рынка график смен на ближайшие 2 недели."""
     for market in list_markets():
         supervisor = get_market_supervisor(market["id"])
-        if not supervisor:
+        if not supervisor or not is_reports_editor(supervisor["telegram_user_id"]):
             continue
         supervisor_id = str(supervisor["telegram_user_id"])
         _awaiting_paste[supervisor_id] = {"market_id": market["id"]}

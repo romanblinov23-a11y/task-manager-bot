@@ -1,5 +1,5 @@
 from config.settings import OWNER_TELEGRAM_IDS
-from monitoring.constants import BLOCK_MONITORING
+from monitoring.constants import BLOCK_MONITORING, BLOCK_REPORTS, DEFAULT_BLOCKS
 from monitoring.db import get_connection
 
 
@@ -29,11 +29,11 @@ def register_manager(telegram_user_id: int, name: str, position: str, market_id:
     try:
         conn.execute(
             """
-            INSERT INTO manager (telegram_user_id, name, role, position, status)
-            VALUES (?, ?, 'manager', ?, 'pending')
+            INSERT INTO manager (telegram_user_id, name, role, position, status, blocks)
+            VALUES (?, ?, 'manager', ?, 'pending', ?)
             ON CONFLICT (telegram_user_id) DO UPDATE SET name = excluded.name, position = excluded.position, status = 'pending'
             """,
-            (telegram_user_id, name, position),
+            (telegram_user_id, name, position, DEFAULT_BLOCKS),
         )
         conn.execute(
             "INSERT OR IGNORE INTO manager_market (manager_telegram_user_id, market_id) VALUES (?, ?)",
@@ -114,6 +114,30 @@ def is_market_editor(telegram_user_id: int) -> bool:
         return True
     manager = get_manager(telegram_user_id)
     return _has_monitoring_block(manager) and manager["position"] == "Управляющий"
+
+
+def _has_reports_block(manager: dict | None) -> bool:
+    if not manager or manager["status"] != "active":
+        return False
+    return BLOCK_REPORTS in (manager.get("blocks") or "").split(",")
+
+
+def has_reports_access(telegram_user_id: int) -> bool:
+    """True для владельца и для активных сотрудников с выданным блоком
+    «Отчёты по смене» — сдавать отчёт (/shift_report) может любой из них,
+    не только назначенный по графику."""
+    if is_owner(telegram_user_id):
+        return True
+    return _has_reports_block(get_manager(telegram_user_id))
+
+
+def is_reports_editor(telegram_user_id: int) -> bool:
+    """True для владельца и для активных Управляющих с выданным блоком
+    «Отчёты по смене» — только им можно менять график смен рынка."""
+    if is_owner(telegram_user_id):
+        return True
+    manager = get_manager(telegram_user_id)
+    return _has_reports_block(manager) and manager["position"] == "Управляющий"
 
 
 def get_market_supervisor(market_id: int, exclude_telegram_user_id: int | None = None) -> dict | None:

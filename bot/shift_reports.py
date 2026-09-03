@@ -9,7 +9,7 @@ from bot.onboarding import get_display_name
 from config.settings import ROMAN_TELEGRAM_ID
 from config.timeutil import fmt_date
 from config.timeutil import today as tz_today
-from monitoring.managers import get_manager, get_market_supervisor, get_markets_for_manager, is_owner
+from monitoring.managers import get_market_supervisor, get_markets_for_manager, has_reports_access, is_owner
 from monitoring.markets import get_market, list_markets
 from monitoring.shift_reports import (
     create_or_get_draft,
@@ -523,9 +523,8 @@ async def on_shift_report_command(update: Update, context: ContextTypes.DEFAULT_
     владельцу — например, если график ещё не загружен, отчёт нужно сдать
     раньше срока, или сдаёт не тот, кто был по графику."""
     user = update.effective_user
-    manager = get_manager(user.id)
-    if not is_owner(user.id) and (not manager or manager["status"] != "active"):
-        await update.effective_message.reply_text("Эта команда доступна только подтверждённым владельцем менеджерам.")
+    if not has_reports_access(user.id):
+        await update.effective_message.reply_text("Эта команда доступна только сотрудникам с выданным блоком «Отчёты по смене».")
         return
 
     markets = list_markets() if is_owner(user.id) else get_markets_for_manager(user.id)

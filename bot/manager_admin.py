@@ -5,7 +5,7 @@ from bot.market_schedule import start_schedule_flow
 from bot.onboarding import get_onboarded_employees, list_legacy_employees, remove_legacy_employee, request_registration
 from bot.regulations import send_next_regulation
 from config.chats import get_all_bindings, get_project_for_chat, register_chat, unregister_chat
-from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS, BLOCK_MONITORING, BLOCK_TASKS, MANAGER_POSITIONS
+from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS, BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_TASKS, MANAGER_POSITIONS
 from monitoring.db import reset_market_players
 from monitoring.managers import (
     acknowledge_block,
@@ -57,9 +57,7 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
     подтвердил, что прочитал его регламент (см. send_next_regulation)."""
     uid = manager["telegram_user_id"]
     blocks = set(get_manager_blocks(uid)) & set(get_acknowledged_blocks(uid))
-    # Отчёт по смене — не привязан к блокам «Задачи»/«Мониторинг», доступен
-    # любому активному сотруднику вне зависимости от прочих прав.
-    commands: list[BotCommand] = [BotCommand("shift_report", "Внести отчёт по смене принудительно")]
+    commands: list[BotCommand] = []
     if BLOCK_TASKS in blocks:
         commands.append(BotCommand("mytasks", "Мои задачи в работе"))
     if BLOCK_MONITORING in blocks:
@@ -67,9 +65,12 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
             commands.append(BotCommand("add_competitor", "Добавить конкурента на рынок"))
             commands.append(BotCommand("close_competitor", "Закрыть/открыть конкурента"))
             commands.append(BotCommand("schedule", "Настроить дни мониторинга рынка"))
-            commands.append(BotCommand("set_shift_schedule", "Загрузить график смен на 2 недели"))
         commands.append(BotCommand("monitoring", "Провести мониторинг конкурентов"))
         commands.append(BotCommand("dashboard_market", "Дашборд по рынку"))
+    if BLOCK_REPORTS in blocks:
+        if manager["position"] == "Управляющий":
+            commands.append(BotCommand("set_shift_schedule", "Загрузить график смен на 2 недели"))
+        commands.append(BotCommand("shift_report", "Внести отчёт по смене принудительно"))
     if commands:
         commands.append(BotCommand("regulations", "Регламенты работы с ботом"))
     return commands
