@@ -140,6 +140,7 @@ from bot.shift_reports import (
     send_pending_reports,
     send_shift_report_escalations,
     send_shift_report_kickoffs,
+    send_shift_report_owner_escalations,
 )
 from bot.shift_schedule_flow import (
     on_set_shift_schedule_cancel,
@@ -158,6 +159,7 @@ from config.settings import (
     OWNER_TELEGRAM_IDS,
     SHIFT_REPORT_DISPATCH_TIME,
     SHIFT_REPORT_ESCALATE_TIME,
+    SHIFT_REPORT_OWNER_ESCALATE_TIME,
     SHIFT_REPORT_START_TIME,
     SHIFT_SCHEDULE_REMINDER_TIME,
     STATUS_CHECK_TIME,
@@ -218,6 +220,10 @@ async def _shift_report_kickoff_job(context) -> None:
 
 async def _shift_report_escalate_job(context) -> None:
     await send_shift_report_escalations(context.bot)
+
+
+async def _shift_report_owner_escalate_job(context) -> None:
+    await send_shift_report_owner_escalations(context.bot)
 
 
 async def _shift_report_dispatch_job(context) -> None:
@@ -426,6 +432,7 @@ def main() -> None:
     app.job_queue.run_daily(_shift_schedule_reminder_job, time=_parse_time(SHIFT_SCHEDULE_REMINDER_TIME, TZ))
     app.job_queue.run_daily(_shift_report_kickoff_job, time=_parse_time(SHIFT_REPORT_START_TIME, TZ))
     app.job_queue.run_daily(_shift_report_escalate_job, time=_parse_time(SHIFT_REPORT_ESCALATE_TIME, TZ))
+    app.job_queue.run_daily(_shift_report_owner_escalate_job, time=_parse_time(SHIFT_REPORT_OWNER_ESCALATE_TIME, TZ))
     app.job_queue.run_daily(_shift_report_dispatch_job, time=_parse_time(SHIFT_REPORT_DISPATCH_TIME, TZ))
 
     app.run_polling()

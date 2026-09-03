@@ -57,4 +57,8 @@ EXTRACTION_CONTEXT_HOURS = int(os.getenv("EXTRACTION_CONTEXT_HOURS", "2"))
 SHIFT_SCHEDULE_REMINDER_TIME = os.getenv("SHIFT_SCHEDULE_REMINDER_TIME", "10:00")
 SHIFT_REPORT_START_TIME = os.getenv("SHIFT_REPORT_START_TIME", "22:00")
 SHIFT_REPORT_ESCALATE_TIME = os.getenv("SHIFT_REPORT_ESCALATE_TIME", "23:30")
+# Если к этому времени вчерашний отчёт так и не согласован Романом — бот
+# сообщает ему напрямую, независимо от того, сработали ли предыдущие
+# эскалации управляющему.
+SHIFT_REPORT_OWNER_ESCALATE_TIME = os.getenv("SHIFT_REPORT_OWNER_ESCALATE_TIME", "09:00")
 SHIFT_REPORT_DISPATCH_TIME = os.getenv("SHIFT_REPORT_DISPATCH_TIME", "10:00")

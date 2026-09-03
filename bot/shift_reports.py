@@ -1010,6 +1010,36 @@ async def send_shift_report_escalations(bot: Bot) -> None:
             )
 
 
+_OWNER_ESCALATION_STATUS_LABELS = {
+    None: "отчёт вообще не начат",
+    "collecting": "отчёт начат, но так и не заполнен до конца",
+    "awaiting_supervisor": "отчёт ждёт согласования управляющего",
+    "awaiting_owner": "отчёт ждёт согласования у тебя",
+}
+
+
+async def send_shift_report_owner_escalations(bot: Bot) -> None:
+    """09:00 — последний рубеж: если вчерашний отчёт рынка так и не дошёл
+    до согласования Романом (approved/dispatched), сообщает ему напрямую —
+    независимо от того, сработала ли эскалация управляющему в 23:30
+    (см. main.py)."""
+    yesterday = (tz_today() - timedelta(days=1)).isoformat()
+    for market in list_markets_with_shift(yesterday):
+        report = get_report_by_date(market["id"], yesterday)
+        if report and report["status"] in ("approved", "dispatched"):
+            continue
+
+        manager_name = get_display_name(market["scheduled_manager_id"])
+        status_text = _OWNER_ESCALATION_STATUS_LABELS.get(report["status"] if report else None, "отчёт не завершён")
+        await bot.send_message(
+            chat_id=ROMAN_TELEGRAM_ID,
+            text=(
+                f"⏰ Отчёт по «{market['name']}» за {fmt_date(yesterday)} до сих пор не готов: {status_text} "
+                f"(ответственный по графику: {manager_name})."
+            ),
+        )
+
+
 async def send_pending_reports(bot: Bot) -> None:
     """10:00 — рассылает вчерашние согласованные отчёты в зарегистрированные
     чаты финпартнёров и команды точки (см. main.py, bot/report_chat_registration.py)."""
