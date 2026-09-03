@@ -32,7 +32,10 @@ _PLAN_LINE_RE = re.compile(
 
 
 def _parse_amount(text: str) -> float | None:
-    cleaned = text.strip().replace(" ", "").replace("\xa0", "").replace("₽", "").replace(",", ".")
+    # \s тут — не только обычный пробел: телефонная клавиатура и разные
+    # источники вставляют между тысячами узкий неразрывный пробел (U+202F),
+    # неразрывный (U+00A0) и другие юникодные пробелы — все убираем разом.
+    cleaned = re.sub(r"\s", "", text).replace("₽", "").replace(",", ".")
     try:
         value = float(cleaned)
     except ValueError:
@@ -41,7 +44,7 @@ def _parse_amount(text: str) -> float | None:
 
 
 def _parse_int(text: str) -> int | None:
-    cleaned = text.strip().replace(" ", "").replace("\xa0", "")
+    cleaned = re.sub(r"\s", "", text)
     return int(cleaned) if cleaned.isdigit() else None
 
 
