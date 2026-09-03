@@ -1,5 +1,5 @@
 from config.settings import OWNER_TELEGRAM_IDS
-from monitoring.constants import BLOCK_MONITORING, BLOCK_REPORTS, DEFAULT_BLOCKS
+from monitoring.constants import BLOCK_MEETINGS, BLOCK_MONITORING, BLOCK_REPORTS, DEFAULT_BLOCKS
 from monitoring.db import get_connection
 
 
@@ -151,6 +151,31 @@ def market_reports_enabled(market_id: int) -> bool:
     if not supervisor:
         return True
     return _has_reports_block(supervisor)
+
+
+def _has_meetings_block(manager: dict | None) -> bool:
+    if not manager or manager["status"] != "active":
+        return False
+    return BLOCK_MEETINGS in (manager.get("blocks") or "").split(",")
+
+
+def is_meetings_editor(telegram_user_id: int) -> bool:
+    """True для владельца и для активных Управляющих с выданным блоком
+    «Собрания» — только им доступен /set_meeting_schedule. В отличие от
+    остальных блоков, «Собрания» не выдаётся по умолчанию — владелец
+    включает его вручную по конкретному Управляющему (см. DEFAULT_BLOCKS)."""
+    if is_owner(telegram_user_id):
+        return True
+    manager = get_manager(telegram_user_id)
+    return _has_meetings_block(manager) and manager["position"] == "Управляющий"
+
+
+def meetings_enabled_for_market(market_id: int) -> bool:
+    """Собрания на рынке ведёт только Управляющий — если его нет, или ему
+    не выдан блок «Собрания», функция на рынке попросту не работает (в
+    отличие от отчётов по смене, здесь нет сценария «без Управляющего»)."""
+    supervisor = get_market_supervisor(market_id)
+    return bool(supervisor) and _has_meetings_block(supervisor)
 
 
 def get_market_supervisor(market_id: int, exclude_telegram_user_id: int | None = None) -> dict | None:

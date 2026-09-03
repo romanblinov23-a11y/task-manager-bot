@@ -68,3 +68,7 @@ SHIFT_REPORT_DISPATCH_TIME = os.getenv("SHIFT_REPORT_DISPATCH_TIME", "10:00")
 MONTHLY_PLAN_REMINDER_TIME = os.getenv("MONTHLY_PLAN_REMINDER_TIME", "10:00")
 # Утреннее напоминание команде точки — план на день + старт/стоп-листы со вчера
 TEAM_MORNING_REPORT_TIME = os.getenv("TEAM_MORNING_REPORT_TIME", "07:00")
+
+# Собрания: во сколько ежедневно проверять, нет ли завтра собрания по
+# настроенному Управляющим ритму, и просить подтверждения
+MEETING_CONFIRM_TIME = os.getenv("MEETING_CONFIRM_TIME", "10:00")

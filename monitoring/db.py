@@ -120,6 +120,29 @@ CREATE TABLE IF NOT EXISTS monthly_plan (
     checks_plan INTEGER NOT NULL,
     PRIMARY KEY (market_id, plan_date)
 );
+
+CREATE TABLE IF NOT EXISTS meeting_schedule (
+    market_id INTEGER NOT NULL REFERENCES market(id),
+    meeting_type TEXT NOT NULL CHECK (meeting_type IN ('team', 'managers')),
+    weekday INTEGER NOT NULL,
+    time TEXT NOT NULL,
+    PRIMARY KEY (market_id, meeting_type)
+);
+
+CREATE TABLE IF NOT EXISTS meeting_instance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_id INTEGER NOT NULL REFERENCES market(id),
+    meeting_type TEXT NOT NULL CHECK (meeting_type IN ('team', 'managers')),
+    meeting_date TEXT NOT NULL,
+    meeting_time TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending_confirmation',
+    agenda TEXT NOT NULL DEFAULT '',
+    invite_roman INTEGER NOT NULL DEFAULT 0,
+    rescheduled INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT,
+    UNIQUE (market_id, meeting_type, meeting_date)
+);
 """
 
 

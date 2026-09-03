@@ -12,7 +12,7 @@ from bot.onboarding import (
 from bot.regulations import send_next_regulation
 from config.chats import get_all_bindings, get_project_for_chat, register_chat, unregister_chat
 from config.settings import OWNER_TELEGRAM_IDS
-from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS, BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_TASKS, MANAGER_POSITIONS
+from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS, BLOCK_MEETINGS, BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_TASKS, MANAGER_POSITIONS
 from monitoring.db import reset_market_players
 from monitoring.managers import (
     acknowledge_block,
@@ -79,6 +79,8 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
             commands.append(BotCommand("set_shift_schedule", "Загрузить график смен на 2 недели"))
             commands.append(BotCommand("set_monthly_plan", "Загрузить план по выручке/чекам на месяц"))
         commands.append(BotCommand("shift_report", "Внести отчёт по смене принудительно"))
+    if BLOCK_MEETINGS in blocks and manager["position"] == "Управляющий":
+        commands.append(BotCommand("set_meeting_schedule", "Настроить ритм собраний"))
     if commands:
         commands.append(BotCommand("regulations", "Регламенты работы с ботом"))
     return commands

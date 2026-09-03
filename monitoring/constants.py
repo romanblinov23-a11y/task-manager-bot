@@ -6,13 +6,22 @@
 MANAGER_POSITIONS = ["Управляющий", "Менеджер", "Наставник", "Маркетолог"]
 
 # Блоки бота, доступ к которым владелец выдаёт/отзывает у сотрудника
-# независимо от роли. Все три блока выдаются всем по умолчанию при
+# независимо от роли. Первые три блока выдаются всем по умолчанию при
 # подтверждении — владелец может сузить доступ вручную через /managers.
+# «Собрания» — единственное исключение: по умолчанию выключено всем и
+# везде, включается владельцем вручную по конкретному Управляющему
+# (см. DEFAULT_BLOCKS ниже — meetings туда сознательно не входит).
 BLOCK_TASKS = "tasks"
 BLOCK_MONITORING = "monitoring"
 BLOCK_REPORTS = "reports"
-AVAILABLE_BLOCKS = [BLOCK_TASKS, BLOCK_MONITORING, BLOCK_REPORTS]
-BLOCK_LABELS = {BLOCK_TASKS: "Задачи (трекер)", BLOCK_MONITORING: "Мониторинг конкурентов", BLOCK_REPORTS: "Отчёты по смене"}
+BLOCK_MEETINGS = "meetings"
+AVAILABLE_BLOCKS = [BLOCK_TASKS, BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_MEETINGS]
+BLOCK_LABELS = {
+    BLOCK_TASKS: "Задачи (трекер)",
+    BLOCK_MONITORING: "Мониторинг конкурентов",
+    BLOCK_REPORTS: "Отчёты по смене",
+    BLOCK_MEETINGS: "Собрания",
+}
 DEFAULT_BLOCKS = f"{BLOCK_TASKS},{BLOCK_MONITORING},{BLOCK_REPORTS}"
 
 COMPETITOR_FORMATS = ["навынос", "посадка", "кофе+кухня с полноценной посадкой"]

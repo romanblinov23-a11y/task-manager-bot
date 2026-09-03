@@ -90,6 +90,16 @@ from bot.messaging import (
     on_message_command,
     on_message_pick,
 )
+from bot.meetings import (
+    on_meeting_cancel,
+    on_meeting_confirm,
+    on_meeting_invite_roman_choice,
+    on_meeting_postpone,
+    on_meeting_schedule_market_choice,
+    on_meeting_schedule_type_choice,
+    on_set_meeting_schedule_command,
+    send_meeting_confirmations,
+)
 from bot.market_schedule import (
     on_schedule_command,
     on_schedule_day_toggle,
@@ -178,6 +188,7 @@ from bot.task_manage import on_employee_command, on_status_command, on_task_mana
 from bot.weekly_report import on_weekly_command, send_weekly_report
 from config.settings import (
     DAILY_REPORT_TIME,
+    MEETING_CONFIRM_TIME,
     MONITORING_REMINDER_TIME,
     MONTHLY_PLAN_REMINDER_TIME,
     OWNER_TELEGRAM_IDS,
@@ -264,6 +275,10 @@ async def _monthly_plan_reminder_job(context) -> None:
         await send_monthly_plan_requests(context.bot)
 
 
+async def _meeting_confirmation_job(context) -> None:
+    await send_meeting_confirmations(context.bot)
+
+
 def _parse_time(value: str, tzinfo) -> dt_time:
     hour, minute = (int(part) for part in value.split(":"))
     return dt_time(hour=hour, minute=minute, tzinfo=tzinfo)
@@ -294,6 +309,7 @@ _ROMAN_COMMANDS = [
     BotCommand("shift_report", "Внести отчёт по смене принудительно"),
     BotCommand("send_shift_report", "Отправить сегодняшний отчёт сейчас (проверка формата)"),
     BotCommand("send_morning_report", "Отправить утреннее напоминание команде сейчас (проверка формата)"),
+    BotCommand("set_meeting_schedule", "Настроить ритм собраний"),
     BotCommand("reset_shift_report", "⚠️ Сбросить сегодняшний отчёт по смене"),
     BotCommand("message", "Написать в личку сотруднику через бота"),
     BotCommand("message_chat", "Написать в зарегистрированный чат через бота"),
@@ -362,6 +378,7 @@ def main() -> None:
     app.add_handler(CommandHandler("message", on_message_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("message_chat", on_message_chat_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("broadcast", on_broadcast_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("set_meeting_schedule", on_set_meeting_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, on_group_message))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))
@@ -475,6 +492,12 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_broadcast_block_choice, pattern=r"^bcast_block:"))
     app.add_handler(CallbackQueryHandler(on_broadcast_confirm, pattern=r"^bcast_confirm$"))
     app.add_handler(CallbackQueryHandler(on_broadcast_cancel, pattern=r"^bcast_cancel$"))
+    app.add_handler(CallbackQueryHandler(on_meeting_schedule_market_choice, pattern=r"^meetsched_market:"))
+    app.add_handler(CallbackQueryHandler(on_meeting_schedule_type_choice, pattern=r"^meetsched_type:"))
+    app.add_handler(CallbackQueryHandler(on_meeting_confirm, pattern=r"^meet_confirm:"))
+    app.add_handler(CallbackQueryHandler(on_meeting_cancel, pattern=r"^meet_cancel:"))
+    app.add_handler(CallbackQueryHandler(on_meeting_postpone, pattern=r"^meet_postpone:"))
+    app.add_handler(CallbackQueryHandler(on_meeting_invite_roman_choice, pattern=r"^meet_inviteroman:"))
 
     app.job_queue.run_daily(_status_check_job, time=_parse_time(STATUS_CHECK_TIME, TZ))
     app.job_queue.run_daily(_daily_report_job, time=_parse_time(DAILY_REPORT_TIME, TZ))
@@ -492,6 +515,7 @@ def main() -> None:
     app.job_queue.run_daily(_shift_report_dispatch_job, time=_parse_time(SHIFT_REPORT_DISPATCH_TIME, TZ))
     app.job_queue.run_daily(_team_morning_report_job, time=_parse_time(TEAM_MORNING_REPORT_TIME, TZ))
     app.job_queue.run_daily(_monthly_plan_reminder_job, time=_parse_time(MONTHLY_PLAN_REMINDER_TIME, TZ))
+    app.job_queue.run_daily(_meeting_confirmation_job, time=_parse_time(MEETING_CONFIRM_TIME, TZ))
 
     app.run_polling()
 
