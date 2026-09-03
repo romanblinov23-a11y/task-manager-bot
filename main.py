@@ -131,7 +131,7 @@ from bot.monthly_plan_flow import (
 )
 from bot.onboarding import on_force_onboard, on_help, on_project_choice, on_role_choice, on_start
 from bot.private import on_private_document, on_private_text, on_project_selected
-from bot.regulations import on_regulations_command
+from bot.regulations import on_regulations_command, on_regulations_view
 from bot.mytasks_manage import on_mytasks_callback, on_mytasks_command
 from bot.queries import (
     on_needhelp_command,
@@ -417,6 +417,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_manager_chat_market, pattern=r"^mgr_chat_market:"))
     app.add_handler(CallbackQueryHandler(on_manager_chat_select, pattern=r"^mgr_chat_select:"))
     app.add_handler(CallbackQueryHandler(on_regulation_ack, pattern=r"^reg_ack:"))
+    app.add_handler(CallbackQueryHandler(on_regulations_view, pattern=r"^reg_view:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_market_choice, pattern=r"^reset_monitoring_market:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_confirm, pattern=r"^reset_monitoring_confirm:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_cancel, pattern=r"^reset_monitoring_cancel$"))

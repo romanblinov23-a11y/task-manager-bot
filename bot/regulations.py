@@ -167,20 +167,6 @@ _REGULATION_BUILDERS = {
 }
 
 
-def get_regulations(role: str | None = None, blocks: list[str] | None = None) -> list[str]:
-    """Регламенты, которые выдаются после того, как владелец подтвердил
-    заявку и выдал блоки. Текст блока «Задачи» одинаков для всех, блоки
-    «Мониторинг» и «Отчёты по смене» зависят от должности: у Управляющего —
-    весь процесс целиком, у остальных ролей — только их часть. blocks=None —
-    вернуть все регламенты (используется для владельца, у которого нет
-    записи в manager)."""
-    docs = []
-    for block_key, builder in _REGULATION_BUILDERS.items():
-        if blocks is None or block_key in blocks:
-            docs.append(builder(role))
-    return docs
-
-
 async def _send_long_text(message, text: str, limit: int = 3500, final_reply_markup=None) -> None:
     if len(text) <= limit:
         await message.reply_text(text, reply_markup=final_reply_markup)
@@ -201,9 +187,17 @@ async def _send_long_text(message, text: str, limit: int = 3500, final_reply_mar
         await message.reply_text(part, reply_markup=markup)
 
 
-async def send_regulations(message, role: str | None = None, blocks: list[str] | None = None) -> None:
-    for doc in get_regulations(role, blocks):
-        await _send_long_text(message, doc)
+def _available_regulation_blocks(blocks: list[str] | None) -> list[str]:
+    """Ключи блоков, регламент которых можно посмотреть — только те,
+    что реально выданы сотруднику (или все — для владельца, у которого
+    blocks=None), в порядке _REGULATION_BUILDERS."""
+    return [b for b in _REGULATION_BUILDERS if blocks is None or b in blocks]
+
+
+def _regulations_keyboard(block_keys: list[str]) -> InlineKeyboardMarkup:
+    from monitoring.constants import BLOCK_LABELS
+
+    return InlineKeyboardMarkup([[InlineKeyboardButton(BLOCK_LABELS[b], callback_data=f"reg_view:{b}")] for b in block_keys])
 
 
 def _ack_keyboard(block_key: str) -> InlineKeyboardMarkup:
@@ -235,12 +229,36 @@ async def send_next_regulation(message, telegram_user_id: int) -> bool:
 
 
 async def on_regulations_command(update, context) -> None:
-    """/regulations — перечитать регламенты в любой момент (выдаются
-    автоматически один раз после подтверждения владельцем, эта команда —
-    просто повтор, с учётом выданных блоков)."""
+    """/regulations — показывает кнопки выбора регламента вместо того,
+    чтобы сразу вываливать все тексты разом. Доступны только регламенты
+    блоков, реально выданных этому сотруднику (у владельца, без записи
+    в manager, доступны все)."""
     from monitoring.managers import get_manager, get_manager_blocks
 
     manager = get_manager(update.effective_user.id)
-    role = manager["position"] if manager else None
     blocks = get_manager_blocks(update.effective_user.id) if manager else None
-    await send_regulations(update.effective_message, role, blocks)
+    block_keys = _available_regulation_blocks(blocks)
+    if not block_keys:
+        await update.effective_message.reply_text("Пока нет ни одного выданного блока — читать нечего.")
+        return
+    await update.effective_message.reply_text("Какой регламент показать?", reply_markup=_regulations_keyboard(block_keys))
+
+
+async def on_regulations_view(update, context) -> None:
+    """Кнопка выбора конкретного регламента из /regulations — присылает
+    текст отдельным сообщением, не трогая список кнопок, чтобы можно было
+    открыть следующий регламент без повторного вызова /regulations."""
+    from monitoring.managers import get_manager, get_manager_blocks
+
+    query = update.callback_query
+    block_key = query.data.split(":", 1)[1]
+
+    manager = get_manager(query.from_user.id)
+    role = manager["position"] if manager else None
+    blocks = get_manager_blocks(query.from_user.id) if manager else None
+    if block_key not in _available_regulation_blocks(blocks):
+        await query.answer("Этот блок вам не выдан", show_alert=True)
+        return
+
+    await query.answer()
+    await _send_long_text(query.message, _REGULATION_BUILDERS[block_key](role))
