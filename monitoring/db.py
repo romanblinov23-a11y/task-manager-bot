@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS report_chat (
     market_id INTEGER NOT NULL REFERENCES market(id),
     role TEXT NOT NULL CHECK (role IN ('finance', 'team')),
     chat_id INTEGER NOT NULL,
+    mention TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (market_id, role)
 );
 """
@@ -142,6 +143,7 @@ def init_schema() -> None:
         _ensure_column(conn, "manager", "blocks", "blocks TEXT NOT NULL DEFAULT 'tasks,monitoring'")
         _ensure_column(conn, "manager", "blocks_ack", "blocks_ack TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "competitor", "closed_at", "closed_at TEXT")
+        _ensure_column(conn, "report_chat", "mention", "mention TEXT NOT NULL DEFAULT ''")
         # Разовая чистка: remove_manager раньше делал soft-delete (status =
         # 'removed'), теперь удаляет запись полностью — доступ возвращается
         # только через новый онбординг. На базах, где остались старые

@@ -132,27 +132,30 @@ def list_reports_by_status_and_date(report_date: str, status: str) -> list[dict]
         conn.close()
 
 
-def set_report_chat(market_id: int, role: str, chat_id: int) -> None:
+def set_report_chat(market_id: int, role: str, chat_id: int, mention: str = "") -> None:
     conn = get_connection()
     try:
         conn.execute(
             """
-            INSERT INTO report_chat (market_id, role, chat_id) VALUES (?, ?, ?)
-            ON CONFLICT (market_id, role) DO UPDATE SET chat_id = excluded.chat_id
+            INSERT INTO report_chat (market_id, role, chat_id, mention) VALUES (?, ?, ?, ?)
+            ON CONFLICT (market_id, role) DO UPDATE SET chat_id = excluded.chat_id, mention = excluded.mention
             """,
-            (market_id, role, chat_id),
+            (market_id, role, chat_id, mention),
         )
         conn.commit()
     finally:
         conn.close()
 
 
-def get_report_chat(market_id: int, role: str) -> int | None:
+def get_report_chat(market_id: int, role: str) -> dict | None:
+    """Возвращает {"chat_id":, "mention":} — mention (например,
+    @Motus_control_group_bot) ставится первой строкой перед отчётом, чтобы
+    бот финпартнёров подхватил сообщение из чата (см. /register_report_chat)."""
     conn = get_connection()
     try:
         row = conn.execute(
-            "SELECT chat_id FROM report_chat WHERE market_id = ? AND role = ?", (market_id, role)
+            "SELECT chat_id, mention FROM report_chat WHERE market_id = ? AND role = ?", (market_id, role)
         ).fetchone()
-        return row["chat_id"] if row else None
+        return dict(row) if row else None
     finally:
         conn.close()

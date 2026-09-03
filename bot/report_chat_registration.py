@@ -7,6 +7,10 @@ from monitoring.shift_reports import set_report_chat
 
 _ROLE_LABELS = {"finance": "💰 Финпартнёры", "team": "👥 Команда точки"}
 
+# telegram_user_id (str) владельца -> {"market_id", "role", "chat_id", "market_name"} —
+# ждём текст, кого тегнуть первой строкой в отчёте для этого чата
+_awaiting_mention: dict[str, dict] = {}
+
 
 def _market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"shrc_market:{m['id']}")] for m in markets])
@@ -71,8 +75,54 @@ async def on_register_report_chat_role(update: Update, context: ContextTypes.DEF
         return
 
     chat_id = query.message.chat.id
-    set_report_chat(market_id, role, chat_id)
     await query.answer()
-    await query.edit_message_text(
-        f"✅ Этот чат будет получать отчёты «{market['name']}» — {_ROLE_LABELS[role]}."
+
+    if role == "finance":
+        # Спрашиваем в личке владельца, а не в самой группе — там сидят
+        # сами финпартнёры, и настроечный диалог не должен идти у них на виду.
+        owner_id = query.from_user.id
+        _awaiting_mention[str(owner_id)] = {
+            "market_id": market_id,
+            "role": role,
+            "chat_id": chat_id,
+            "market_name": market["name"],
+        }
+        await query.edit_message_text(f"✅ Этот чат привязан для «{market['name']}» — {_ROLE_LABELS[role]}. Донастрою в личке.")
+        try:
+            await context.bot.send_message(
+                chat_id=owner_id,
+                text=(
+                    f"Кого тегнуть первой строкой в отчёте для чата «{market['name']}» (например, "
+                    "@Motus_control_group_bot)? Если не нужно — напишите «нет»."
+                ),
+            )
+        except Exception:
+            await query.message.reply_text(
+                "Не смог написать вам в личку — откройте диалог со мной (/start) и повторите /register_report_chat."
+            )
+        return
+
+    set_report_chat(market_id, role, chat_id)
+    await query.edit_message_text(f"✅ Этот чат будет получать отчёты «{market['name']}» — {_ROLE_LABELS[role]}.")
+
+
+async def on_register_report_chat_mention_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Забирает текст, кого тегать первой строкой отчёта для финпартнёров.
+    Возвращает True, если сообщение обработано — по конвенции остальных
+    claim-хендлеров в on_private_text."""
+    owner_id = str(update.effective_user.id)
+    state = _awaiting_mention.pop(owner_id, None)
+    if not state:
+        return False
+
+    text = (update.effective_message.text or "").strip()
+    mention = "" if text.lower() in ("нет", "не надо", "-") else text
+    if mention and not mention.startswith("@"):
+        mention = f"@{mention}"
+
+    set_report_chat(state["market_id"], state["role"], state["chat_id"], mention)
+    suffix = f" Первой строкой будет: {mention}" if mention else ""
+    await update.effective_message.reply_text(
+        f"✅ Этот чат будет получать отчёты «{state['market_name']}» — {_ROLE_LABELS[state['role']]}.{suffix}"
     )
+    return True

@@ -926,17 +926,23 @@ async def send_pending_reports(bot: Bot) -> None:
         if not market:
             continue
 
-        finance_chat_id = get_report_chat(report["market_id"], "finance")
-        if finance_chat_id:
+        finance_chat = get_report_chat(report["market_id"], "finance")
+        if finance_chat:
+            text = render_finance_report(market, report["report_date"], report["data"])
+            if finance_chat.get("mention"):
+                text = f"{finance_chat['mention']}\n\n{text}"
             try:
-                await bot.send_message(chat_id=finance_chat_id, text=render_finance_report(market, report["report_date"], report["data"]))
+                await bot.send_message(chat_id=finance_chat["chat_id"], text=text)
             except Exception:
                 pass
 
-        team_chat_id = get_report_chat(report["market_id"], "team")
-        if team_chat_id:
+        team_chat = get_report_chat(report["market_id"], "team")
+        if team_chat:
+            text = render_team_report(market, report["report_date"], report["data"])
+            if team_chat.get("mention"):
+                text = f"{team_chat['mention']}\n\n{text}"
             try:
-                await bot.send_message(chat_id=team_chat_id, text=render_team_report(market, report["report_date"], report["data"]))
+                await bot.send_message(chat_id=team_chat["chat_id"], text=text)
             except Exception:
                 pass
 

@@ -9,6 +9,7 @@ from bot.manager_admin import on_manager_admin_reply
 from bot.monitoring_flow import on_monitoring_reply
 from bot.mytasks_manage import on_mytasks_manage_reply
 from bot.onboarding import on_employee_message
+from bot.report_chat_registration import on_register_report_chat_mention_reply
 from bot.shift_reports import (
     on_shift_report_edit_reply,
     on_shift_report_more_info_reply,
@@ -93,6 +94,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if await on_shift_report_more_info_reply(update, context):
+        return
+
+    if await on_register_report_chat_mention_reply(update, context):
         return
 
     if not _is_roman(update):
