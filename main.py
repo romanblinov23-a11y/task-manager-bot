@@ -162,6 +162,7 @@ from bot.shift_reports import (
     on_shift_report_edit_field,
     on_shift_report_edit_reply,
     on_shift_report_fill,
+    on_shift_report_instruction_choice,
     on_shift_report_fix_field,
     on_shift_report_manual_market_choice,
     on_shift_report_more_info,
@@ -477,6 +478,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_reset_shift_report_confirm, pattern=r"^shrep_resetconfirm:"))
     app.add_handler(CallbackQueryHandler(on_reset_shift_report_cancel, pattern=r"^shrep_resetcancel$"))
     app.add_handler(CallbackQueryHandler(on_shift_report_fill, pattern=r"^shrep_fill:"))
+    app.add_handler(CallbackQueryHandler(on_shift_report_instruction_choice, pattern=r"^shrep_instr:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_fix_field, pattern=r"^shrep_fixfield:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_absent, pattern=r"^shrep_absent:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_supervisor_approve, pattern=r"^shrep_svapprove:"))

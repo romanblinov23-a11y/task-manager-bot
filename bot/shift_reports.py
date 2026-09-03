@@ -629,6 +629,63 @@ async def _finish_collection(bot: Bot, message, user_id: str) -> None:
         await _send_for_supervisor_approval(bot, report_id)
 
 
+SHIFT_REPORT_METRICS_GUIDE = """📖 Шпаргалка: откуда брать цифры для отчёта
+
+Смотрим всё в iiko. Главное правило — сначала выбрать нужный период: все показатели должны быть за один и тот же день. 🗓
+
+<b>1️⃣ Отчёт о прибылях и убытках</b>
+💰 Выручка — итоговая выручка за день
+🗑 Срок годности — сумма списаний по статье «Срок годности»
+🎁 Комплимент — сумма списаний по статье «Комплимент»
+🍽 Питание — сумма списаний по статье «Питание»
+
+<b>2️⃣ Отчёт о движении денежных средств</b>
+💵 Наличные — сумма наличных, полученных за день
+💳 Безнал искать не нужно — просто вычти:
+Безнал = Выручка − Наличные
+
+<b>3️⃣ OLAP-отчёт по продажам</b>
+👥 Гости — количество гостей
+⏱ Среднее время отдачи — это «Задержка начала приготовления (средняя)»
+
+🧾 Средний чек тоже считать не нужно — формула простая:
+Средний чек = Выручка ÷ Гости
+
+Пользуйтесь, кайфуйте! 🌊"""
+
+
+def _instruction_keyboard(market_id: int, report_date: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📖 Да, пришли инструкцию", callback_data=f"shrep_instr:{market_id}:{report_date}:yes")],
+            [InlineKeyboardButton("✅ Не нужна, я знаю, где смотреть", callback_data=f"shrep_instr:{market_id}:{report_date}:no")],
+        ]
+    )
+
+
+async def _offer_instructions(message, market: dict, report_date: str) -> None:
+    await message.reply_text(
+        "Прежде чем начнём — подскажи: нужна инструкция, где брать показатели для отчёта, или ты уже знаешь, где что смотреть? 🧭",
+        reply_markup=_instruction_keyboard(market["id"], report_date),
+    )
+
+
+async def on_shift_report_instruction_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    _, market_id_str, report_date, choice = query.data.split(":", 3)
+    market_id = int(market_id_str)
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    user_id = query.from_user.id
+    await query.answer()
+    await query.edit_message_reply_markup(reply_markup=None)
+    if choice == "yes":
+        await query.message.reply_text(SHIFT_REPORT_METRICS_GUIDE, parse_mode="HTML")
+    await _begin_collection(context.bot, query.message, user_id, market, report_date)
+
+
 async def _begin_collection(bot: Bot, message, user_id: int, market: dict, report_date: str) -> None:
     report = create_or_get_draft(market["id"], report_date, user_id)
     answers = dict(report.get("data") or {})
@@ -660,10 +717,9 @@ async def on_shift_report_fill(update: Update, context: ContextTypes.DEFAULT_TYP
     if not market:
         await query.answer("Рынок не найден", show_alert=True)
         return
-    user_id = query.from_user.id
     await query.answer()
     await query.edit_message_reply_markup(reply_markup=None)
-    await _begin_collection(context.bot, query.message, user_id, market, report_date)
+    await _offer_instructions(query.message, market, report_date)
 
 
 _STATUS_LABELS = {
@@ -678,14 +734,14 @@ def _manual_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"shrep_manualmarket:{m['id']}")] for m in markets])
 
 
-async def _start_manual_report(bot: Bot, message, user_id: int, market: dict) -> None:
+async def _start_manual_report(message, market: dict) -> None:
     date_iso = tz_today().isoformat()
     existing = get_report_by_date(market["id"], date_iso)
     if existing and existing["status"] != "collecting":
         label = _STATUS_LABELS.get(existing["status"], "уже обработан")
         await message.reply_text(f"Отчёт по «{market['name']}» за сегодня {label}.")
         return
-    await _begin_collection(bot, message, user_id, market, date_iso)
+    await _offer_instructions(message, market, date_iso)
 
 
 async def on_shift_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -705,7 +761,7 @@ async def on_shift_report_command(update: Update, context: ContextTypes.DEFAULT_
         return
 
     if len(markets) == 1:
-        await _start_manual_report(context.bot, update.effective_message, user.id, markets[0])
+        await _start_manual_report(update.effective_message, markets[0])
         return
 
     await update.effective_message.reply_text("По какому рынку вносим отчёт?", reply_markup=_manual_market_pick_keyboard(markets))
@@ -720,7 +776,7 @@ async def on_shift_report_manual_market_choice(update: Update, context: ContextT
         return
     await query.answer()
     await query.edit_message_text(f"Рынок: {market['name']}")
-    await _start_manual_report(context.bot, query.message, query.from_user.id, market)
+    await _start_manual_report(query.message, market)
 
 
 def _send_now_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
