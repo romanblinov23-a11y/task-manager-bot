@@ -105,6 +105,12 @@ _FIELD_LABELS = {
     "shift_composition": "Состав смены",
 }
 
+_FIELD_INDEX = {q["key"]: i for i, q in enumerate(_QUESTIONS)}
+
+
+def _field_index(key: str) -> int | None:
+    return _FIELD_INDEX.get(key)
+
 # telegram_user_id (str) заполняющего -> {"market_id", "market_name", "report_date",
 # "report_id", "step_index", "answers", "is_supervisor_filling"}
 _pending: dict[str, dict] = {}
@@ -151,11 +157,13 @@ def _count_field(data: dict, key: str) -> str:
     return _format_count(value) if value is not None else "—"
 
 
-def _validate_reconciliation(answers: dict) -> str | None:
+def _validate_reconciliation(answers: dict) -> tuple[str, list[str]] | None:
     """Сверка сумм: наличные+безнал должны совпадать с выручкой до копейки,
     средний чек должен совпадать с выручкой/гости с точностью до рубля.
     Вызывается после каждого ответа — срабатывает, только когда все нужные
-    для конкретной проверки поля уже заполнены."""
+    для конкретной проверки поля уже заполнены. Возвращает текст ошибки и
+    список полей, любое из которых может быть неверным — сотрудник сам
+    выбирает, какое поправить, вместо того чтобы гадать за него."""
     total = _parse_amount(answers.get("revenue_total", "") or "")
     cash = _parse_amount(answers.get("revenue_cash", "") or "")
     noncash = _parse_amount(answers.get("revenue_noncash", "") or "")
@@ -163,7 +171,8 @@ def _validate_reconciliation(answers: dict) -> str | None:
         if abs(round(cash + noncash, 2) - round(total, 2)) > 0.005:
             return (
                 f"Наличные + Безнал = {_format_money(cash)} + {_format_money(noncash)} = "
-                f"{_format_money(cash + noncash)}, а выручка указана как {_format_money(total)} — не сходится."
+                f"{_format_money(cash + noncash)}, а выручка указана как {_format_money(total)} — не сходится.",
+                ["revenue_total", "revenue_cash", "revenue_noncash"],
             )
 
     avg_check = _parse_amount(answers.get("avg_check", "") or "")
@@ -173,7 +182,8 @@ def _validate_reconciliation(answers: dict) -> str | None:
         if round(expected) != round(avg_check):
             return (
                 f"При выручке {_format_money(total)} и {guests} гостях средний чек должен быть "
-                f"≈ {_format_money(expected)}, а указано {_format_money(avg_check)} — не сходится."
+                f"≈ {_format_money(expected)}, а указано {_format_money(avg_check)} — не сходится.",
+                ["revenue_total", "avg_check", "guests"],
             )
     return None
 
@@ -241,6 +251,23 @@ def _edit_field_keyboard(report_id: int) -> InlineKeyboardMarkup:
         for i, q in enumerate(_QUESTIONS)
     ]
     buttons.append([InlineKeyboardButton("↩️ Отмена", callback_data=f"shrep_editcancel:{report_id}")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _fix_field_keyboard_collection(keys: list[str]) -> InlineKeyboardMarkup:
+    """Кнопки выбора поля при сведении сумм ещё во время сбора отчёта —
+    сотрудник мог ошибиться в любом из участвующих в проверке полей, не
+    обязательно в том, что спрашивали последним."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton(_FIELD_LABELS[k], callback_data=f"shrep_fixfield:{k}")] for k in keys])
+
+
+def _fix_field_keyboard_edit(report_id: int, keys: list[str]) -> InlineKeyboardMarkup:
+    """То же самое, но при правке уже собранного отчёта — переиспользует
+    те же callback'и, что и «✏️ Редактировать»."""
+    buttons = [
+        [InlineKeyboardButton(_FIELD_LABELS[k], callback_data=f"shrep_editfield:{report_id}:{_field_index(k)}")]
+        for k in keys
+    ]
     return InlineKeyboardMarkup(buttons)
 
 
@@ -467,6 +494,34 @@ async def on_shift_report_absent(update: Update, context: ContextTypes.DEFAULT_T
         )
 
 
+async def _handle_reconciliation_failure(message, state: dict, error: str, keys: list[str]) -> None:
+    save_report_data(state["report_id"], state["answers"])
+    await message.reply_text(f"{error}\n\nКакое из полей поправить?", reply_markup=_fix_field_keyboard_collection(keys))
+
+
+async def on_shift_report_fix_field(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Сотрудник выбрал, какое из полей поправить, после того как суммы не
+    сошлись — открывает именно этот вопрос повторно, не трогая остальные
+    уже собранные ответы."""
+    query = update.callback_query
+    user_id = str(query.from_user.id)
+    state = _pending.get(user_id)
+    if not state:
+        await query.answer()
+        return
+
+    key = query.data.split(":", 1)[1]
+    idx = _field_index(key)
+    if idx is None:
+        await query.answer()
+        return
+
+    state["awaiting_fix_key"] = key
+    await query.answer()
+    await query.edit_message_reply_markup(reply_markup=None)
+    await query.message.reply_text(_QUESTIONS[idx]["prompt"])
+
+
 async def on_shift_report_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Забирает ответы на вопросы вечернего отчёта. Возвращает True, если
     сообщение обработано — по конвенции остальных claim-хендлеров в
@@ -475,6 +530,28 @@ async def on_shift_report_reply(update: Update, context: ContextTypes.DEFAULT_TY
     state = _pending.get(user_id)
     if not state:
         return False
+
+    fix_key = state.get("awaiting_fix_key")
+    if fix_key:
+        idx = _field_index(fix_key)
+        question = _QUESTIONS[idx]
+        text = update.effective_message.text or ""
+        value, error = _validate(question["kind"], text)
+        if error:
+            await update.effective_message.reply_text(error)
+            return True
+
+        state["answers"][fix_key] = value
+        del state["awaiting_fix_key"]
+        recon = _validate_reconciliation(state["answers"])
+        if recon:
+            await _handle_reconciliation_failure(update.effective_message, state, recon[0], recon[1])
+            return True
+
+        state["step_index"] += 1
+        save_report_data(state["report_id"], state["answers"])
+        await _ask_current_question(context.bot, update.effective_message, user_id)
+        return True
 
     idx = state["step_index"]
     if idx >= len(_QUESTIONS):
@@ -487,10 +564,9 @@ async def on_shift_report_reply(update: Update, context: ContextTypes.DEFAULT_TY
         return True
 
     state["answers"][question["key"]] = value
-    recon_error = _validate_reconciliation(state["answers"])
-    if recon_error:
-        save_report_data(state["report_id"], state["answers"])
-        await update.effective_message.reply_text(f"{recon_error}\n\n{question['prompt']}")
+    recon = _validate_reconciliation(state["answers"])
+    if recon:
+        await _handle_reconciliation_failure(update.effective_message, state, recon[0], recon[1])
         return True
 
     state["step_index"] += 1
@@ -596,9 +672,13 @@ async def on_shift_report_edit_reply(update: Update, context: ContextTypes.DEFAU
     data = report["data"]
     candidate = dict(data)
     candidate[question["key"]] = value
-    recon_error = _validate_reconciliation(candidate)
-    if recon_error:
-        await update.effective_message.reply_text(f"{recon_error}\n\n{question['prompt']}")
+    recon = _validate_reconciliation(candidate)
+    if recon:
+        error_text, keys = recon
+        del _editing[user_id]
+        await update.effective_message.reply_text(
+            f"{error_text}\n\nКакое из полей поправить?", reply_markup=_fix_field_keyboard_edit(report["id"], keys)
+        )
         return True
 
     del _editing[user_id]
