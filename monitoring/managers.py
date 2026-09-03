@@ -140,6 +140,19 @@ def is_reports_editor(telegram_user_id: int) -> bool:
     return _has_reports_block(manager) and manager["position"] == "Управляющий"
 
 
+def market_reports_enabled(market_id: int) -> bool:
+    """Можно ли пока вести отчёты по смене на этом рынке: если у рынка есть
+    Управляющий, но владелец отключил ему блок «Отчёты по смене» — рынок
+    сознательно не подключён к отчётности, и кикофф/эскалации по нему
+    временно не идут (владелец решит, когда включить). Если Управляющего
+    на рынке нет — график мог завести только сам владелец, поэтому
+    ограничения нет."""
+    supervisor = get_market_supervisor(market_id)
+    if not supervisor:
+        return True
+    return _has_reports_block(supervisor)
+
+
 def get_market_supervisor(market_id: int, exclude_telegram_user_id: int | None = None) -> dict | None:
     """Активный Управляющий этого рынка (он же проект — market 1:1 с
     PROJECTS), если есть, кроме исключённого пользователя. У рынка/проекта

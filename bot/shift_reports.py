@@ -9,7 +9,13 @@ from bot.onboarding import get_display_name
 from config.settings import ROMAN_TELEGRAM_ID
 from config.timeutil import fmt_date
 from config.timeutil import today as tz_today
-from monitoring.managers import get_market_supervisor, get_markets_for_manager, has_reports_access, is_owner
+from monitoring.managers import (
+    get_market_supervisor,
+    get_markets_for_manager,
+    has_reports_access,
+    is_owner,
+    market_reports_enabled,
+)
 from monitoring.markets import get_market, list_markets
 from monitoring.shift_reports import (
     create_or_get_draft,
@@ -979,18 +985,26 @@ async def on_shift_report_more_info_reply(update: Update, context: ContextTypes.
 
 async def send_shift_report_kickoffs(bot: Bot) -> None:
     """22:00 — для каждого рынка с записью в графике на сегодня предлагает
-    назначенному менеджеру заполнить отчёт (см. main.py)."""
+    назначенному менеджеру заполнить отчёт (см. main.py). Пропускает рынки,
+    у которых Управляющему сейчас отключён блок «Отчёты по смене» —
+    владелец сознательно ещё не подключил рынок к отчётности."""
     date_iso = tz_today().isoformat()
     for market in list_markets_with_shift(date_iso):
+        if not market_reports_enabled(market["id"]):
+            continue
         await _offer_report_or_absence(bot, market["scheduled_manager_id"], market, date_iso)
 
 
 async def send_shift_report_escalations(bot: Bot) -> None:
     """23:30 — если по рынку с сегодняшней записью в графике отчёт так и не
     начали сдавать управляющему, сообщает управляющему (или владельцу, если
-    управляющего нет) и предлагает те же две кнопки (см. main.py)."""
+    управляющего нет) и предлагает те же две кнопки (см. main.py). Рынки с
+    отключённым у Управляющего блоком «Отчёты по смене» пропускаются —
+    см. market_reports_enabled."""
     date_iso = tz_today().isoformat()
     for market in list_markets_with_shift(date_iso):
+        if not market_reports_enabled(market["id"]):
+            continue
         report = get_report_by_date(market["id"], date_iso)
         if report and report["status"] != "collecting":
             continue
@@ -1022,9 +1036,12 @@ async def send_shift_report_owner_escalations(bot: Bot) -> None:
     """09:00 — последний рубеж: если вчерашний отчёт рынка так и не дошёл
     до согласования Романом (approved/dispatched), сообщает ему напрямую —
     независимо от того, сработала ли эскалация управляющему в 23:30
-    (см. main.py)."""
+    (см. main.py). Рынки с отключённым у Управляющего блоком «Отчёты по
+    смене» пропускаются — см. market_reports_enabled."""
     yesterday = (tz_today() - timedelta(days=1)).isoformat()
     for market in list_markets_with_shift(yesterday):
+        if not market_reports_enabled(market["id"]):
+            continue
         report = get_report_by_date(market["id"], yesterday)
         if report and report["status"] in ("approved", "dispatched"):
             continue
