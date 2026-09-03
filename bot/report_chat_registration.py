@@ -7,6 +7,13 @@ from monitoring.shift_reports import delete_report_chat, get_report_chat, list_r
 
 _ROLE_LABELS = {"finance": "💰 Финпартнёры", "team": "👥 Команда точки"}
 
+_TEAM_CHAT_GREETING = (
+    "Привет, Серферы! Рад быть с вами в чате, я хоть и искусственный, но очень добрый 🙈\n\n"
+    "Тут я для того, чтобы все оставались в едином информационном поле и буду помогать вам ничего не забыть. "
+    "Я буду писать вам утром и вечером - очень прошу, не оставляйте мои сообщения без внимания, ведь единая "
+    "информационная среда поможет нам достичь еще более крутых результатов и покорить самые большие волны 🌊"
+)
+
 # Управляющий (не владелец) может привязывать только чат команды точки —
 # чат финпартнёров (с тегом и финансовыми данными) остаётся только владельцу.
 _SUPERVISOR_ALLOWED_ROLES = ("team",)
@@ -121,6 +128,14 @@ async def on_register_report_chat_role(update: Update, context: ContextTypes.DEF
 
     set_report_chat(market_id, role, chat_id)
     await query.edit_message_text(f"✅ Этот чат будет получать отчёты «{market['name']}» — {_ROLE_LABELS[role]}.")
+    if role == "team":
+        # Представляемся команде сразу при привязке — это их первый контакт
+        # с ботом в этом чате (см. bot.chat_registration для аналогичной
+        # логики у рабочего чата проекта).
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=_TEAM_CHAT_GREETING)
+        except Exception:
+            pass
 
 
 async def on_register_report_chat_mention_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
