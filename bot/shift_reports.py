@@ -29,21 +29,33 @@ _WEEKDAY_RU = ["понедельник", "вторник", "среда", "чет
 # Вопросы в порядке образца отчёта (не прозы ТЗ — там расходился порядок
 # "Комплимент"/"Питание" с образцом; ориентируемся на образец).
 _QUESTIONS = [
-    {"key": "revenue_total", "kind": "money", "prompt": "Привет! Пришло время вечернего отчёта! Начнём: напиши сумму общей выручки за день (формат: 324675,87):"},
-    {"key": "revenue_cash", "kind": "money", "prompt": "Напиши сумму наличной выручки (формат: 324 675,87):"},
-    {"key": "revenue_noncash", "kind": "money", "prompt": "Напиши сумму безналичной выручки (формат: 324675,87):"},
-    {"key": "avg_check", "kind": "money", "prompt": "Напиши средний чек за смену (формат: 789,87):"},
-    {"key": "guests", "kind": "guests", "prompt": "Напиши количество гостей (формат: 1 234):"},
-    {"key": "writeoff_expiry", "kind": "money", "prompt": "Укажи сумму списаний на статью «Истёк срок годности» за сегодня, с/с (формат: 7 189,87):"},
-    {"key": "writeoff_compliment", "kind": "money", "prompt": "Укажи сумму списаний на статью «Комплимент» за сегодня, с/с (формат: 7 189,87):"},
-    {"key": "writeoff_staff_meals", "kind": "money", "prompt": "Укажи сумму списаний на статью «Питание сотрудников» за сегодня, с/с (формат: 7 189,87):"},
-    {"key": "avg_service_time", "kind": "time", "prompt": "Укажи среднее время выдачи и приготовления заказов за сегодняшний день (формат: 5:35):"},
+    {"key": "revenue_total", "kind": "money", "prompt": "💰 Общая выручка за день\nНапример: 324675,87"},
+    {"key": "revenue_cash", "kind": "money", "prompt": "💵 Наличная выручка\nНапример: 324 675,87"},
+    {"key": "revenue_noncash", "kind": "money", "prompt": "💳 Безналичная выручка\nНапример: 324675,87"},
+    {"key": "avg_check", "kind": "money", "prompt": "🧾 Средний чек за смену\nНапример: 789,87"},
+    {"key": "guests", "kind": "guests", "prompt": "👥 Количество гостей\nНапример: 1 234"},
+    {
+        "key": "writeoff_expiry",
+        "kind": "money",
+        "prompt": "🗑 Списания «Истёк срок годности»\nЗа сегодня, себестоимость. Например: 7 189,87",
+    },
+    {
+        "key": "writeoff_compliment",
+        "kind": "money",
+        "prompt": "🎁 Списания «Комплимент»\nЗа сегодня, себестоимость. Например: 7 189,87",
+    },
+    {
+        "key": "writeoff_staff_meals",
+        "kind": "money",
+        "prompt": "🍽 Списания «Питание сотрудников»\nЗа сегодня, себестоимость. Например: 7 189,87",
+    },
+    {"key": "avg_service_time", "kind": "time", "prompt": "⏱ Среднее время выдачи и приготовления заказов\nНапример: 5:35"},
     {
         "key": "comment_general",
         "kind": "text",
         "prompt": (
-            "Отлично! Перейдём к комментариям. Расскажи общие комментарии по работе кофейни за сегодня: как "
-            "прошла смена, с какими трудностями столкнулись, а с чем справились хорошо, на что стоит обратить "
+            "📝 Общая работа точки\n"
+            "Как прошла смена, с какими трудностями столкнулись, а с чем справились хорошо? На что обратить "
             "внимание менеджеру следующего дня?"
         ),
     },
@@ -51,39 +63,38 @@ _QUESTIONS = [
         "key": "comment_service",
         "kind": "text",
         "prompt": (
-            "Супер! Расскажи, как проходило обслуживание гостей сегодня. Были ли позитивные отзывы? Как гости "
-            "реагировали на новинки в меню, если такие есть?"
+            "🙂 Обслуживание гостей\n"
+            "Как проходило сегодня? Были позитивные отзывы? Как гости реагировали на новинки в меню, если такие есть?"
         ),
     },
-    {"key": "comment_conflicts", "kind": "text", "prompt": "Случались ли сегодня конфликтные ситуации? Опиши, если да — или напиши «не было»."},
+    {"key": "comment_conflicts", "kind": "text", "prompt": "⚠️ Конфликтные ситуации\nБыли сегодня? Опиши, если да — или напиши «не было»."},
     {
         "key": "comment_equipment",
         "kind": "text",
         "prompt": (
-            "Отлично! Теперь дай комментарий по работе оборудования, состоянию предметов интерьера или мебели. "
-            "Даже если уже говорил(а) об этом раньше — сообщи ещё раз, если что-то неисправно: так мы увидим, "
-            "что проблема острая."
+            "🔧 Оборудование\n"
+            "Что с техникой, интерьером, мебелью? Если что-то неисправно — сообщи, даже если уже говорил(а) об этом раньше."
         ),
     },
     {
         "key": "comment_weather_flow",
         "kind": "text",
         "prompt": (
-            "Супер, спасибо! Обсудим гостевой поток и погоду. Опиши: какая была погода и влияла ли она на поток "
-            "в течение дня. Соотнеси с планом — что ещё могло повлиять на поток?"
+            "🌤 Погода и поток гостей\n"
+            "Какая была погода и как она влияла на поток в течение дня? Что ещё могло повлиять, если сравнить с планом?"
         ),
     },
     {
         "key": "comment_events",
         "kind": "text",
-        "prompt": "Спасибо! Теперь опиши события и мероприятия в Парке или рядом, которые могли повлиять на гостевой поток — в любую сторону.",
+        "prompt": "📅 Значимые события\nБыли события или мероприятия в Парке или рядом, которые повлияли на поток — в любую сторону?",
     },
     {
         "key": "shift_composition",
         "kind": "text",
         "prompt": (
-            "Класс, ты почти закончил! Расскажи, кто и в каком составе работал сегодня — в утреннюю и в "
-            "вечернюю смену (сколько менеджеров, бариста, клинеров и «уютных»)."
+            "👩‍🍳 Состав смены\n"
+            "Кто и в каком количестве работал — отдельно утро и вечер (менеджеры, бариста, клинеры, «уютные»)."
         ),
     },
 ]
@@ -113,9 +124,9 @@ _FIELD_LABELS = {
 # Поля для сравнения с той же датой на прошлой неделе — запрашиваются
 # дополнительно только если за прошлую неделю нет согласованного отчёта.
 _BASELINE_FIELD_DEFS = {
-    "revenue_total_prev": {"key": "revenue_total_prev", "kind": "money", "prompt": "Какая была выручка на сравниваемую дату (формат: 324675,87)?"},
-    "avg_check_prev": {"key": "avg_check_prev", "kind": "money", "prompt": "Какой был средний чек на сравниваемую дату (формат: 789,87)?"},
-    "guests_prev": {"key": "guests_prev", "kind": "guests", "prompt": "Сколько было гостей на сравниваемую дату (формат: 1 234)?"},
+    "revenue_total_prev": {"key": "revenue_total_prev", "kind": "money", "prompt": "📊 Выручка на сравниваемую дату\nНапример: 324675,87"},
+    "avg_check_prev": {"key": "avg_check_prev", "kind": "money", "prompt": "📊 Средний чек на сравниваемую дату\nНапример: 789,87"},
+    "guests_prev": {"key": "guests_prev", "kind": "guests", "prompt": "📊 Количество гостей на сравниваемую дату\nНапример: 1 234"},
 }
 
 _QUESTION_BY_KEY = {q["key"]: q for q in _QUESTIONS}
@@ -180,7 +191,7 @@ def _validate_reconciliation(answers: dict) -> tuple[str, list[str]] | None:
     if total is not None and cash is not None and noncash is not None:
         if abs(round(cash + noncash, 2) - round(total, 2)) > 0.005:
             return (
-                f"Наличные + Безнал = {_format_money(cash)} + {_format_money(noncash)} = "
+                f"⚠️ Наличные + Безнал = {_format_money(cash)} + {_format_money(noncash)} = "
                 f"{_format_money(cash + noncash)}, а выручка указана как {_format_money(total)} — не сходится.",
                 ["revenue_total", "revenue_cash", "revenue_noncash"],
             )
@@ -191,7 +202,7 @@ def _validate_reconciliation(answers: dict) -> tuple[str, list[str]] | None:
         expected = total / guests
         if round(expected) != round(avg_check):
             return (
-                f"При выручке {_format_money(total)} и {guests} гостях средний чек должен быть "
+                f"⚠️ При выручке {_format_money(total)} и {guests} гостях средний чек должен быть "
                 f"≈ {_format_money(expected)}, а указано {_format_money(avg_check)} — не сходится.",
                 ["revenue_total", "avg_check", "guests"],
             )
@@ -202,18 +213,18 @@ def _validate(kind: str, text: str) -> tuple[str | None, str | None]:
     text = text.strip()
     if kind == "money":
         if _parse_amount(text) is None:
-            return None, "Нужно число, например 324675,87. Попробуй ещё раз:"
+            return None, "🤔 Не понял число. Попробуй ещё раз, например: 324675,87"
         return text, None
     if kind == "guests":
         if _parse_int(text) is None:
-            return None, "Нужно целое число, например 737. Попробуй ещё раз:"
+            return None, "🤔 Нужно целое число. Попробуй ещё раз, например: 737"
         return text, None
     if kind == "time":
         if not re.match(r"^\d{1,2}:\d{2}$", text):
-            return None, "Нужен формат М:СС, например 5:35. Попробуй ещё раз:"
+            return None, "🤔 Нужен формат М:СС. Попробуй ещё раз, например: 5:35"
         return text, None
     if not text:
-        return None, "Не может быть пустым, напиши хотя бы коротко:"
+        return None, "🤔 Не может быть пустым — напиши хотя бы коротко:"
     return text, None
 
 
@@ -365,7 +376,7 @@ async def _offer_report_or_absence(bot: Bot, telegram_user_id: int, market: dict
     try:
         await bot.send_message(
             chat_id=telegram_user_id,
-            text="Привет! Пришло время вечернего отчёта!",
+            text="👋 Привет! Пора сдавать вечерний отчёт по смене.",
             reply_markup=_kickoff_keyboard(market["id"], report_date),
         )
     except Exception:
@@ -413,10 +424,13 @@ def _build_questions(report_date: str, answers: dict) -> list[dict]:
         {
             "key": "revenue_total_prev",
             "kind": "money",
-            "prompt": f"Не нашёл отчёт за прошлую {weekday_name} ({fmt_date(prev_date)}) для сравнения — какая тогда была выручка (формат: 324675,87)?",
+            "prompt": (
+                f"📊 Не нашёл отчёт за прошлую {weekday_name} ({fmt_date(prev_date)}) для сравнения — "
+                "подскажи вручную, какая тогда была выручка?\nНапример: 324675,87"
+            ),
         },
-        {"key": "avg_check_prev", "kind": "money", "prompt": f"Какой был средний чек в прошлую {weekday_name} (формат: 789,87)?"},
-        {"key": "guests_prev", "kind": "guests", "prompt": f"Сколько было гостей в прошлую {weekday_name} (формат: 1 234)?"},
+        {"key": "avg_check_prev", "kind": "money", "prompt": f"📊 Какой был средний чек в прошлую {weekday_name}?\nНапример: 789,87"},
+        {"key": "guests_prev", "kind": "guests", "prompt": f"📊 Сколько было гостей в прошлую {weekday_name}?\nНапример: 1 234"},
     ]
     return baseline + list(_QUESTIONS)
 
@@ -428,17 +442,18 @@ async def _ask_current_question(bot: Bot, message, user_id: str) -> None:
     if idx >= len(questions):
         await _finish_collection(bot, message, user_id)
         return
-    await message.reply_text(questions[idx]["prompt"])
+    progress = f"Шаг {idx + 1} из {len(questions)}"
+    await message.reply_text(f"{progress}\n\n{questions[idx]['prompt']}")
 
 
 async def _finish_collection(bot: Bot, message, user_id: str) -> None:
     state = _pending.pop(user_id)
     report_id = state["report_id"]
     if state["is_supervisor_filling"]:
-        await message.reply_text("Спасибо, отчёт готов! Отправляю Роману на согласование.")
+        await message.reply_text("🎉 Спасибо, отчёт готов! Отправляю Роману на согласование.")
         await _send_for_owner_approval(bot, report_id)
     else:
-        await message.reply_text("Спасибо, отчёт готов! Отправляю управляющему на согласование.")
+        await message.reply_text("🎉 Спасибо, отчёт готов! Отправляю управляющему на согласование.")
         await _send_for_supervisor_approval(bot, report_id)
 
 
