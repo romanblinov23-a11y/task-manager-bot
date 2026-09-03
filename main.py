@@ -85,6 +85,8 @@ from bot.messaging import (
     on_broadcast_market_choice,
     on_broadcast_position_choice,
     on_broadcast_scope_choice,
+    on_message_chat_command,
+    on_message_chat_pick,
     on_message_command,
     on_message_pick,
 )
@@ -294,6 +296,7 @@ _ROMAN_COMMANDS = [
     BotCommand("send_morning_report", "Отправить утреннее напоминание команде сейчас (проверка формата)"),
     BotCommand("reset_shift_report", "⚠️ Сбросить сегодняшний отчёт по смене"),
     BotCommand("message", "Написать в личку сотруднику через бота"),
+    BotCommand("message_chat", "Написать в зарегистрированный чат через бота"),
     BotCommand("broadcast", "Разослать сообщение группе сотрудников"),
     BotCommand("regulations", "Регламенты работы с ботом"),
     BotCommand("help", "Список команд"),
@@ -357,6 +360,7 @@ def main() -> None:
     app.add_handler(CommandHandler("send_morning_report", on_send_morning_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("reset_shift_report", on_reset_shift_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("message", on_message_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("message_chat", on_message_chat_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("broadcast", on_broadcast_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, on_group_message))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text))
@@ -464,6 +468,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_shift_report_edit, pattern=r"^shrep_edit:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_more_info, pattern=r"^shrep_moreinfo:"))
     app.add_handler(CallbackQueryHandler(on_message_pick, pattern=r"^msg_pick:"))
+    app.add_handler(CallbackQueryHandler(on_message_chat_pick, pattern=r"^msgchat_pick:"))
     app.add_handler(CallbackQueryHandler(on_broadcast_scope_choice, pattern=r"^bcast_scope:"))
     app.add_handler(CallbackQueryHandler(on_broadcast_market_choice, pattern=r"^bcast_market:"))
     app.add_handler(CallbackQueryHandler(on_broadcast_position_choice, pattern=r"^bcast_position:"))

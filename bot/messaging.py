@@ -1,12 +1,19 @@
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS, MANAGER_POSITIONS
+from config.chats import get_all_bindings
+from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS
 from monitoring.managers import get_manager_blocks, is_owner, list_managers
+from monitoring.markets import get_market
+from monitoring.shift_reports import list_report_chats
 
 # telegram_user_id (str) владельца -> {"target_id": int, "target_name": str} —
 # ждём текст личного сообщения для конкретного сотрудника
 _awaiting_dm: dict[str, dict] = {}
+
+# telegram_user_id (str) владельца -> {"chat_id": int, "chat_label": str} —
+# ждём текст сообщения для конкретного зарегистрированного чата
+_awaiting_chat_message: dict[str, dict] = {}
 
 # telegram_user_id (str) владельца -> [{"telegram_user_id", "name"}, ...] —
 # аудитория выбрана, ждём текст рассылки
@@ -71,6 +78,74 @@ async def on_message_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.effective_message.reply_text(f"✅ Отправлено {state['target_name']}.")
     except Exception as e:
         await update.effective_message.reply_text(f"⚠️ Не смог отправить {state['target_name']}: {e}")
+    return True
+
+
+def _registered_chats() -> list[dict]:
+    """Рабочие чаты проектов (/register_project) и чаты команды точки
+    (/register_report_chat, роль team) — куда владелец может написать
+    напрямую. Чат финпартнёров сюда не входит: там внешние люди, писать
+    туда через эту команду не предполагается."""
+    chats = [
+        {"chat_id": chat_id, "label": f"📋 {project} — рабочий чат"}
+        for chat_id, project, _source in get_all_bindings()
+    ]
+    for row in list_report_chats():
+        if row["role"] != "team":
+            continue
+        market = get_market(row["market_id"])
+        market_name = market["name"] if market else f"#{row['market_id']}"
+        chats.append({"chat_id": row["chat_id"], "label": f"👥 {market_name} — команда точки"})
+    return chats
+
+
+def _chats_pick_keyboard(chats: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(c["label"], callback_data=f"msgchat_pick:{c['chat_id']}")] for c in chats])
+
+
+async def on_message_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/message_chat — владелец выбирает зарегистрированный чат (рабочий
+    чат проекта или чат команды точки) и пишет туда сообщение через бота."""
+    if not is_owner(update.effective_user.id):
+        return
+    chats = _registered_chats()
+    if not chats:
+        await update.effective_message.reply_text("Пока нет ни одного зарегистрированного чата.")
+        return
+    await update.effective_message.reply_text("В какой чат написать?", reply_markup=_chats_pick_keyboard(chats))
+
+
+async def on_message_chat_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    chat_id = int(query.data.split(":", 1)[1])
+    chats = {c["chat_id"]: c for c in _registered_chats()}
+    chat = chats.get(chat_id)
+    if not chat:
+        await query.answer("Чат больше не зарегистрирован", show_alert=True)
+        return
+    _awaiting_chat_message[str(query.from_user.id)] = {"chat_id": chat_id, "chat_label": chat["label"]}
+    await query.answer()
+    await query.edit_message_text(f"Напиши сообщение для «{chat['label']}» — отправлю от твоего имени:")
+
+
+async def on_message_chat_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Забирает текст сообщения владельца для зарегистрированного чата.
+    Возвращает True, если сообщение обработано — по конвенции остальных
+    claim-хендлеров в on_private_text."""
+    owner_id = str(update.effective_user.id)
+    state = _awaiting_chat_message.pop(owner_id, None)
+    if not state:
+        return False
+
+    text = update.effective_message.text or ""
+    try:
+        await context.bot.send_message(chat_id=state["chat_id"], text=f"✉️ Сообщение от Романа:\n\n{text}")
+        await update.effective_message.reply_text(f"✅ Отправлено в «{state['chat_label']}».")
+    except Exception as e:
+        await update.effective_message.reply_text(f"⚠️ Не смог отправить в «{state['chat_label']}»: {e}")
     return True
 
 
