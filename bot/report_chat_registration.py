@@ -1,11 +1,15 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from monitoring.managers import is_owner
+from monitoring.managers import get_markets_for_manager, is_owner, is_reports_editor
 from monitoring.markets import get_market, list_markets
 from monitoring.shift_reports import delete_report_chat, get_report_chat, list_report_chats, set_report_chat
 
 _ROLE_LABELS = {"finance": "💰 Финпартнёры", "team": "👥 Команда точки"}
+
+# Управляющий (не владелец) может привязывать только чат команды точки —
+# чат финпартнёров (с тегом и финансовыми данными) остаётся только владельцу.
+_SUPERVISOR_ALLOWED_ROLES = ("team",)
 
 # telegram_user_id (str) владельца -> {"market_id", "role", "chat_id", "market_name"} —
 # ждём текст, кого тегнуть первой строкой в отчёте для этого чата
@@ -16,18 +20,27 @@ def _market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"shrc_market:{m['id']}")] for m in markets])
 
 
-def _role_pick_keyboard(market_id: int) -> InlineKeyboardMarkup:
+def _role_pick_keyboard(market_id: int, roles: tuple[str, ...]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(label, callback_data=f"shrc_role:{market_id}:{role}")] for role, label in _ROLE_LABELS.items()]
+        [[InlineKeyboardButton(_ROLE_LABELS[role], callback_data=f"shrc_role:{market_id}:{role}")] for role in roles]
     )
 
 
+def _allowed_markets(user_id: int) -> list[dict]:
+    """Владелец видит и привязывает любой рынок; Управляющий — только
+    рынок(и), где он сам Управляющий (см. is_reports_editor)."""
+    if is_owner(user_id):
+        return list_markets()
+    return get_markets_for_manager(user_id)
+
+
 async def on_register_report_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/register_report_chat — владелец вызывает внутри группы, чтобы
-    привязать её как получателя ежедневного отчёта по смене (не как
-    рабочий чат проекта — сюда бот только рассылает готовые отчёты,
-    переписку не разбирает на задачи)."""
-    if not is_owner(update.effective_user.id):
+    """/register_report_chat — владелец или Управляющий рынка вызывает
+    внутри группы, чтобы привязать её как получателя ежедневного отчёта по
+    смене (не как рабочий чат проекта — сюда бот только рассылает готовые
+    отчёты, переписку не разбирает на задачи). Управляющий может привязать
+    только чат команды точки, чат финпартнёров — только владелец."""
+    if not is_reports_editor(update.effective_user.id):
         return
 
     chat = update.effective_chat
@@ -35,9 +48,9 @@ async def on_register_report_chat(update: Update, context: ContextTypes.DEFAULT_
         await update.effective_message.reply_text("Эта команда работает только внутри группового чата.")
         return
 
-    markets = list_markets()
+    markets = _allowed_markets(update.effective_user.id)
     if not markets:
-        await update.effective_message.reply_text("Пока нет ни одного рынка — сначала /add_project в личке боту.")
+        await update.effective_message.reply_text("Пока нет ни одного доступного вам рынка.")
         return
 
     await update.effective_message.reply_text(
@@ -47,31 +60,35 @@ async def on_register_report_chat(update: Update, context: ContextTypes.DEFAULT_
 
 async def on_register_report_chat_market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if not is_owner(query.from_user.id):
+    if not is_reports_editor(query.from_user.id):
         await query.answer()
         return
 
     market_id = int(query.data.split(":", 1)[1])
     market = get_market(market_id)
-    if not market:
+    allowed_ids = {m["id"] for m in _allowed_markets(query.from_user.id)}
+    if not market or market_id not in allowed_ids:
         await query.answer("Рынок не найден", show_alert=True)
         return
 
+    roles = _ROLE_LABELS.keys() if is_owner(query.from_user.id) else _SUPERVISOR_ALLOWED_ROLES
     await query.answer()
-    await query.edit_message_text(f"Рынок: {market['name']}. Какой это чат?", reply_markup=_role_pick_keyboard(market_id))
+    await query.edit_message_text(f"Рынок: {market['name']}. Какой это чат?", reply_markup=_role_pick_keyboard(market_id, tuple(roles)))
 
 
 async def on_register_report_chat_role(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if not is_owner(query.from_user.id):
+    if not is_reports_editor(query.from_user.id):
         await query.answer()
         return
 
     _, market_id_str, role = query.data.split(":")
     market_id = int(market_id_str)
     market = get_market(market_id)
-    if not market:
-        await query.answer("Рынок не найден", show_alert=True)
+    allowed_ids = {m["id"] for m in _allowed_markets(query.from_user.id)}
+    is_supervisor = not is_owner(query.from_user.id)
+    if not market or market_id not in allowed_ids or (is_supervisor and role not in _SUPERVISOR_ALLOWED_ROLES):
+        await query.answer("Недоступно", show_alert=True)
         return
 
     chat_id = query.message.chat.id
