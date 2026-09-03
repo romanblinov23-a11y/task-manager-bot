@@ -1,9 +1,11 @@
 import re
+from datetime import date, timedelta
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from config.timeutil import parse_date
+from config.timeutil import today as tz_today
 from monitoring.managers import get_market_supervisor, get_markets_for_manager, is_owner, is_reports_editor
 from monitoring.markets import get_market, list_markets
 from monitoring.monthly_plan import set_monthly_plan
@@ -14,9 +16,23 @@ _awaiting_paste: dict[str, dict] = {}
 # telegram_user_id (str) -> {"market_id": int, "entries": [(date_iso, revenue, checks), ...]}
 _pending_confirm: dict[str, dict] = {}
 
+# Реальный формат выгрузки, которым пользуются управляющие:
+# "01.09 вт — 691 600 ₽ | 910 чек." — дата без года, день недели опционален,
+# разделитель "—" перед суммой, "₽" после выручки, "|" перед чеками, "чек."
+# после числа чеков (точка не обязательна).
+_PLAN_LINE_RE = re.compile(
+    r"^(?P<date>\d{1,2}\.\d{1,2}(?:\.\d{2,4})?)"
+    r"\s*[а-яё]{0,3}\.?\s*"
+    r"[-—]\s*"
+    r"(?P<revenue>[\d\s\xa0.,]+?)\s*₽?\s*"
+    r"\|\s*"
+    r"(?P<checks>[\d\s\xa0]+)\s*чек\.?\s*$",
+    re.IGNORECASE,
+)
+
 
 def _parse_amount(text: str) -> float | None:
-    cleaned = text.strip().replace(" ", "").replace("\xa0", "").replace(",", ".")
+    cleaned = text.strip().replace(" ", "").replace("\xa0", "").replace("₽", "").replace(",", ".")
     try:
         value = float(cleaned)
     except ValueError:
@@ -27,6 +43,27 @@ def _parse_amount(text: str) -> float | None:
 def _parse_int(text: str) -> int | None:
     cleaned = text.strip().replace(" ", "").replace("\xa0", "")
     return int(cleaned) if cleaned.isdigit() else None
+
+
+def _resolve_plan_date(date_raw: str) -> str | None:
+    """«ДД.ММ» без года — разрешаем так, чтобы месяц не «улетал» на год
+    вперёд из-за общей логики parse_date («если дата раньше сегодня — взять
+    следующий год», что годится для разговорных ссылок на дату, но ломает
+    начало текущего месяца при загрузке плана прямо по ходу месяца). Берём
+    следующий год, только если дата в прошлом больше чем на 20 дней — тогда
+    это точно не текущий месяц, а план на будущее."""
+    parts = date_raw.strip().split(".")
+    if len(parts) == 2 and all(p.isdigit() for p in parts):
+        day, month = int(parts[0]), int(parts[1])
+        t = tz_today()
+        try:
+            candidate = date(t.year, month, day)
+        except ValueError:
+            return None
+        if candidate < t - timedelta(days=20):
+            candidate = candidate.replace(year=t.year + 1)
+        return candidate.isoformat()
+    return parse_date(date_raw)
 
 
 def _available_markets(user_id: int) -> list[dict]:
@@ -49,8 +86,8 @@ def _instructions_text(market_name: str) -> str:
     return (
         f"Пришли план по выручке и чекам на месяц вперёд для «{market_name}» — по дням.\n\n"
         "Формат, по одной дате на строку:\n"
-        "1.09.2026 - 350000 - 120\n"
-        "2.09.2026 - 340000 - 115\n\n"
+        "01.09 вт — 691 600 ₽ | 910 чек.\n"
+        "02.09 ср — 614 200 ₽ | 830 чек.\n\n"
         "Средний чек считать не нужно — бот сам поделит выручку на чеки."
     )
 
@@ -103,12 +140,20 @@ def _parse_plan_paste(text: str) -> tuple[list[tuple[str, float, int]], list[str
         line = raw_line.strip()
         if not line:
             continue
-        parts = re.split(r"\s*[-—]\s*", line)
-        if len(parts) != 3:
-            errors.append(f"строка {i} «{line}»: ожидал «дата - выручка - чеки»")
-            continue
-        date_raw, revenue_raw, checks_raw = parts
-        date_iso = parse_date(date_raw.strip())
+
+        match = _PLAN_LINE_RE.match(line)
+        if match:
+            date_raw, revenue_raw, checks_raw = match.group("date"), match.group("revenue"), match.group("checks")
+        else:
+            # Запасной вариант — если кто-то введёт вручную проще, через
+            # обычные дефисы: "дата - выручка - чеки".
+            parts = re.split(r"\s*[-—]\s*", line)
+            if len(parts) != 3:
+                errors.append(f"строка {i} «{line}»: не понял формат — жду «01.09 вт — 691 600 ₽ | 910 чек.»")
+                continue
+            date_raw, revenue_raw, checks_raw = parts
+
+        date_iso = _resolve_plan_date(date_raw)
         if not date_iso:
             errors.append(f"строка {i} «{line}»: не понял дату «{date_raw.strip()}»")
             continue
