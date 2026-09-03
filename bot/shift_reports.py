@@ -802,6 +802,64 @@ async def on_send_shift_report_market_choice(update: Update, context: ContextTyp
     await _send_report_now(context.bot, query.message, market)
 
 
+def _send_morning_now_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"shrep_sendmorning:{m['id']}")] for m in markets])
+
+
+async def _send_morning_report_now(bot: Bot, message, market: dict) -> None:
+    date_iso = tz_today().isoformat()
+    team_chat = get_report_chat(market["id"], "team")
+    if not team_chat:
+        await message.reply_text(f"Для «{market['name']}» не привязан чат команды точки — сначала /register_report_chat.")
+        return
+
+    text = render_team_morning_message(market, date_iso)
+    if text is None:
+        await message.reply_text(f"На «{market['name']}» ещё не загружен план на сегодня — сначала /set_monthly_plan.")
+        return
+
+    if team_chat.get("mention"):
+        text = f"{team_chat['mention']}\n\n{text}"
+    try:
+        await bot.send_message(chat_id=team_chat["chat_id"], text=text, parse_mode="HTML")
+        await message.reply_text(f"✅ Отправил утреннее напоминание по «{market['name']}» в чат команды точки.")
+    except Exception as e:
+        await message.reply_text(f"⚠️ Не смог отправить в чат команды точки: {e}")
+
+
+async def on_send_morning_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/send_morning_report — владелец разово шлёт сегодняшнее утреннее
+    напоминание в чат команды точки прямо сейчас, не дожидаясь 07:00 —
+    удобно, чтобы проверить формат/план, не трогая обычное расписание."""
+    if not is_owner(update.effective_user.id):
+        return
+    markets = list_markets()
+    if not markets:
+        await update.effective_message.reply_text("Пока нет ни одного рынка.")
+        return
+    if len(markets) == 1:
+        await _send_morning_report_now(context.bot, update.effective_message, markets[0])
+        return
+    await update.effective_message.reply_text(
+        "По какому рынку отправить утреннее напоминание?", reply_markup=_send_morning_now_market_pick_keyboard(markets)
+    )
+
+
+async def on_send_morning_report_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(f"Рынок: {market['name']}")
+    await _send_morning_report_now(context.bot, query.message, market)
+
+
 def _reset_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"shrep_resetmarket:{m['id']}")] for m in markets])
 
