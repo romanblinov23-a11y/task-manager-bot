@@ -350,7 +350,7 @@ async def on_meeting_postpone_reply(update: Update, context: ContextTypes.DEFAUL
     return True
 
 
-def _render_meeting_message(market: dict, instance: dict) -> str:
+def _render_meeting_message(market: dict, instance: dict, recipient_name: str | None = None) -> str:
     label = _MEETING_TYPE_LABELS[instance["meeting_type"]]
     date_time = f"{fmt_date(instance['meeting_date'])} в {instance['meeting_time']}"
     if instance["status"] == "cancelled":
@@ -365,24 +365,26 @@ def _render_meeting_message(market: dict, instance: dict) -> str:
             "сильнее гораздо быстрее. Если у тебя есть уважительная причина отсутствия — сообщи её здесь в чате, "
             "чтобы вся команда была в курсе и не беспокоилась о твоём отсутствии."
         )
-    return f"📅 Собрание «{label}» на «{market['name']}» состоится {date_time}{reschedule_note}.\n\nПовестка:\n{instance['agenda']}"
+    return (
+        f"Привет, {recipient_name}! Управляющий подтвердил запланированное собрание {date_time}{reschedule_note}, "
+        f"вот повестка, чтобы оно прошло эффективнее:\n\n{instance['agenda']}"
+    )
 
 
 async def _dispatch_meeting(bot: Bot, instance: dict) -> None:
     """Рассылает собрание нужной аудитории: команде — в чат, куда уходят
     отчёты для команды; менеджерам — лично в личку каждому активному
-    менеджеру рынка (кроме самого Управляющего). Отдельно, если запрошено —
-    приглашает Романа с той же повесткой."""
+    менеджеру рынка (кроме самого Управляющего), с обращением по имени.
+    Отдельно, если запрошено — приглашает Романа с той же повесткой."""
     market = get_market(instance["market_id"])
     if not market:
         return
-    text = _render_meeting_message(market, instance)
 
     if instance["meeting_type"] == "team":
         team_chat = get_report_chat(instance["market_id"], "team")
         if team_chat:
             try:
-                await bot.send_message(chat_id=team_chat["chat_id"], text=text)
+                await bot.send_message(chat_id=team_chat["chat_id"], text=_render_meeting_message(market, instance))
             except Exception:
                 pass
     else:
@@ -392,7 +394,9 @@ async def _dispatch_meeting(bot: Bot, instance: dict) -> None:
             if manager["status"] != "active" or manager["telegram_user_id"] == supervisor_id:
                 continue
             try:
-                await bot.send_message(chat_id=manager["telegram_user_id"], text=text)
+                await bot.send_message(
+                    chat_id=manager["telegram_user_id"], text=_render_meeting_message(market, instance, manager["name"])
+                )
             except Exception:
                 pass
 
