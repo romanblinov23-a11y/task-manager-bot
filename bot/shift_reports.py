@@ -13,6 +13,7 @@ from monitoring.managers import get_manager, get_market_supervisor, get_markets_
 from monitoring.markets import get_market, list_markets
 from monitoring.shift_reports import (
     create_or_get_draft,
+    delete_report,
     get_previous_week_report,
     get_report,
     get_report_by_date,
@@ -534,6 +535,82 @@ async def on_shift_report_manual_market_choice(update: Update, context: ContextT
     await query.answer()
     await query.edit_message_text(f"Рынок: {market['name']}")
     await _start_manual_report(context.bot, query.message, query.from_user.id, market)
+
+
+def _reset_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"shrep_resetmarket:{m['id']}")] for m in markets])
+
+
+def _reset_confirm_keyboard(market_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🗑 Да, сбросить", callback_data=f"shrep_resetconfirm:{market_id}"),
+                InlineKeyboardButton("Отмена", callback_data="shrep_resetcancel"),
+            ]
+        ]
+    )
+
+
+async def on_reset_shift_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/reset_shift_report — владелец удаляет сегодняшний отчёт целиком
+    (собранные ответы или согласование), чтобы прогнать /shift_report
+    заново — например, для тестирования."""
+    if not is_owner(update.effective_user.id):
+        return
+    markets = list_markets()
+    if not markets:
+        await update.effective_message.reply_text("Пока нет ни одного рынка.")
+        return
+    await update.effective_message.reply_text(
+        "По какому рынку сбросить сегодняшний отчёт?", reply_markup=_reset_market_pick_keyboard(markets)
+    )
+
+
+async def on_reset_shift_report_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    date_iso = tz_today().isoformat()
+    if not get_report_by_date(market_id, date_iso):
+        await query.answer()
+        await query.edit_message_text(f"На «{market['name']}» отчёта за сегодня и не было — сбрасывать нечего.")
+        return
+    await query.answer()
+    await query.edit_message_text(
+        f"⚠️ Удалить сегодняшний отчёт по «{market['name']}» целиком (собранные ответы, согласование)? Действие необратимо.",
+        reply_markup=_reset_confirm_keyboard(market_id),
+    )
+
+
+async def on_reset_shift_report_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    await query.answer("Сбрасываю…")
+    delete_report(market_id, tz_today().isoformat())
+    await query.edit_message_text(f"✅ Отчёт по «{market['name']}» за сегодня сброшен. Запустите заново через /shift_report.")
+
+
+async def on_reset_shift_report_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    await query.answer()
+    await query.edit_message_text("Отменено.")
 
 
 async def on_shift_report_absent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -83,6 +83,19 @@ def get_report_by_date(market_id: int, report_date: str) -> dict | None:
         conn.close()
 
 
+def delete_report(market_id: int, report_date: str) -> bool:
+    """Удаляет отчёт целиком — владельцу нужно, если сбор начали по
+    ошибке (не тот рынок, тестовый прогон) и надо начать заново тем же
+    днём. Возвращает False, если отчёта на эту дату и не было."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute("DELETE FROM shift_report WHERE market_id = ? AND report_date = ?", (market_id, report_date))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def get_previous_week_report(market_id: int, report_date: str) -> dict | None:
     """Отчёт того же рынка за тот же день недели неделей раньше, только
     если он дошёл до конца (согласован или уже разослан) — используется

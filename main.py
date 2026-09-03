@@ -111,6 +111,10 @@ from bot.report_chat_registration import (
     on_register_report_chat_role,
 )
 from bot.shift_reports import (
+    on_reset_shift_report_cancel,
+    on_reset_shift_report_command,
+    on_reset_shift_report_confirm,
+    on_reset_shift_report_market_choice,
     on_shift_report_absent,
     on_shift_report_command,
     on_shift_report_edit,
@@ -238,6 +242,7 @@ _ROMAN_COMMANDS = [
     BotCommand("set_shift_schedule", "Загрузить график смен на 2 недели"),
     BotCommand("register_report_chat", "Привязать чат к рассылке отчётов смены"),
     BotCommand("shift_report", "Внести отчёт по смене принудительно"),
+    BotCommand("reset_shift_report", "⚠️ Сбросить сегодняшний отчёт по смене"),
     BotCommand("regulations", "Регламенты работы с ботом"),
     BotCommand("help", "Список команд"),
 ]
@@ -294,6 +299,7 @@ def main() -> None:
     app.add_handler(CommandHandler("set_shift_schedule", on_set_shift_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("register_report_chat", on_register_report_chat, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("shift_report", on_shift_report_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("reset_shift_report", on_reset_shift_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, on_group_message))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))
@@ -377,6 +383,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_register_report_chat_market, pattern=r"^shrc_market:"))
     app.add_handler(CallbackQueryHandler(on_register_report_chat_role, pattern=r"^shrc_role:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_manual_market_choice, pattern=r"^shrep_manualmarket:"))
+    app.add_handler(CallbackQueryHandler(on_reset_shift_report_market_choice, pattern=r"^shrep_resetmarket:"))
+    app.add_handler(CallbackQueryHandler(on_reset_shift_report_confirm, pattern=r"^shrep_resetconfirm:"))
+    app.add_handler(CallbackQueryHandler(on_reset_shift_report_cancel, pattern=r"^shrep_resetcancel$"))
     app.add_handler(CallbackQueryHandler(on_shift_report_fill, pattern=r"^shrep_fill:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_fix_field, pattern=r"^shrep_fixfield:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_absent, pattern=r"^shrep_absent:"))
