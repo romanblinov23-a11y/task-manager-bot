@@ -460,6 +460,7 @@ def render_team_report(market: dict, report_date: str, data: dict) -> str:
         _plan_money_sentence("💰 Выручка", data, "revenue_total", plan_revenue),
         _plan_count_sentence("🧾 Чеков", data, "guests", plan_checks),
         _plan_money_sentence("🎯 Средний чек", data, "avg_check", plan_avg_check),
+        f"⏱ Среднее время отдачи: {data.get('avg_service_time', '—')}",
         "",
         "<b>♻️ Списания</b>",
         f"🗑 Срок годности: {_money_field(data, 'writeoff_expiry')} ₽",
