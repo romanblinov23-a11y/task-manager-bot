@@ -350,28 +350,49 @@ async def on_meeting_postpone_reply(update: Update, context: ContextTypes.DEFAUL
     return True
 
 
-def _render_meeting_message(market: dict, instance: dict, recipient_name: str | None = None) -> str:
-    label = _MEETING_TYPE_LABELS[instance["meeting_type"]]
-    date_time = f"{fmt_date(instance['meeting_date'])} в {instance['meeting_time']}"
-    if instance["status"] == "cancelled":
-        return f"❌ Собрание «{label}» на «{market['name']}» {date_time} отменяется."
+_TEAM_ATTENDANCE_NOTE = (
+    "Напоминаю: собрание — часть рабочего процесса и командообразования. Явка обязательна, так мы станем "
+    "сильнее гораздо быстрее. Если у тебя есть уважительная причина отсутствия — сообщи её здесь в чате, "
+    "чтобы вся команда была в курсе и не беспокоилась о твоём отсутствии."
+)
 
-    reschedule_note = " (перенесено)" if instance.get("rescheduled") else ""
-    if instance["meeting_type"] == "team":
+_MANAGERS_ATTENDANCE_NOTE = (
+    "Понимаю, что ситуации могут быть разными и, возможно, у тебя есть уважительная причина отсутствия. "
+    "Если таковая имеется — дай знать Управляющему в лс. Но помни: регулярность наших встреч приводит нас "
+    "к ощутимым результатам — и гораздо быстрее!"
+)
+
+
+def _render_meeting_message(instance: dict, recipient_name: str | None = None) -> str:
+    date_time = f"{fmt_date(instance['meeting_date'])} в {instance['meeting_time']}"
+    is_team = instance["meeting_type"] == "team"
+
+    if instance["status"] == "cancelled":
+        if is_team:
+            return (
+                f"👋 Привет, Серферы! Собрание, которое планировалось {date_time}, отменяется — как только "
+                "появится новая дата, сообщу отдельно здесь в чате."
+            )
         return (
-            f"👋 Привет, Серферы! Напоминаю, что у нас с вами запланировано собрание {date_time}{reschedule_note}. "
-            f"Чтобы вам было удобно к нему подготовиться, вот повестка:\n\n{instance['agenda']}\n\n"
-            "Напоминаю: собрание — часть рабочего процесса и командообразования. Явка обязательна, так мы станем "
-            "сильнее гораздо быстрее. Если у тебя есть уважительная причина отсутствия — сообщи её здесь в чате, "
-            "чтобы вся команда была в курсе и не беспокоилась о твоём отсутствии."
+            f"Привет, {recipient_name}! Управляющий сообщает: запланированное собрание {date_time} отменяется. "
+            "Как только появится новая дата — сообщим отдельно."
         )
-    return (
-        f"Привет, {recipient_name}! Управляющий подтвердил запланированное собрание {date_time}{reschedule_note}, "
-        f"вот повестка, чтобы оно прошло эффективнее:\n\n{instance['agenda']}\n\n"
-        "Понимаю, что ситуации могут быть разными и, возможно, у тебя есть уважительная причина отсутствия. "
-        "Если таковая имеется — дай знать Управляющему в лс. Но помни: регулярность наших встреч приводит нас "
-        "к ощутимым результатам — и гораздо быстрее!"
-    )
+
+    if instance.get("rescheduled"):
+        if is_team:
+            intro = f"👋 Привет, Серферы! Собрание переносится — новая дата и время: {date_time}. Чтобы вам было удобно подготовиться, вот повестка:"
+        else:
+            intro = (
+                f"Привет, {recipient_name}! Управляющий перенёс собрание — новая дата и время: {date_time}. "
+                "Вот повестка, чтобы оно прошло эффективнее:"
+            )
+    elif is_team:
+        intro = f"👋 Привет, Серферы! Напоминаю, что у нас с вами запланировано собрание {date_time}. Чтобы вам было удобно к нему подготовиться, вот повестка:"
+    else:
+        intro = f"Привет, {recipient_name}! Управляющий подтвердил запланированное собрание {date_time}, вот повестка, чтобы оно прошло эффективнее:"
+
+    note = _TEAM_ATTENDANCE_NOTE if is_team else _MANAGERS_ATTENDANCE_NOTE
+    return f"{intro}\n\n{instance['agenda']}\n\n{note}"
 
 
 async def _dispatch_meeting(bot: Bot, instance: dict) -> None:
@@ -387,7 +408,7 @@ async def _dispatch_meeting(bot: Bot, instance: dict) -> None:
         team_chat = get_report_chat(instance["market_id"], "team")
         if team_chat:
             try:
-                await bot.send_message(chat_id=team_chat["chat_id"], text=_render_meeting_message(market, instance))
+                await bot.send_message(chat_id=team_chat["chat_id"], text=_render_meeting_message(instance))
             except Exception:
                 pass
     else:
@@ -398,7 +419,7 @@ async def _dispatch_meeting(bot: Bot, instance: dict) -> None:
                 continue
             try:
                 await bot.send_message(
-                    chat_id=manager["telegram_user_id"], text=_render_meeting_message(market, instance, manager["name"])
+                    chat_id=manager["telegram_user_id"], text=_render_meeting_message(instance, manager["name"])
                 )
             except Exception:
                 pass
