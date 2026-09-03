@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 from config.chats import get_chats_for_project, get_project_for_chat
 from config.settings import OWNER_TELEGRAM_IDS, ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
 from monitoring.constants import MANAGER_POSITIONS
-from monitoring.managers import get_manager, is_owner, list_managers, register_manager
+from monitoring.managers import get_manager, get_market_supervisor, is_owner, list_managers, register_manager
 from monitoring.markets import get_market, list_markets
 from tasks.tasks import get_all_tasks, update_task
 
@@ -435,14 +435,25 @@ async def on_role_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         position=position,
         market_id=pending["market_id"],
     )
+    market_id = pending["market_id"]
     market_name = pending["market_name"]
     del _pending_onboarding[user_id]
 
-    await query.message.reply_text(
-        f"Заявка отправлена Роме: «{position}» на проекте «{market_name}». "
-        "Как только подтвердит — расскажу подробнее, как я работаю."
-    )
-    await _notify_owners_of_pending(context, int(user_id), pending["real_name"], position, market_name)
+    supervisor = get_market_supervisor(market_id, exclude_telegram_user_id=int(user_id))
+    if supervisor:
+        await query.message.reply_text(
+            f"Заявка отправлена управляющему проекта «{market_name}»: «{position}». "
+            "После его одобрения её увидит Рома — как только подтвердит, расскажу подробнее, как я работаю."
+        )
+        await notify_supervisor_of_pending(
+            context, int(user_id), pending["real_name"], position, market_name, supervisor["telegram_user_id"]
+        )
+    else:
+        await query.message.reply_text(
+            f"Заявка отправлена Роме: «{position}» на проекте «{market_name}». "
+            "Как только подтвердит — расскажу подробнее, как я работаю."
+        )
+        await notify_owners_of_pending(context, int(user_id), pending["real_name"], position, market_name)
 
 
 def _approval_keyboard(telegram_user_id: int) -> InlineKeyboardMarkup:
@@ -456,14 +467,29 @@ def _approval_keyboard(telegram_user_id: int) -> InlineKeyboardMarkup:
     )
 
 
-async def _notify_owners_of_pending(
+def _supervisor_approval_keyboard(telegram_user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("✅ Одобрить", callback_data=f"mgr_svapprove:{telegram_user_id}"),
+                InlineKeyboardButton("❌ Отклонить", callback_data=f"mgr_svreject:{telegram_user_id}"),
+            ]
+        ]
+    )
+
+
+async def notify_owners_of_pending(
     context: ContextTypes.DEFAULT_TYPE, telegram_user_id: int, name: str, position: str, market_name: str
 ) -> None:
+    """Финальный шаг согласования — владелец. Вызывается либо сразу (если
+    на рынке нет Управляющего), либо после того, как Управляющий рынка
+    одобрил заявку (см. notify_supervisor_of_pending, bot.manager_admin.
+    on_manager_supervisor_approve)."""
     text = (
         f"🆕 Новая заявка на доступ к боту:\n"
         f"{name} — «{position}», проект «{market_name}».\n"
         f"Telegram ID: {telegram_user_id}\n\n"
-        "При подтверждении будут выданы оба блока бота (задачи и мониторинг) — доступные блоки "
+        "При подтверждении будут выданы блоки бота по умолчанию — доступные блоки "
         "можно изменить позже через /managers."
     )
     for owner_id in OWNER_TELEGRAM_IDS:
@@ -473,6 +499,24 @@ async def _notify_owners_of_pending(
             )
         except Exception:
             logging.getLogger(__name__).exception("Не удалось уведомить владельца %s о новой заявке", owner_id)
+
+
+async def notify_supervisor_of_pending(
+    context: ContextTypes.DEFAULT_TYPE, telegram_user_id: int, name: str, position: str, market_name: str, supervisor_id: int
+) -> None:
+    """Первый шаг согласования, когда на рынке есть Управляющий: заявка
+    сначала идёт ему, и только после его одобрения — владельцу
+    (notify_owners_of_pending). Без Управляющего на рынке шаг пропускается,
+    заявка сразу идёт владельцу — см. on_role_choice."""
+    text = (
+        f"🆕 Новая заявка на доступ к боту на твоём проекте «{market_name}»:\n"
+        f"{name} — «{position}».\n\n"
+        "Сначала нужно твоё одобрение, затем окончательно подтвердит Рома."
+    )
+    try:
+        await context.bot.send_message(chat_id=supervisor_id, text=text, reply_markup=_supervisor_approval_keyboard(telegram_user_id))
+    except Exception:
+        logging.getLogger(__name__).exception("Не удалось уведомить управляющего %s о новой заявке", supervisor_id)
 
 
 async def _greet_after_onboarding(message, user_id: int) -> None:

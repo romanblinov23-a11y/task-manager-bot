@@ -2,9 +2,16 @@ from telegram import BotCommand, BotCommandScopeChat, InlineKeyboardButton, Inli
 from telegram.ext import ContextTypes
 
 from bot.market_schedule import start_schedule_flow
-from bot.onboarding import get_onboarded_employees, list_legacy_employees, remove_legacy_employee, request_registration
+from bot.onboarding import (
+    get_onboarded_employees,
+    list_legacy_employees,
+    notify_owners_of_pending,
+    remove_legacy_employee,
+    request_registration,
+)
 from bot.regulations import send_next_regulation
 from config.chats import get_all_bindings, get_project_for_chat, register_chat, unregister_chat
+from config.settings import OWNER_TELEGRAM_IDS
 from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS, BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_TASKS, MANAGER_POSITIONS
 from monitoring.db import reset_market_players
 from monitoring.managers import (
@@ -525,6 +532,62 @@ async def on_manager_reject(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await context.bot.send_message(chat_id=uid, text="❌ Владелец отклонил заявку на доступ к боту.")
     except Exception:
         pass
+
+
+def _pending_applicant_market(uid: int) -> dict | None:
+    markets = get_markets_for_manager(uid)
+    return markets[0] if markets else None
+
+
+async def on_manager_supervisor_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Первая ступень согласования: Управляющий рынка одобряет заявку —
+    после этого она уходит на финальное подтверждение владельцу (см.
+    bot.onboarding.notify_supervisor_of_pending/on_role_choice)."""
+    query = update.callback_query
+    uid = int(query.data.split(":", 1)[1])
+    manager = get_manager(uid)
+    market = _pending_applicant_market(uid)
+    if not manager or not market:
+        await query.answer("Заявка уже неактуальна", show_alert=True)
+        return
+    supervisor = get_market_supervisor(market["id"])
+    if not supervisor or supervisor["telegram_user_id"] != query.from_user.id:
+        await query.answer()
+        return
+
+    await query.answer("Одобрено")
+    await query.edit_message_text(f"✅ Одобрено. Жду окончательного подтверждения от Ромы: {manager['name']} — «{manager['position']}».")
+    await notify_owners_of_pending(context, uid, manager["name"], manager["position"], market["name"])
+
+
+async def on_manager_supervisor_reject(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    uid = int(query.data.split(":", 1)[1])
+    manager = get_manager(uid)
+    market = _pending_applicant_market(uid)
+    if not manager or not market:
+        await query.answer("Заявка уже неактуальна", show_alert=True)
+        return
+    supervisor = get_market_supervisor(market["id"])
+    if not supervisor or supervisor["telegram_user_id"] != query.from_user.id:
+        await query.answer()
+        return
+
+    reject_manager(uid)
+    await query.answer("Отклонено")
+    await query.edit_message_text(f"❌ Заявка {manager['name']} отклонена.")
+    try:
+        await context.bot.send_message(chat_id=uid, text="❌ Управляющий проекта отклонил вашу заявку на доступ к боту.")
+    except Exception:
+        pass
+    for owner_id in OWNER_TELEGRAM_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=int(owner_id),
+                text=f"ℹ️ Управляющий «{market['name']}» отклонил заявку {manager['name']} («{manager['position']}»), до тебя она не дошла.",
+            )
+        except Exception:
+            pass
 
 
 async def on_manager_role(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

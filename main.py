@@ -66,6 +66,8 @@ from bot.manager_admin import (
     on_manager_select,
     on_manager_set_market,
     on_manager_set_role,
+    on_manager_supervisor_approve,
+    on_manager_supervisor_reject,
     on_manager_toggle_block,
     on_managers_command,
     on_regulation_ack,
@@ -328,6 +330,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_manager_legacy_remove, pattern=r"^mgr_legacy_remove:"))
     app.add_handler(CallbackQueryHandler(on_manager_approve, pattern=r"^mgr_approve:"))
     app.add_handler(CallbackQueryHandler(on_manager_reject, pattern=r"^mgr_reject:"))
+    app.add_handler(CallbackQueryHandler(on_manager_supervisor_approve, pattern=r"^mgr_svapprove:"))
+    app.add_handler(CallbackQueryHandler(on_manager_supervisor_reject, pattern=r"^mgr_svreject:"))
     app.add_handler(CallbackQueryHandler(on_manager_set_role, pattern=r"^mgr_setrole:"))
     app.add_handler(CallbackQueryHandler(on_manager_role, pattern=r"^mgr_role:"))
     app.add_handler(CallbackQueryHandler(on_manager_set_market, pattern=r"^mgr_setmarket:"))
