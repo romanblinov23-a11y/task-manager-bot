@@ -355,7 +355,13 @@ def _render_meeting_message(market: dict, instance: dict) -> str:
     date_time = f"{fmt_date(instance['meeting_date'])} в {instance['meeting_time']}"
     if instance["status"] == "cancelled":
         return f"❌ Собрание «{label}» на «{market['name']}» {date_time} отменяется."
+
     reschedule_note = " (перенесено)" if instance.get("rescheduled") else ""
+    if instance["meeting_type"] == "team":
+        return (
+            f"👋 Привет, Серферы! Напоминаю, что у нас с вами запланировано собрание {date_time}{reschedule_note}. "
+            f"Чтобы вам было удобно к нему подготовиться, вот повестка:\n\n{instance['agenda']}"
+        )
     return f"📅 Собрание «{label}» на «{market['name']}» состоится {date_time}{reschedule_note}.\n\nПовестка:\n{instance['agenda']}"
 
 
