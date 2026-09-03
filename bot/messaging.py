@@ -74,7 +74,7 @@ async def on_message_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     text = update.effective_message.text or ""
     try:
-        await context.bot.send_message(chat_id=state["target_id"], text=f"✉️ Сообщение от Романа:\n\n{text}")
+        await context.bot.send_message(chat_id=state["target_id"], text=f"На связи Havana Standart!\n\n{text}")
         await update.effective_message.reply_text(f"✅ Отправлено {state['target_name']}.")
     except Exception as e:
         await update.effective_message.reply_text(f"⚠️ Не смог отправить {state['target_name']}: {e}")
@@ -142,7 +142,7 @@ async def on_message_chat_reply(update: Update, context: ContextTypes.DEFAULT_TY
 
     text = update.effective_message.text or ""
     try:
-        await context.bot.send_message(chat_id=state["chat_id"], text=f"✉️ Сообщение от Романа:\n\n{text}")
+        await context.bot.send_message(chat_id=state["chat_id"], text=f"На связи Havana Standart!\n\n{text}")
         await update.effective_message.reply_text(f"✅ Отправлено в «{state['chat_label']}».")
     except Exception as e:
         await update.effective_message.reply_text(f"⚠️ Не смог отправить в «{state['chat_label']}»: {e}")
@@ -293,7 +293,7 @@ async def on_broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     await query.answer("Рассылаю…")
-    text = f"📣 Рассылка от Романа:\n\n{state['text']}"
+    text = f"На связи Havana Standart!\n\n{state['text']}"
     failed = []
     for manager in state["audience"]:
         try:
