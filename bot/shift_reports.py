@@ -13,6 +13,7 @@ from monitoring.managers import get_manager, get_market_supervisor, get_markets_
 from monitoring.markets import get_market, list_markets
 from monitoring.shift_reports import (
     create_or_get_draft,
+    get_previous_week_report,
     get_report,
     get_report_by_date,
     get_report_chat,
@@ -99,23 +100,31 @@ _FIELD_LABELS = {
     "comment_general": "Общая работа точки",
     "comment_service": "Обслуживание гостей",
     "comment_conflicts": "Конфликтные ситуации",
-    "comment_equipment": "Оборудование и техпроблемы",
+    "comment_equipment": "Оборудование",
     "comment_weather_flow": "Погода и поток гостей",
     "comment_events": "Значимые события",
     "shift_composition": "Состав смены",
+    "revenue_total_prev": "Выручка (сравнение)",
+    "avg_check_prev": "Средний чек (сравнение)",
+    "guests_prev": "Гости (сравнение)",
 }
 
-_FIELD_INDEX = {q["key"]: i for i, q in enumerate(_QUESTIONS)}
+# Поля для сравнения с той же датой на прошлой неделе — запрашиваются
+# дополнительно только если за прошлую неделю нет согласованного отчёта.
+_BASELINE_FIELD_DEFS = {
+    "revenue_total_prev": {"key": "revenue_total_prev", "kind": "money", "prompt": "Какая была выручка на сравниваемую дату (формат: 324675,87)?"},
+    "avg_check_prev": {"key": "avg_check_prev", "kind": "money", "prompt": "Какой был средний чек на сравниваемую дату (формат: 789,87)?"},
+    "guests_prev": {"key": "guests_prev", "kind": "guests", "prompt": "Сколько было гостей на сравниваемую дату (формат: 1 234)?"},
+}
 
-
-def _field_index(key: str) -> int | None:
-    return _FIELD_INDEX.get(key)
+_QUESTION_BY_KEY = {q["key"]: q for q in _QUESTIONS}
+_QUESTION_BY_KEY.update(_BASELINE_FIELD_DEFS)
 
 # telegram_user_id (str) заполняющего -> {"market_id", "market_name", "report_date",
 # "report_id", "step_index", "answers", "is_supervisor_filling"}
 _pending: dict[str, dict] = {}
 
-# telegram_user_id (str) -> {"report_id": int, "field_index": int} — точечная правка поля
+# telegram_user_id (str) -> {"report_id": int, "field_key": str} — точечная правка поля
 _editing: dict[str, dict] = {}
 
 # telegram_user_id (str) владельца -> {"report_id": int} — ждём текст замечания для управляющего
@@ -245,11 +254,15 @@ def _approval_keyboard_owner(report_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def _edit_field_keyboard(report_id: int) -> InlineKeyboardMarkup:
+def _edit_field_keyboard(report: dict) -> InlineKeyboardMarkup:
+    report_id = report["id"]
     buttons = [
-        [InlineKeyboardButton(_FIELD_LABELS[q["key"]], callback_data=f"shrep_editfield:{report_id}:{i}")]
-        for i, q in enumerate(_QUESTIONS)
+        [InlineKeyboardButton(_FIELD_LABELS[q["key"]], callback_data=f"shrep_editfield:{report_id}:{q['key']}")]
+        for q in _QUESTIONS
     ]
+    for key in _BASELINE_FIELD_DEFS:
+        if key in report["data"]:
+            buttons.append([InlineKeyboardButton(_FIELD_LABELS[key], callback_data=f"shrep_editfield:{report_id}:{key}")])
     buttons.append([InlineKeyboardButton("↩️ Отмена", callback_data=f"shrep_editcancel:{report_id}")])
     return InlineKeyboardMarkup(buttons)
 
@@ -264,55 +277,77 @@ def _fix_field_keyboard_collection(keys: list[str]) -> InlineKeyboardMarkup:
 def _fix_field_keyboard_edit(report_id: int, keys: list[str]) -> InlineKeyboardMarkup:
     """То же самое, но при правке уже собранного отчёта — переиспользует
     те же callback'и, что и «✏️ Редактировать»."""
-    buttons = [
-        [InlineKeyboardButton(_FIELD_LABELS[k], callback_data=f"shrep_editfield:{report_id}:{_field_index(k)}")]
-        for k in keys
-    ]
-    return InlineKeyboardMarkup(buttons)
+    return InlineKeyboardMarkup([[InlineKeyboardButton(_FIELD_LABELS[k], callback_data=f"shrep_editfield:{report_id}:{k}")] for k in keys])
+
+
+def _format_delta(current: float, previous: float) -> str:
+    """Δ% к той же дате прошлой недели, со стрелкой направления. Пустая
+    строка, если сравнивать не с чем (previous = 0)."""
+    if not previous:
+        return ""
+    pct = (current - previous) / previous * 100
+    arrow = "↗️" if pct > 0 else ("↘️" if pct < 0 else "➡️")
+    pct_str = f"{abs(pct):.2f}".replace(".", ",")
+    return f"    {pct_str}% {arrow}"
+
+
+def _money_compare_line(label: str, data: dict, key: str) -> str:
+    current = _parse_amount(data.get(key, "") or "")
+    current_str = _format_money(current) if current is not None else "—"
+    prev_raw = data.get(f"{key}_prev")
+    prev = _parse_amount(prev_raw or "") if prev_raw is not None else None
+    if current is not None and prev is not None:
+        return f"{label}: {current_str} ({_format_money(prev)}){_format_delta(current, prev)}"
+    return f"{label}: {current_str}"
+
+
+def _count_compare_line(label: str, data: dict, key: str) -> str:
+    current = _parse_int(data.get(key, "") or "")
+    current_str = _format_count(current) if current is not None else "—"
+    prev_raw = data.get(f"{key}_prev")
+    prev = _parse_int(prev_raw or "") if prev_raw is not None else None
+    if current is not None and prev is not None:
+        return f"{label}: {current_str} ({_format_count(prev)}){_format_delta(current, prev)}"
+    return f"{label}: {current_str}"
 
 
 def render_finance_report(market: dict, report_date: str, data: dict) -> str:
-    """Форматирует отчёт строго по образцу Романа — заголовок, денежные
-    поля, блок ***Комментарий:*** с жирными подзаголовками, состав смены
-    свободным текстом в конце."""
+    """Форматирует отчёт строго по образцу Романа: заголовок, денежные
+    поля (у выручки/среднего чека/гостей — сравнение с той же датой на
+    прошлой неделе и % изменения), блок комментариев без разметки, состав
+    смены свободным текстом в конце."""
     weekday = _WEEKDAY_RU[_date.fromisoformat(report_date).weekday()].capitalize()
     lines = [
         f"Отчет {fmt_date(report_date)} {weekday}",
         "",
-        f"Выручка: {_money_field(data, 'revenue_total')}",
+        _money_compare_line("выручка", data, "revenue_total"),
+        f"наличные: {_money_field(data, 'revenue_cash')}",
+        f"безнал: {_money_field(data, 'revenue_noncash')}",
         "",
-        f"Наличные: {_money_field(data, 'revenue_cash')}",
+        _money_compare_line("средний чек", data, "avg_check"),
         "",
-        f"Безнал: {_money_field(data, 'revenue_noncash')}",
+        _count_compare_line("гости", data, "guests"),
         "",
-        f"Средний чек: {_money_field(data, 'avg_check')}",
-        "",
-        f"Гости: {_count_field(data, 'guests')}",
-        "",
-        f"Срок годности: {_money_field(data, 'writeoff_expiry')}",
-        "",
-        f"Комплимент: {_money_field(data, 'writeoff_compliment')}",
-        "",
-        f"Питание: {_money_field(data, 'writeoff_staff_meals')}",
+        f"срок годности: {_money_field(data, 'writeoff_expiry')}",
+        f"комплимент: {_money_field(data, 'writeoff_compliment')}",
+        f"питание: {_money_field(data, 'writeoff_staff_meals')}",
         "",
         f"Среднее время отдачи за день: {data.get('avg_service_time', '—')}",
         "",
-        "***Комментарий:***",
+        "Комментарий:",
         "",
-        f"**Общая работа точки:** {data.get('comment_general', '—')}",
+        f"Общая работа точки: {data.get('comment_general', '—')}",
         "",
-        f"**Обслуживание гостей:** {data.get('comment_service', '—')}",
+        f"Обслуживание гостей: {data.get('comment_service', '—')}",
         "",
-        f"**Конфликтные ситуации:** {data.get('comment_conflicts', '—')}",
+        f"Конфликтные ситуации: {data.get('comment_conflicts', '—')}",
         "",
-        f"**Оборудование и технические проблемы:** {data.get('comment_equipment', '—')}",
+        f"Оборудование: {data.get('comment_equipment', '—')}",
         "",
-        f"**Погода и поток гостей:** {data.get('comment_weather_flow', '—')}",
+        f"Погода и поток гостей: {data.get('comment_weather_flow', '—')}",
         "",
-        f"**Значимые события:** {data.get('comment_events', '—')}",
-        "",
-        "**Состав смены:**",
-        "",
+        f"Значимые события: {data.get('comment_events', '—')}",
+        "Состав смены:",
         data.get("shift_composition", "—"),
     ]
     return "\n".join(lines)
@@ -364,13 +399,35 @@ async def _send_for_owner_approval(bot: Bot, report_id: int) -> None:
     )
 
 
+def _build_questions(report_date: str, answers: dict) -> list[dict]:
+    """Основные 16 вопросов, плюс — только если для сравнения ещё нет
+    данных (нет согласованного отчёта за ту же дату прошлой недели и они
+    не введены вручную ранее) — 3 дополнительных вопроса на выручку/чек/
+    гостей за прошлую неделю, чтобы было с чем сравнивать в самом отчёте."""
+    if all(k in answers for k in _BASELINE_FIELD_DEFS):
+        return list(_QUESTIONS)
+    prev_date = (_date.fromisoformat(report_date) - timedelta(days=7)).isoformat()
+    weekday_name = _WEEKDAY_RU[_date.fromisoformat(prev_date).weekday()]
+    baseline = [
+        {
+            "key": "revenue_total_prev",
+            "kind": "money",
+            "prompt": f"Не нашёл отчёт за прошлую {weekday_name} ({fmt_date(prev_date)}) для сравнения — какая тогда была выручка (формат: 324675,87)?",
+        },
+        {"key": "avg_check_prev", "kind": "money", "prompt": f"Какой был средний чек в прошлую {weekday_name} (формат: 789,87)?"},
+        {"key": "guests_prev", "kind": "guests", "prompt": f"Сколько было гостей в прошлую {weekday_name} (формат: 1 234)?"},
+    ]
+    return baseline + list(_QUESTIONS)
+
+
 async def _ask_current_question(bot: Bot, message, user_id: str) -> None:
     state = _pending[user_id]
     idx = state["step_index"]
-    if idx >= len(_QUESTIONS):
+    questions = state["questions"]
+    if idx >= len(questions):
         await _finish_collection(bot, message, user_id)
         return
-    await message.reply_text(_QUESTIONS[idx]["prompt"])
+    await message.reply_text(questions[idx]["prompt"])
 
 
 async def _finish_collection(bot: Bot, message, user_id: str) -> None:
@@ -386,13 +443,22 @@ async def _finish_collection(bot: Bot, message, user_id: str) -> None:
 
 async def _begin_collection(bot: Bot, message, user_id: int, market: dict, report_date: str) -> None:
     report = create_or_get_draft(market["id"], report_date, user_id)
+    answers = dict(report.get("data") or {})
+    if not all(k in answers for k in _BASELINE_FIELD_DEFS):
+        prev_report = get_previous_week_report(market["id"], report_date)
+        if prev_report and all(k in prev_report["data"] for k in ("revenue_total", "avg_check", "guests")):
+            answers.setdefault("revenue_total_prev", prev_report["data"]["revenue_total"])
+            answers.setdefault("avg_check_prev", prev_report["data"]["avg_check"])
+            answers.setdefault("guests_prev", prev_report["data"]["guests"])
+
     _pending[str(user_id)] = {
         "market_id": market["id"],
         "market_name": market["name"],
         "report_date": report_date,
         "report_id": report["id"],
         "step_index": 0,
-        "answers": dict(report.get("data") or {}),
+        "answers": answers,
+        "questions": _build_questions(report_date, answers),
         "is_supervisor_filling": _is_market_supervisor(user_id, market["id"]),
     }
     await _ask_current_question(bot, message, str(user_id))
@@ -511,15 +577,15 @@ async def on_shift_report_fix_field(update: Update, context: ContextTypes.DEFAUL
         return
 
     key = query.data.split(":", 1)[1]
-    idx = _field_index(key)
-    if idx is None:
+    question = _QUESTION_BY_KEY.get(key)
+    if not question:
         await query.answer()
         return
 
     state["awaiting_fix_key"] = key
     await query.answer()
     await query.edit_message_reply_markup(reply_markup=None)
-    await query.message.reply_text(_QUESTIONS[idx]["prompt"])
+    await query.message.reply_text(question["prompt"])
 
 
 async def on_shift_report_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -533,8 +599,7 @@ async def on_shift_report_reply(update: Update, context: ContextTypes.DEFAULT_TY
 
     fix_key = state.get("awaiting_fix_key")
     if fix_key:
-        idx = _field_index(fix_key)
-        question = _QUESTIONS[idx]
+        question = _QUESTION_BY_KEY[fix_key]
         text = update.effective_message.text or ""
         value, error = _validate(question["kind"], text)
         if error:
@@ -554,9 +619,10 @@ async def on_shift_report_reply(update: Update, context: ContextTypes.DEFAULT_TY
         return True
 
     idx = state["step_index"]
-    if idx >= len(_QUESTIONS):
+    questions = state["questions"]
+    if idx >= len(questions):
         return False
-    question = _QUESTIONS[idx]
+    question = questions[idx]
     text = update.effective_message.text or ""
     value, error = _validate(question["kind"], text)
     if error:
@@ -618,24 +684,24 @@ async def on_shift_report_edit(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.answer()
         return
     await query.answer()
-    await query.edit_message_reply_markup(reply_markup=_edit_field_keyboard(report_id))
+    await query.edit_message_reply_markup(reply_markup=_edit_field_keyboard(report))
 
 
 async def on_shift_report_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    _, report_id_str, idx_str = query.data.split(":")
-    report_id, idx = int(report_id_str), int(idx_str)
+    _, report_id_str, key = query.data.split(":", 2)
+    report_id = int(report_id_str)
     report = get_report(report_id)
-    if not report or idx >= len(_QUESTIONS):
+    question = _QUESTION_BY_KEY.get(key)
+    if not report or not question:
         await query.answer("Не найдено", show_alert=True)
         return
     if not (is_owner(query.from_user.id) or _is_market_supervisor(query.from_user.id, report["market_id"])):
         await query.answer()
         return
-    _editing[str(query.from_user.id)] = {"report_id": report_id, "field_index": idx}
+    _editing[str(query.from_user.id)] = {"report_id": report_id, "field_key": key}
     await query.answer()
-    question = _QUESTIONS[idx]
-    await query.message.reply_text(f"Новое значение — {_FIELD_LABELS[question['key']]}:\n{question['prompt']}")
+    await query.message.reply_text(f"Новое значение — {_FIELD_LABELS[key]}:\n{question['prompt']}")
 
 
 async def on_shift_report_edit_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -662,7 +728,7 @@ async def on_shift_report_edit_reply(update: Update, context: ContextTypes.DEFAU
         await update.effective_message.reply_text("Отчёт больше недоступен.")
         return True
 
-    question = _QUESTIONS[state["field_index"]]
+    question = _QUESTION_BY_KEY[state["field_key"]]
     text = update.effective_message.text or ""
     value, error = _validate(question["kind"], text)
     if error:
@@ -735,7 +801,7 @@ async def on_shift_report_more_info_reply(update: Update, context: ContextTypes.
             f"💬 Рома просит поправить отчёт по «{market['name']}» за {fmt_date(report['report_date'])}:\n"
             f"«{note}»\n\nВыбери, что поправить:"
         ),
-        reply_markup=_edit_field_keyboard(report["id"]),
+        reply_markup=_edit_field_keyboard(report),
     )
     await update.effective_message.reply_text("Передал управляющему.")
     return True

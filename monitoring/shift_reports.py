@@ -1,4 +1,5 @@
 import json
+from datetime import date, timedelta
 
 from config.timeutil import now as tz_now
 from monitoring.db import get_connection
@@ -72,6 +73,26 @@ def get_report_by_date(market_id: int, report_date: str) -> dict | None:
     try:
         row = conn.execute(
             "SELECT * FROM shift_report WHERE market_id = ? AND report_date = ?", (market_id, report_date)
+        ).fetchone()
+        if not row:
+            return None
+        report = dict(row)
+        report["data"] = json.loads(report["data"])
+        return report
+    finally:
+        conn.close()
+
+
+def get_previous_week_report(market_id: int, report_date: str) -> dict | None:
+    """Отчёт того же рынка за тот же день недели неделей раньше, только
+    если он дошёл до конца (согласован или уже разослан) — используется
+    для сравнения выручки/среднего чека/гостей в текущем отчёте."""
+    prev_date = (date.fromisoformat(report_date) - timedelta(days=7)).isoformat()
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM shift_report WHERE market_id = ? AND report_date = ? AND status IN ('approved', 'dispatched')",
+            (market_id, prev_date),
         ).fetchone()
         if not row:
             return None
