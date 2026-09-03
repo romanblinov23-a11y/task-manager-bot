@@ -17,6 +17,7 @@ from monitoring.managers import (
     market_reports_enabled,
 )
 from monitoring.markets import get_market, list_markets
+from monitoring.monthly_plan import get_daily_plan
 from monitoring.shift_reports import (
     create_or_get_draft,
     delete_report,
@@ -103,6 +104,26 @@ _QUESTIONS = [
             "Кто и в каком количестве работал — отдельно утро и вечер (менеджеры, бариста, клинеры, «уютные»)."
         ),
     },
+    {
+        "key": "tomorrow_stop_list",
+        "kind": "text",
+        "prompt": "🛑 Стоп-лист на завтра\nЧто завтра будет в стоп-листе?",
+    },
+    {
+        "key": "tomorrow_start_list",
+        "kind": "text",
+        "prompt": "🚀 Старт-лист на завтра\nЧто завтра будет в старт-листе?",
+    },
+    {
+        "key": "tomorrow_events",
+        "kind": "text",
+        "prompt": "📅 Значимые события завтра\nКакие значимые события в Парке или неподалёку будут проходить завтра?",
+    },
+    {
+        "key": "tomorrow_inspiration",
+        "kind": "text",
+        "prompt": "🌿 Вдохновение для команды\nНапиши что-то вдохновляющее для своей команды на утро!",
+    },
 ]
 
 _FIELD_LABELS = {
@@ -122,6 +143,10 @@ _FIELD_LABELS = {
     "comment_weather_flow": "Погода и поток гостей",
     "comment_events": "Значимые события",
     "shift_composition": "Состав смены",
+    "tomorrow_stop_list": "Стоп-лист на завтра",
+    "tomorrow_start_list": "Старт-лист на завтра",
+    "tomorrow_events": "Значимые события на завтра",
+    "tomorrow_inspiration": "Вдохновение для команды",
     "revenue_total_prev": "Выручка (сравнение)",
     "avg_check_prev": "Средний чек (сравнение)",
     "guests_prev": "Гости (сравнение)",
@@ -298,15 +323,22 @@ def _fix_field_keyboard_edit(report_id: int, keys: list[str]) -> InlineKeyboardM
     return InlineKeyboardMarkup([[InlineKeyboardButton(_FIELD_LABELS[k], callback_data=f"shrep_editfield:{report_id}:{k}")] for k in keys])
 
 
-def _format_delta(current: float, previous: float) -> str:
-    """Δ% к той же дате прошлой недели, со стрелкой направления. Пустая
-    строка, если сравнивать не с чем (previous = 0)."""
+def _delta_text(current: float, previous: float) -> str:
+    """«12,34% ↗️» — Δ% и стрелка направления, без обрамления. Пустая
+    строка, если сравнивать не с чем (previous = 0/None)."""
     if not previous:
         return ""
     pct = (current - previous) / previous * 100
     arrow = "↗️" if pct > 0 else ("↘️" if pct < 0 else "➡️")
     pct_str = f"{abs(pct):.2f}".replace(".", ",")
-    return f"    {pct_str}% {arrow}"
+    return f"{pct_str}% {arrow}"
+
+
+def _format_delta(current: float, previous: float) -> str:
+    """Δ% к той же дате прошлой недели, со стрелкой направления — для
+    отчёта финпартнёрам, где раньше значение уже показано в скобках."""
+    delta = _delta_text(current, previous)
+    return f"    {delta}" if delta else ""
 
 
 def _money_compare_line(label: str, data: dict, key: str) -> str:
@@ -371,11 +403,102 @@ def render_finance_report(market: dict, report_date: str, data: dict) -> str:
     return "\n".join(lines)
 
 
+def _plan_money_line(label: str, data: dict, key: str, plan_value: float | None) -> str:
+    current = _parse_amount(data.get(key, "") or "")
+    current_str = _format_money(current) if current is not None else "—"
+    if current is None or plan_value is None:
+        return f"{label}: {current_str}"
+    delta = _delta_text(current, plan_value)
+    delta_part = f" ({delta})" if delta else ""
+    return f"{label}: {current_str}/{_format_money(plan_value)}{delta_part}"
+
+
+def _plan_count_line(label: str, data: dict, key: str, plan_value: int | None) -> str:
+    current = _parse_int(data.get(key, "") or "")
+    current_str = _format_count(current) if current is not None else "—"
+    if current is None or plan_value is None:
+        return f"{label}: {current_str}"
+    delta = _delta_text(current, plan_value)
+    delta_part = f" ({delta})" if delta else ""
+    return f"{label}: {current_str}/{_format_count(plan_value)}{delta_part}"
+
+
 def render_team_report(market: dict, report_date: str, data: dict) -> str:
-    """Заглушка — Роман пришлёт формат отчёта для чата команды точки
-    отдельно. Пока переиспользуем отчёт для финпартнёров с пометкой, что
-    формат черновой — заменить одной этой функцией, когда формат придёт."""
-    return "⚠️ Черновой формат — для чата команды формат ещё не задан:\n\n" + render_finance_report(market, report_date, data)
+    """Вечерний отчёт для чата команды точки — уходит сразу после сбора,
+    без цепочки согласований (см. _dispatch_team_report_now). Выручка/чеки/
+    средний чек сравниваются с планом на месяц (см. monitoring.monthly_plan),
+    а не с прошлой неделей, как в отчёте для финпартнёров. «Чеки» — то же
+    поле «Гости», что и в остальном отчёте (отдельно чеки не считаем)."""
+    plan = get_daily_plan(market["id"], report_date)
+    plan_revenue = plan["revenue_plan"] if plan else None
+    plan_checks = plan["checks_plan"] if plan else None
+    plan_avg_check = (plan_revenue / plan_checks) if plan and plan_checks else None
+
+    lines = [
+        "Йоу! мы закрыли еще один день и вот результаты:",
+        "",
+        " ".join(
+            [
+                _plan_money_line("выручка", data, "revenue_total", plan_revenue),
+                _plan_count_line("чеки", data, "guests", plan_checks),
+                _plan_money_line("средний чек", data, "avg_check", plan_avg_check),
+            ]
+        ),
+        "",
+        "Списания:",
+        "",
+        f"срок годности: {_money_field(data, 'writeoff_expiry')}",
+        f"комплимент: {_money_field(data, 'writeoff_compliment')}",
+        f"питание: {_money_field(data, 'writeoff_staff_meals')}",
+        "",
+        "Комментарий:",
+        "",
+        f"**Общая работа Предприятия:** {data.get('comment_general', '—')}",
+        "",
+        f"**Конфликтные ситуации:** {data.get('comment_conflicts', '—')}",
+        "",
+        f"**Оборудование:** {data.get('comment_equipment', '—')}",
+        "",
+        f"**Погода и поток гостей:** {data.get('comment_weather_flow', '—')}",
+        "",
+        f"**Значимые события на завтра:** {data.get('tomorrow_events', '—')}",
+        "",
+        "А теперь Серферы, пора отдыхать! Ведь если благодарности нет внутри, нечем будет награждать! 🌿",
+    ]
+    return "\n".join(lines)
+
+
+def render_team_morning_message(market: dict, date_iso: str) -> str | None:
+    """Утреннее напоминание команде: план на сегодня (выручка/чеки/средний
+    чек — последний бот считает сам) плюс старт/стоп-лист, события и
+    пожелание, собранные вчера вечером на этот случай (см. _QUESTIONS —
+    tomorrow_*). Возвращает None, если плана на сегодня нет вообще —
+    тогда сообщение не отправляется (см. send_team_morning_messages)."""
+    plan = get_daily_plan(market["id"], date_iso)
+    if not plan:
+        return None
+    revenue = plan["revenue_plan"]
+    checks = plan["checks_plan"]
+    avg_check = revenue / checks if checks else 0
+
+    yesterday = (_date.fromisoformat(date_iso) - timedelta(days=1)).isoformat()
+    prev_report = get_report_by_date(market["id"], yesterday)
+    prev_data = prev_report["data"] if prev_report else {}
+
+    lines = [
+        "Привет, друзья! Сегодня - новый день для покорения новой волны! Напоминаю о наших планах:",
+        "",
+        f"выручка: {_format_money(revenue)} чеки: {_format_count(checks)} средний чек: {_format_money(avg_check)}",
+        "",
+        f"Старт лист: {prev_data.get('tomorrow_start_list', '')}",
+        "",
+        f"Стоп лист: {prev_data.get('tomorrow_stop_list', '')}",
+        "",
+        f"Предстоящие события на сегодня: {prev_data.get('tomorrow_events', '')}",
+        "",
+        f"Вдохновение от вечерней команды: {prev_data.get('tomorrow_inspiration', '')}",
+    ]
+    return "\n".join(lines)
 
 
 async def _offer_report_or_absence(bot: Bot, telegram_user_id: int, market: dict, report_date: str) -> None:
@@ -452,14 +575,37 @@ async def _ask_current_question(bot: Bot, message, user_id: str) -> None:
     await message.reply_text(f"{progress}\n\n{questions[idx]['prompt']}")
 
 
+async def _dispatch_team_report_now(bot: Bot, market: dict, report_date: str, data: dict) -> bool:
+    """Отчёт для чата команды точки уходит сразу после того, как менеджер
+    закончил заполнение — без цепочки согласований (в отличие от отчёта
+    финпартнёрам): это просто ежедневная сводка для самой команды, никто
+    её не утверждает. Возвращает True, если чат привязан и отправка
+    удалась."""
+    team_chat = get_report_chat(market["id"], "team")
+    if not team_chat:
+        return False
+    text = render_team_report(market, report_date, data)
+    if team_chat.get("mention"):
+        text = f"{team_chat['mention']}\n\n{text}"
+    try:
+        await bot.send_message(chat_id=team_chat["chat_id"], text=text)
+    except Exception:
+        return False
+    return True
+
+
 async def _finish_collection(bot: Bot, message, user_id: str) -> None:
     state = _pending.pop(user_id)
     report_id = state["report_id"]
+    report = get_report(report_id)
+    market = get_market(report["market_id"])
+    team_sent = await _dispatch_team_report_now(bot, market, report["report_date"], report["data"])
+    team_note = " Отчёт для команды точки уже ушёл в чат." if team_sent else ""
     if state["is_supervisor_filling"]:
-        await message.reply_text("🎉 Спасибо, отчёт готов! Отправляю Роману на согласование.")
+        await message.reply_text(f"🎉 Спасибо, отчёт готов!{team_note} Отправляю Роману на согласование.")
         await _send_for_owner_approval(bot, report_id)
     else:
-        await message.reply_text("🎉 Спасибо, отчёт готов! Отправляю управляющему на согласование.")
+        await message.reply_text(f"🎉 Спасибо, отчёт готов!{team_note} Отправляю управляющему на согласование.")
         await _send_for_supervisor_approval(bot, report_id)
 
 
@@ -1058,8 +1204,10 @@ async def send_shift_report_owner_escalations(bot: Bot) -> None:
 
 
 async def send_pending_reports(bot: Bot) -> None:
-    """10:00 — рассылает вчерашние согласованные отчёты в зарегистрированные
-    чаты финпартнёров и команды точки (см. main.py, bot/report_chat_registration.py)."""
+    """10:00 — рассылает вчерашние согласованные отчёты в зарегистрированный
+    чат финпартнёров (см. main.py, bot/report_chat_registration.py). Чат
+    команды точки сюда не входит — тот отчёт уже ушёл сразу после сбора,
+    без согласований (см. _dispatch_team_report_now)."""
     yesterday = (tz_today() - timedelta(days=1)).isoformat()
     for report in list_reports_by_status_and_date(yesterday, "approved"):
         market = get_market(report["market_id"])
@@ -1076,14 +1224,28 @@ async def send_pending_reports(bot: Bot) -> None:
             except Exception:
                 pass
 
-        team_chat = get_report_chat(report["market_id"], "team")
-        if team_chat:
-            text = render_team_report(market, report["report_date"], report["data"])
-            if team_chat.get("mention"):
-                text = f"{team_chat['mention']}\n\n{text}"
-            try:
-                await bot.send_message(chat_id=team_chat["chat_id"], text=text)
-            except Exception:
-                pass
-
         set_report_status(report["id"], "dispatched")
+
+
+async def send_team_morning_messages(bot: Bot) -> None:
+    """Утреннее напоминание команде точки (см. main.py): план на сегодня +
+    старт/стоп-лист, события, пожелание из вчерашнего вечернего отчёта.
+    Пропускает рынки без плана на сегодня (план ещё не загружен — тогда
+    просто не шлём, см. render_team_morning_message) и рынки с отключённым
+    у Управляющего блоком «Отчёты по смене» (market_reports_enabled)."""
+    date_iso = tz_today().isoformat()
+    for market in list_markets():
+        if not market_reports_enabled(market["id"]):
+            continue
+        team_chat = get_report_chat(market["id"], "team")
+        if not team_chat:
+            continue
+        text = render_team_morning_message(market, date_iso)
+        if text is None:
+            continue
+        if team_chat.get("mention"):
+            text = f"{team_chat['mention']}\n\n{text}"
+        try:
+            await bot.send_message(chat_id=team_chat["chat_id"], text=text)
+        except Exception:
+            pass

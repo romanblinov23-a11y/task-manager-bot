@@ -7,6 +7,7 @@ from bot.fix_reading import on_fix_reading_reply
 from bot.import_readings import on_import_readings_reply
 from bot.manager_admin import on_manager_admin_reply
 from bot.monitoring_flow import on_monitoring_reply
+from bot.monthly_plan_flow import on_set_monthly_plan_reply
 from bot.mytasks_manage import on_mytasks_manage_reply
 from bot.onboarding import on_employee_message
 from bot.report_chat_registration import on_register_report_chat_mention_reply
@@ -85,6 +86,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if await on_set_shift_schedule_reply(update, context):
+        return
+
+    if await on_set_monthly_plan_reply(update, context):
         return
 
     if await on_shift_report_reply(update, context):

@@ -112,6 +112,14 @@ CREATE TABLE IF NOT EXISTS report_chat (
     mention TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (market_id, role)
 );
+
+CREATE TABLE IF NOT EXISTS monthly_plan (
+    market_id INTEGER NOT NULL REFERENCES market(id),
+    plan_date TEXT NOT NULL,
+    revenue_plan REAL NOT NULL,
+    checks_plan INTEGER NOT NULL,
+    PRIMARY KEY (market_id, plan_date)
+);
 """
 
 

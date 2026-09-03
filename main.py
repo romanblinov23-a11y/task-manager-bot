@@ -99,6 +99,13 @@ from bot.monitoring_flow import (
     on_monitoring_start_button,
     send_monitoring_reminders,
 )
+from bot.monthly_plan_flow import (
+    on_set_monthly_plan_cancel,
+    on_set_monthly_plan_command,
+    on_set_monthly_plan_confirm,
+    on_set_monthly_plan_market_choice,
+    send_monthly_plan_requests,
+)
 from bot.onboarding import on_force_onboard, on_help, on_project_choice, on_role_choice, on_start
 from bot.private import on_private_document, on_private_text, on_project_selected
 from bot.regulations import on_regulations_command
@@ -141,6 +148,7 @@ from bot.shift_reports import (
     send_shift_report_escalations,
     send_shift_report_kickoffs,
     send_shift_report_owner_escalations,
+    send_team_morning_messages,
 )
 from bot.shift_schedule_flow import (
     on_set_shift_schedule_cancel,
@@ -156,6 +164,7 @@ from bot.weekly_report import on_weekly_command, send_weekly_report
 from config.settings import (
     DAILY_REPORT_TIME,
     MONITORING_REMINDER_TIME,
+    MONTHLY_PLAN_REMINDER_TIME,
     OWNER_TELEGRAM_IDS,
     SHIFT_REPORT_DISPATCH_TIME,
     SHIFT_REPORT_ESCALATE_TIME,
@@ -163,6 +172,7 @@ from config.settings import (
     SHIFT_REPORT_START_TIME,
     SHIFT_SCHEDULE_REMINDER_TIME,
     STATUS_CHECK_TIME,
+    TEAM_MORNING_REPORT_TIME,
     TELEGRAM_BOT_TOKEN,
     TZ,
     WEEKLY_REPORT_DAY,
@@ -230,6 +240,15 @@ async def _shift_report_dispatch_job(context) -> None:
     await send_pending_reports(context.bot)
 
 
+async def _team_morning_report_job(context) -> None:
+    await send_team_morning_messages(context.bot)
+
+
+async def _monthly_plan_reminder_job(context) -> None:
+    if tz_today().day == 25:
+        await send_monthly_plan_requests(context.bot)
+
+
 def _parse_time(value: str, tzinfo) -> dt_time:
     hour, minute = (int(part) for part in value.split(":"))
     return dt_time(hour=hour, minute=minute, tzinfo=tzinfo)
@@ -254,6 +273,7 @@ _ROMAN_COMMANDS = [
     BotCommand("monitoring", "Провести мониторинг конкурентов"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
     BotCommand("set_shift_schedule", "Загрузить график смен на 2 недели"),
+    BotCommand("set_monthly_plan", "Загрузить план по выручке/чекам на месяц"),
     BotCommand("register_report_chat", "Привязать чат к рассылке отчётов смены"),
     BotCommand("report_chats", "Посмотреть/отвязать чаты рассылки отчётов"),
     BotCommand("shift_report", "Внести отчёт по смене принудительно"),
@@ -313,6 +333,7 @@ def main() -> None:
     app.add_handler(CommandHandler("dashboard_market", on_dashboard_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("dashboard_tasks", on_dashboard_tasks_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_shift_schedule", on_set_shift_schedule_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("set_monthly_plan", on_set_monthly_plan_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("register_report_chat", on_register_report_chat, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("report_chats", on_report_chats_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("shift_report", on_shift_report_command, filters=filters.ChatType.PRIVATE))
@@ -400,6 +421,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_set_shift_schedule_market_choice, pattern=r"^shsched_market:"))
     app.add_handler(CallbackQueryHandler(on_set_shift_schedule_confirm, pattern=r"^shsched_confirm$"))
     app.add_handler(CallbackQueryHandler(on_set_shift_schedule_cancel, pattern=r"^shsched_cancel$"))
+    app.add_handler(CallbackQueryHandler(on_set_monthly_plan_market_choice, pattern=r"^monthplan_market:"))
+    app.add_handler(CallbackQueryHandler(on_set_monthly_plan_confirm, pattern=r"^monthplan_confirm$"))
+    app.add_handler(CallbackQueryHandler(on_set_monthly_plan_cancel, pattern=r"^monthplan_cancel$"))
     app.add_handler(CallbackQueryHandler(on_register_report_chat_market, pattern=r"^shrc_market:"))
     app.add_handler(CallbackQueryHandler(on_register_report_chat_role, pattern=r"^shrc_role:"))
     app.add_handler(CallbackQueryHandler(on_report_chats_list, pattern=r"^shrc_list$"))
@@ -434,6 +458,8 @@ def main() -> None:
     app.job_queue.run_daily(_shift_report_escalate_job, time=_parse_time(SHIFT_REPORT_ESCALATE_TIME, TZ))
     app.job_queue.run_daily(_shift_report_owner_escalate_job, time=_parse_time(SHIFT_REPORT_OWNER_ESCALATE_TIME, TZ))
     app.job_queue.run_daily(_shift_report_dispatch_job, time=_parse_time(SHIFT_REPORT_DISPATCH_TIME, TZ))
+    app.job_queue.run_daily(_team_morning_report_job, time=_parse_time(TEAM_MORNING_REPORT_TIME, TZ))
+    app.job_queue.run_daily(_monthly_plan_reminder_job, time=_parse_time(MONTHLY_PLAN_REMINDER_TIME, TZ))
 
     app.run_polling()
 
