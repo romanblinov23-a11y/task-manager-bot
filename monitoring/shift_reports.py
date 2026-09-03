@@ -159,3 +159,23 @@ def get_report_chat(market_id: int, role: str) -> dict | None:
         return dict(row) if row else None
     finally:
         conn.close()
+
+
+def list_report_chats() -> list[dict]:
+    """Все привязанные чаты отчётов по сменам — для /report_chats."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT * FROM report_chat ORDER BY market_id, role").fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def delete_report_chat(market_id: int, role: str) -> bool:
+    conn = get_connection()
+    try:
+        cursor = conn.execute("DELETE FROM report_chat WHERE market_id = ? AND role = ?", (market_id, role))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()

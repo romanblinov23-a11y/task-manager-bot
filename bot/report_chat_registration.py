@@ -3,7 +3,7 @@ from telegram.ext import ContextTypes
 
 from monitoring.managers import is_owner
 from monitoring.markets import get_market, list_markets
-from monitoring.shift_reports import set_report_chat
+from monitoring.shift_reports import delete_report_chat, get_report_chat, list_report_chats, set_report_chat
 
 _ROLE_LABELS = {"finance": "💰 Финпартнёры", "team": "👥 Команда точки"}
 
@@ -126,3 +126,85 @@ async def on_register_report_chat_mention_reply(update: Update, context: Context
         f"✅ Этот чат будет получать отчёты «{state['market_name']}» — {_ROLE_LABELS[state['role']]}.{suffix}"
     )
     return True
+
+
+def _chat_list_keyboard(chats: list[dict]) -> InlineKeyboardMarkup:
+    buttons = []
+    for c in chats:
+        market = get_market(c["market_id"])
+        market_name = market["name"] if market else f"#{c['market_id']}"
+        buttons.append(
+            [InlineKeyboardButton(f"{market_name} — {_ROLE_LABELS[c['role']]}", callback_data=f"shrc_view:{c['market_id']}:{c['role']}")]
+        )
+    return InlineKeyboardMarkup(buttons)
+
+
+def _chat_card_text(chat_row: dict, market_name: str, role: str) -> str:
+    mention_line = f"\nТег первой строкой: {chat_row['mention']}" if chat_row.get("mention") else ""
+    return f"{market_name} — {_ROLE_LABELS[role]}\nChat ID: {chat_row['chat_id']}{mention_line}"
+
+
+def _chat_card_keyboard(market_id: int, role: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🗑 Отвязать", callback_data=f"shrc_unbind:{market_id}:{role}")],
+            [InlineKeyboardButton("↩️ К списку", callback_data="shrc_list")],
+        ]
+    )
+
+
+async def on_report_chats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/report_chats — владелец смотрит и отвязывает чаты, привязанные к
+    рассылке отчётов по сменам (финпартнёры/команда точки)."""
+    if not is_owner(update.effective_user.id):
+        return
+    chats = list_report_chats()
+    if not chats:
+        await update.effective_message.reply_text("Пока нет привязанных чатов для отчётов по сменам.")
+        return
+    await update.effective_message.reply_text(
+        "Привязанные чаты для отчётов по сменам:", reply_markup=_chat_list_keyboard(chats)
+    )
+
+
+async def on_report_chats_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    chats = list_report_chats()
+    await query.answer()
+    if not chats:
+        await query.edit_message_text("Пока нет привязанных чатов для отчётов по сменам.")
+        return
+    await query.edit_message_text("Привязанные чаты для отчётов по сменам:", reply_markup=_chat_list_keyboard(chats))
+
+
+async def on_report_chats_view(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    _, market_id_str, role = query.data.split(":")
+    market_id = int(market_id_str)
+    row = get_report_chat(market_id, role)
+    market = get_market(market_id)
+    if not row or not market:
+        await query.answer("Не найдено — возможно, уже отвязано", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(_chat_card_text(row, market["name"], role), reply_markup=_chat_card_keyboard(market_id, role))
+
+
+async def on_report_chats_unbind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    _, market_id_str, role = query.data.split(":")
+    market_id = int(market_id_str)
+    market = get_market(market_id)
+    delete_report_chat(market_id, role)
+    await query.answer("Отвязано")
+    market_name = market["name"] if market else f"#{market_id}"
+    await query.edit_message_text(f"✅ Чат отвязан от отчётов «{market_name}» — {_ROLE_LABELS[role]}.")
