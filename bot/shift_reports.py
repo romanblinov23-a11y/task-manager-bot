@@ -1,3 +1,4 @@
+import html
 import re
 from datetime import date as _date
 from datetime import timedelta
@@ -326,14 +327,15 @@ def _fix_field_keyboard_edit(report_id: int, keys: list[str]) -> InlineKeyboardM
     return InlineKeyboardMarkup([[InlineKeyboardButton(_FIELD_LABELS[k], callback_data=f"shrep_editfield:{report_id}:{k}")] for k in keys])
 
 
-def _delta_text(current: float, previous: float) -> str:
+def _delta_text(current: float, previous: float, decimals: int = 2) -> str:
     """«12,34% ↗️» — Δ% и стрелка направления, без обрамления. Пустая
-    строка, если сравнивать не с чем (previous = 0/None)."""
+    строка, если сравнивать не с чем (previous = 0/None). decimals=0 —
+    для чата команды, где точный процент не нужен, важна только тенденция."""
     if not previous:
         return ""
     pct = (current - previous) / previous * 100
     arrow = "↗️" if pct > 0 else ("↘️" if pct < 0 else "➡️")
-    pct_str = f"{abs(pct):.2f}".replace(".", ",")
+    pct_str = f"{abs(pct):.{decimals}f}".replace(".", ",")
     return f"{pct_str}% {arrow}"
 
 
@@ -406,24 +408,33 @@ def render_finance_report(market: dict, report_date: str, data: dict) -> str:
     return "\n".join(lines)
 
 
-def _plan_money_line(label: str, data: dict, key: str, plan_value: float | None) -> str:
+def _esc(text: str | None) -> str:
+    """Экранирует &/</> в свободном тексте сотрудника — сообщения команде
+    точки идут с parse_mode=HTML (нужен ради <b> в заголовках секций), и
+    без экранирования спецсимвол в чьём-то комментарии сломал бы разметку
+    всего сообщения. Отчёт финпартнёрам этого не касается — он остаётся
+    обычным текстом без parse_mode, там экранировать нечего."""
+    return html.escape(text, quote=False) if text else "—"
+
+
+def _plan_money_sentence(label: str, data: dict, key: str, plan_value: float | None) -> str:
     current = _parse_amount(data.get(key, "") or "")
-    current_str = _format_money(current) if current is not None else "—"
+    current_str = f"{_format_money(current)} ₽" if current is not None else "—"
     if current is None or plan_value is None:
         return f"{label}: {current_str}"
-    delta = _delta_text(current, plan_value)
-    delta_part = f" ({delta})" if delta else ""
-    return f"{label}: {current_str}/{_format_money(plan_value)}{delta_part}"
+    delta = _delta_text(current, plan_value, decimals=0)
+    delta_part = f", {delta}" if delta else ""
+    return f"{label}: {current_str} (план {_format_money(plan_value)} ₽{delta_part})"
 
 
-def _plan_count_line(label: str, data: dict, key: str, plan_value: int | None) -> str:
+def _plan_count_sentence(label: str, data: dict, key: str, plan_value: int | None) -> str:
     current = _parse_int(data.get(key, "") or "")
     current_str = _format_count(current) if current is not None else "—"
     if current is None or plan_value is None:
         return f"{label}: {current_str}"
-    delta = _delta_text(current, plan_value)
-    delta_part = f" ({delta})" if delta else ""
-    return f"{label}: {current_str}/{_format_count(plan_value)}{delta_part}"
+    delta = _delta_text(current, plan_value, decimals=0)
+    delta_part = f", {delta}" if delta else ""
+    return f"{label}: {current_str} (план {_format_count(plan_value)}{delta_part})"
 
 
 def render_team_report(market: dict, report_date: str, data: dict) -> str:
@@ -431,40 +442,36 @@ def render_team_report(market: dict, report_date: str, data: dict) -> str:
     без цепочки согласований (см. _dispatch_team_report_now). Выручка/чеки/
     средний чек сравниваются с планом на месяц (см. monitoring.monthly_plan),
     а не с прошлой неделей, как в отчёте для финпартнёров. «Чеки» — то же
-    поле «Гости», что и в остальном отчёте (отдельно чеки не считаем)."""
+    поле «Гости», что и в остальном отчёте (отдельно чеки не считаем).
+    Формат — «френдли», под аудиторию (в основном молодые сотрудники): по
+    метрике на строку с эмодзи вместо плотного текста, реальный жирный
+    через HTML (см. _dispatch_team_report_now — parse_mode="HTML"), без
+    строгих требований к формату, в отличие от отчёта финпартнёрам."""
     plan = get_daily_plan(market["id"], report_date)
     plan_revenue = plan["revenue_plan"] if plan else None
     plan_checks = plan["checks_plan"] if plan else None
     plan_avg_check = (plan_revenue / plan_checks) if plan and plan_checks else None
+    weekday = _WEEKDAY_RU[_date.fromisoformat(report_date).weekday()]
 
     lines = [
-        "Йоу! мы закрыли еще один день и вот результаты:",
+        f"Йоу! Мы закрыли ещё один день ({weekday}, {fmt_date(report_date)}), вот что получилось 👇",
         "",
-        " ".join(
-            [
-                _plan_money_line("выручка", data, "revenue_total", plan_revenue),
-                _plan_count_line("чеки", data, "guests", plan_checks),
-                _plan_money_line("средний чек", data, "avg_check", plan_avg_check),
-            ]
-        ),
+        "<b>📊 Показатели</b>",
+        _plan_money_sentence("💰 Выручка", data, "revenue_total", plan_revenue),
+        _plan_count_sentence("🧾 Чеков", data, "guests", plan_checks),
+        _plan_money_sentence("🎯 Средний чек", data, "avg_check", plan_avg_check),
         "",
-        "Списания:",
+        "<b>♻️ Списания</b>",
+        f"🗑 Срок годности: {_money_field(data, 'writeoff_expiry')} ₽",
+        f"🎁 Комплимент: {_money_field(data, 'writeoff_compliment')} ₽",
+        f"🍽 Питание: {_money_field(data, 'writeoff_staff_meals')} ₽",
         "",
-        f"срок годности: {_money_field(data, 'writeoff_expiry')}",
-        f"комплимент: {_money_field(data, 'writeoff_compliment')}",
-        f"питание: {_money_field(data, 'writeoff_staff_meals')}",
-        "",
-        "Комментарий:",
-        "",
-        f"**Общая работа Предприятия:** {data.get('comment_general', '—')}",
-        "",
-        f"**Конфликтные ситуации:** {data.get('comment_conflicts', '—')}",
-        "",
-        f"**Оборудование:** {data.get('comment_equipment', '—')}",
-        "",
-        f"**Погода и поток гостей:** {data.get('comment_weather_flow', '—')}",
-        "",
-        f"**Значимые события на завтра:** {data.get('tomorrow_events', '—')}",
+        "<b>💬 Как прошла смена</b>",
+        f"📝 Общая работа: {_esc(data.get('comment_general'))}",
+        f"⚠️ Конфликты: {_esc(data.get('comment_conflicts'))}",
+        f"🔧 Оборудование: {_esc(data.get('comment_equipment'))}",
+        f"🌤 Погода и поток гостей: {_esc(data.get('comment_weather_flow'))}",
+        f"📅 Ждём завтра: {_esc(data.get('tomorrow_events'))}",
         "",
         "А теперь Серферы, пора отдыхать! Ведь если благодарности нет внутри, нечем будет награждать! 🌿",
     ]
@@ -476,7 +483,8 @@ def render_team_morning_message(market: dict, date_iso: str) -> str | None:
     чек — последний бот считает сам) плюс старт/стоп-лист, события и
     пожелание, собранные вчера вечером на этот случай (см. _QUESTIONS —
     tomorrow_*). Возвращает None, если плана на сегодня нет вообще —
-    тогда сообщение не отправляется (см. send_team_morning_messages)."""
+    тогда сообщение не отправляется (см. send_team_morning_messages).
+    Формат — тот же «френдли» стиль, что и у вечернего отчёта команде."""
     plan = get_daily_plan(market["id"], date_iso)
     if not plan:
         return None
@@ -487,19 +495,27 @@ def render_team_morning_message(market: dict, date_iso: str) -> str | None:
     yesterday = (_date.fromisoformat(date_iso) - timedelta(days=1)).isoformat()
     prev_report = get_report_by_date(market["id"], yesterday)
     prev_data = prev_report["data"] if prev_report else {}
+    weekday = _WEEKDAY_RU[_date.fromisoformat(date_iso).weekday()]
 
     lines = [
-        "Привет, друзья! Сегодня - новый день для покорения новой волны! Напоминаю о наших планах:",
+        f"Доброе утро, Серферы! ☀️ {weekday.capitalize()}, {fmt_date(date_iso)} — новый день, новая волна 🌊",
         "",
-        f"выручка: {_format_money(revenue)} чеки: {_format_count(checks)} средний чек: {_format_money(avg_check)}",
+        "<b>🎯 План на сегодня</b>",
+        f"💰 Выручка: {_format_money(revenue)} ₽",
+        f"🧾 Чеков: {_format_count(checks)}",
+        f"🎯 Средний чек: {_format_money(avg_check)} ₽",
         "",
-        f"Старт лист: {prev_data.get('tomorrow_start_list', '')}",
+        "<b>🚀 Старт-лист</b>",
+        _esc(prev_data.get("tomorrow_start_list")),
         "",
-        f"Стоп лист: {prev_data.get('tomorrow_stop_list', '')}",
+        "<b>🛑 Стоп-лист</b>",
+        _esc(prev_data.get("tomorrow_stop_list")),
         "",
-        f"Предстоящие события на сегодня: {prev_data.get('tomorrow_events', '')}",
+        "<b>📅 Ждём сегодня</b>",
+        _esc(prev_data.get("tomorrow_events")),
         "",
-        f"Вдохновение от вечерней команды: {prev_data.get('tomorrow_inspiration', '')}",
+        "<b>🌿 От вечерней команды</b>",
+        _esc(prev_data.get("tomorrow_inspiration")),
     ]
     return "\n".join(lines)
 
@@ -591,7 +607,7 @@ async def _dispatch_team_report_now(bot: Bot, market: dict, report_date: str, da
     if team_chat.get("mention"):
         text = f"{team_chat['mention']}\n\n{text}"
     try:
-        await bot.send_message(chat_id=team_chat["chat_id"], text=text)
+        await bot.send_message(chat_id=team_chat["chat_id"], text=text, parse_mode="HTML")
     except Exception:
         return False
     return True
@@ -739,7 +755,7 @@ async def _send_report_now(bot: Bot, message, market: dict) -> None:
         if team_chat.get("mention"):
             text = f"{team_chat['mention']}\n\n{text}"
         try:
-            await bot.send_message(chat_id=team_chat["chat_id"], text=text)
+            await bot.send_message(chat_id=team_chat["chat_id"], text=text, parse_mode="HTML")
             sent.append("команда точки")
         except Exception as e:
             await message.reply_text(f"⚠️ Не смог отправить в чат команды точки: {e}")
@@ -1249,6 +1265,6 @@ async def send_team_morning_messages(bot: Bot) -> None:
         if team_chat.get("mention"):
             text = f"{team_chat['mention']}\n\n{text}"
         try:
-            await bot.send_message(chat_id=team_chat["chat_id"], text=text)
+            await bot.send_message(chat_id=team_chat["chat_id"], text=text, parse_mode="HTML")
         except Exception:
             pass
