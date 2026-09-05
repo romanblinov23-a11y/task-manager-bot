@@ -5,7 +5,7 @@ from datetime import time as dt_time
 from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
-from bot.chat_registration import on_register_project, on_register_project_choice
+from bot.chat_registration import on_register_project, on_register_project_choice, on_register_project_scope_choice
 from bot.competitors import (
     on_add_competitor_command,
     on_add_competitor_factor_field_choice,
@@ -51,6 +51,9 @@ from bot.manager_admin import (
     on_manager_chat_market,
     on_manager_chat_select,
     on_manager_chat_set_market,
+    on_manager_chat_thread_select,
+    on_manager_chat_thread_unbind,
+    on_manager_chat_thread_unbind_confirm,
     on_manager_chat_unbind,
     on_manager_chat_unbind_confirm,
     on_manager_chats,
@@ -384,6 +387,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))
     app.add_handler(CallbackQueryHandler(on_register_project_choice, pattern=r"^regchat:"))
+    app.add_handler(CallbackQueryHandler(on_register_project_scope_choice, pattern=r"^regchatscope:"))
     app.add_handler(CallbackQueryHandler(on_confirmation_callback, pattern=r"^confirm:"))
     app.add_handler(CallbackQueryHandler(on_edit_field_selected, pattern=r"^edit_field:"))
     app.add_handler(CallbackQueryHandler(on_set_category, pattern=r"^set_cat:"))
@@ -417,6 +421,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_manager_chat_set_market, pattern=r"^mgr_chat_setmarket:"))
     app.add_handler(CallbackQueryHandler(on_manager_chat_market, pattern=r"^mgr_chat_market:"))
     app.add_handler(CallbackQueryHandler(on_manager_chat_select, pattern=r"^mgr_chat_select:"))
+    app.add_handler(CallbackQueryHandler(on_manager_chat_thread_unbind_confirm, pattern=r"^mgr_chatthread_unbind_confirm:"))
+    app.add_handler(CallbackQueryHandler(on_manager_chat_thread_unbind, pattern=r"^mgr_chatthread_unbind:"))
+    app.add_handler(CallbackQueryHandler(on_manager_chat_thread_select, pattern=r"^mgr_chatthread_select:"))
     app.add_handler(CallbackQueryHandler(on_regulation_ack, pattern=r"^reg_ack:"))
     app.add_handler(CallbackQueryHandler(on_regulations_view, pattern=r"^reg_view:"))
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_market_choice, pattern=r"^reset_monitoring_market:"))

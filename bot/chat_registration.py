@@ -12,6 +12,15 @@ def _project_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
     )
 
 
+def _scope_keyboard(market_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("Только эту ветку", callback_data=f"regchatscope:{market_id}:thread")],
+            [InlineKeyboardButton("Весь чат целиком", callback_data=f"regchatscope:{market_id}:chat")],
+        ]
+    )
+
+
 async def on_register_project(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Самообслуживание для онбординга чата: владелец вызывает эту команду
     внутри рабочей группы и выбирает проект кнопкой — без ввода названия
@@ -35,6 +44,17 @@ async def on_register_project(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 
+async def _finish_registration(query, context: ContextTypes.DEFAULT_TYPE, market: dict, message_thread_id: int | None) -> None:
+    chat_id = query.message.chat.id
+    register_chat(chat_id, market["name"], message_thread_id=message_thread_id)
+    bot_username = context.bot.username
+    await query.edit_message_text(
+        f"👋 Привет! Я бот Енисей, помогаю Роме в этом чате по проекту «{market['name']}».\n\n"
+        f"Тегните меня (@{bot_username}) или ответьте на моё сообщение — соберу из переписки "
+        "договорённости и пришлю задачи на подтверждение."
+    )
+
+
 async def on_register_project_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not is_owner(query.from_user.id):
@@ -47,12 +67,39 @@ async def on_register_project_choice(update: Update, context: ContextTypes.DEFAU
         await query.answer("Проект не найден", show_alert=True)
         return
 
-    chat_id = query.message.chat.id
-    register_chat(chat_id, market["name"])
+    # Если /register_project запускали внутри конкретной ветки форума —
+    # телеграм передаёт её id на всей цепочке сообщений бота (PTB
+    # Message.reply_text по умолчанию отвечает в ту же ветку), так что
+    # query.message уже несёт нужный message_thread_id к этому шагу. Раз
+    # ветка есть — уточняем, привязывать только её (мульти-проектный форум)
+    # или весь чат целиком, как для обычной группы без топиков.
+    message_thread_id = query.message.message_thread_id
     await query.answer()
-    bot_username = context.bot.username
+
+    if message_thread_id is None:
+        await _finish_registration(query, context, market, None)
+        return
+
     await query.edit_message_text(
-        f"👋 Привет! Я бот Енисей, помогаю Роме в этом чате по проекту «{market['name']}».\n\n"
-        f"Тегните меня (@{bot_username}) или ответьте на моё сообщение — соберу из переписки "
-        "договорённости и пришлю задачи на подтверждение."
+        f"Эта команда запущена внутри ветки форума. Привязать к проекту «{market['name']}» только эту ветку, "
+        "или весь чат целиком?",
+        reply_markup=_scope_keyboard(market_id),
     )
+
+
+async def on_register_project_scope_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+
+    _, market_id_str, scope = query.data.split(":")
+    market_id = int(market_id_str)
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Проект не найден", show_alert=True)
+        return
+
+    await query.answer()
+    message_thread_id = query.message.message_thread_id if scope == "thread" else None
+    await _finish_registration(query, context, market, message_thread_id)

@@ -99,6 +99,11 @@ async def on_register_report_chat_role(update: Update, context: ContextTypes.DEF
         return
 
     chat_id = query.message.chat.id
+    # Если /register_report_chat запускали внутри конкретной ветки форума —
+    # телеграм сам передаёт её id на всей цепочке сообщений бота (см.
+    # PTB Message.reply_text: по умолчанию отвечает в ту же ветку), так что
+    # к этому шагу флоу query.message уже несёт нужный message_thread_id.
+    message_thread_id = query.message.message_thread_id
     await query.answer()
 
     if role == "finance":
@@ -110,6 +115,7 @@ async def on_register_report_chat_role(update: Update, context: ContextTypes.DEF
             "role": role,
             "chat_id": chat_id,
             "market_name": market["name"],
+            "message_thread_id": message_thread_id,
         }
         await query.edit_message_text(f"✅ Этот чат привязан для «{market['name']}» — {_ROLE_LABELS[role]}. Донастрою в личке.")
         try:
@@ -126,14 +132,14 @@ async def on_register_report_chat_role(update: Update, context: ContextTypes.DEF
             )
         return
 
-    set_report_chat(market_id, role, chat_id)
+    set_report_chat(market_id, role, chat_id, message_thread_id=message_thread_id)
     await query.edit_message_text(f"✅ Этот чат будет получать отчёты «{market['name']}» — {_ROLE_LABELS[role]}.")
     if role == "team":
         # Представляемся команде сразу при привязке — это их первый контакт
         # с ботом в этом чате (см. bot.chat_registration для аналогичной
         # логики у рабочего чата проекта).
         try:
-            await context.bot.send_message(chat_id=chat_id, text=_TEAM_CHAT_GREETING)
+            await context.bot.send_message(chat_id=chat_id, text=_TEAM_CHAT_GREETING, message_thread_id=message_thread_id)
         except Exception:
             pass
 
@@ -152,7 +158,7 @@ async def on_register_report_chat_mention_reply(update: Update, context: Context
     if mention and not mention.startswith("@"):
         mention = f"@{mention}"
 
-    set_report_chat(state["market_id"], state["role"], state["chat_id"], mention)
+    set_report_chat(state["market_id"], state["role"], state["chat_id"], mention, state.get("message_thread_id"))
     suffix = f" Первой строкой будет: {mention}" if mention else ""
     await update.effective_message.reply_text(
         f"✅ Этот чат будет получать отчёты «{state['market_name']}» — {_ROLE_LABELS[state['role']]}.{suffix}"
@@ -173,7 +179,8 @@ def _chat_list_keyboard(chats: list[dict]) -> InlineKeyboardMarkup:
 
 def _chat_card_text(chat_row: dict, market_name: str, role: str) -> str:
     mention_line = f"\nТег первой строкой: {chat_row['mention']}" if chat_row.get("mention") else ""
-    return f"{market_name} — {_ROLE_LABELS[role]}\nChat ID: {chat_row['chat_id']}{mention_line}"
+    thread_line = f"\nВетка (топик): {chat_row['message_thread_id']}" if chat_row.get("message_thread_id") else ""
+    return f"{market_name} — {_ROLE_LABELS[role]}\nChat ID: {chat_row['chat_id']}{thread_line}{mention_line}"
 
 
 def _chat_card_keyboard(market_id: int, role: str) -> InlineKeyboardMarkup:

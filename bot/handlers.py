@@ -41,6 +41,10 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     chat = update.effective_chat
+    # (chat_id, message_thread_id) — в форуме с топиками разные ветки одного
+    # chat_id могут относиться к разным проектам (см. config.chats), поэтому
+    # буфер переписки и привязка к проекту учитывают ветку, а не только чат.
+    buffer_key = (chat.id, message.message_thread_id)
     logging.debug("Сообщение из группы %r (chat_id=%s): %r", chat.title, chat.id, message.text)
     sender = update.effective_user
     if sender and str(sender.id) == str(ROMAN_TELEGRAM_ID):
@@ -57,18 +61,18 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         text=message.text,
         link=_message_link(chat, message.message_id),
     )
-    _buffer.add(chat.id, buffered)
+    _buffer.add(buffer_key, buffered)
 
     if not _is_trigger(update, context.bot.username):
         return
 
-    project = get_project_for_chat(chat.id)
+    project = get_project_for_chat(chat.id, message.message_thread_id)
     if project is None:
         return
 
     await message.reply_text("Кажется, есть работёнка — забрал 👀")
 
-    context_messages = _buffer.get_context(chat.id, hours=EXTRACTION_CONTEXT_HOURS)
+    context_messages = _buffer.get_context(buffer_key, hours=EXTRACTION_CONTEXT_HOURS)
     text_blob = format_context(context_messages)
 
     tasks = extract_tasks(text_blob, project_name=project)

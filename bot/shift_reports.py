@@ -608,7 +608,9 @@ async def _dispatch_team_report_now(bot: Bot, market: dict, report_date: str, da
     if team_chat.get("mention"):
         text = f"{team_chat['mention']}\n\n{text}"
     try:
-        await bot.send_message(chat_id=team_chat["chat_id"], text=text, parse_mode="HTML")
+        await bot.send_message(
+            chat_id=team_chat["chat_id"], text=text, parse_mode="HTML", message_thread_id=team_chat.get("message_thread_id")
+        )
     except Exception:
         return False
     return True
@@ -800,7 +802,9 @@ async def _send_report_now(bot: Bot, message, market: dict) -> None:
         if finance_chat.get("mention"):
             text = f"{finance_chat['mention']}\n\n{text}"
         try:
-            await bot.send_message(chat_id=finance_chat["chat_id"], text=text)
+            await bot.send_message(
+                chat_id=finance_chat["chat_id"], text=text, message_thread_id=finance_chat.get("message_thread_id")
+            )
             sent.append("финпартнёры")
         except Exception as e:
             await message.reply_text(f"⚠️ Не смог отправить в чат финпартнёров: {e}")
@@ -810,7 +814,9 @@ async def _send_report_now(bot: Bot, message, market: dict) -> None:
         if team_chat.get("mention"):
             text = f"{team_chat['mention']}\n\n{text}"
         try:
-            await bot.send_message(chat_id=team_chat["chat_id"], text=text, parse_mode="HTML")
+            await bot.send_message(
+                chat_id=team_chat["chat_id"], text=text, parse_mode="HTML", message_thread_id=team_chat.get("message_thread_id")
+            )
             sent.append("команда точки")
         except Exception as e:
             await message.reply_text(f"⚠️ Не смог отправить в чат команды точки: {e}")
@@ -875,7 +881,9 @@ async def _send_morning_report_now(bot: Bot, message, market: dict) -> None:
     if team_chat.get("mention"):
         text = f"{team_chat['mention']}\n\n{text}"
     try:
-        await bot.send_message(chat_id=team_chat["chat_id"], text=text, parse_mode="HTML")
+        await bot.send_message(
+            chat_id=team_chat["chat_id"], text=text, parse_mode="HTML", message_thread_id=team_chat.get("message_thread_id")
+        )
         await message.reply_text(f"✅ Отправил утреннее напоминание по «{market['name']}» в чат команды точки.")
     except Exception as e:
         await message.reply_text(f"⚠️ Не смог отправить в чат команды точки: {e}")
@@ -1352,7 +1360,9 @@ async def send_pending_reports(bot: Bot) -> None:
             if finance_chat.get("mention"):
                 text = f"{finance_chat['mention']}\n\n{text}"
             try:
-                await bot.send_message(chat_id=finance_chat["chat_id"], text=text)
+                await bot.send_message(
+                    chat_id=finance_chat["chat_id"], text=text, message_thread_id=finance_chat.get("message_thread_id")
+                )
             except Exception:
                 pass
 
@@ -1378,6 +1388,8 @@ async def send_team_morning_messages(bot: Bot) -> None:
         if team_chat.get("mention"):
             text = f"{team_chat['mention']}\n\n{text}"
         try:
-            await bot.send_message(chat_id=team_chat["chat_id"], text=text, parse_mode="HTML")
+            await bot.send_message(
+                chat_id=team_chat["chat_id"], text=text, parse_mode="HTML", message_thread_id=team_chat.get("message_thread_id")
+            )
         except Exception:
             pass

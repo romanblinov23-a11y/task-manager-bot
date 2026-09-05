@@ -175,6 +175,7 @@ def init_schema() -> None:
         _ensure_column(conn, "manager", "blocks_ack", "blocks_ack TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "competitor", "closed_at", "closed_at TEXT")
         _ensure_column(conn, "report_chat", "mention", "mention TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "report_chat", "message_thread_id", "message_thread_id INTEGER")
         # Разовая миграция данных: блок "Отчёты по смене" появился позже
         # tasks/monitoring, у уже активных сотрудников его нет в списке —
         # добавляем, чтобы функция сразу заработала без ручной правки

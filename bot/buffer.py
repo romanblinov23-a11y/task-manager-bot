@@ -18,20 +18,25 @@ class BufferedMessage:
 class MessageBuffer:
     """Скользящий буфер сообщений группового чата (раздел 2.1, 9.3
     PROJECT_SPEC.md). Хранит последние MESSAGE_BUFFER_HOURS часов в
-    памяти, старые сообщения вытесняются при каждом добавлении."""
+    памяти, старые сообщения вытесняются при каждом добавлении.
+
+    Ключ — (chat_id, message_thread_id): в форуме с топиками разные ветки
+    одного чата могут относиться к разным проектам, поэтому буферизуются
+    отдельно, а не смешиваются в одну переписку (message_thread_id=None
+    для обычного чата без топиков — как и раньше)."""
 
     def __init__(self, retention_hours: int = MESSAGE_BUFFER_HOURS) -> None:
         self._retention = timedelta(hours=retention_hours)
-        self._chats: dict[int, deque[BufferedMessage]] = defaultdict(deque)
+        self._chats: dict[tuple[int, int | None], deque[BufferedMessage]] = defaultdict(deque)
 
-    def add(self, chat_id: int, message: BufferedMessage) -> None:
-        chat_buffer = self._chats[chat_id]
+    def add(self, buffer_key: tuple[int, int | None], message: BufferedMessage) -> None:
+        chat_buffer = self._chats[buffer_key]
         chat_buffer.append(message)
         self._evict_old(chat_buffer)
 
-    def get_context(self, chat_id: int, hours: int) -> list[BufferedMessage]:
-        """Сообщения чата за последние `hours` часов, в порядке получения."""
-        chat_buffer = self._chats[chat_id]
+    def get_context(self, buffer_key: tuple[int, int | None], hours: int) -> list[BufferedMessage]:
+        """Сообщения ветки/чата за последние `hours` часов, в порядке получения."""
+        chat_buffer = self._chats[buffer_key]
         self._evict_old(chat_buffer)
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         return [m for m in chat_buffer if m.timestamp >= cutoff]

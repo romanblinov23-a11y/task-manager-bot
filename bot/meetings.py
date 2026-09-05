@@ -408,7 +408,11 @@ async def _dispatch_meeting(bot: Bot, instance: dict) -> None:
         team_chat = get_report_chat(instance["market_id"], "team")
         if team_chat:
             try:
-                await bot.send_message(chat_id=team_chat["chat_id"], text=_render_meeting_message(instance))
+                await bot.send_message(
+                    chat_id=team_chat["chat_id"],
+                    text=_render_meeting_message(instance),
+                    message_thread_id=team_chat.get("message_thread_id"),
+                )
             except Exception:
                 pass
     else:

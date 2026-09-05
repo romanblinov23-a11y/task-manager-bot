@@ -10,7 +10,7 @@ from bot.onboarding import (
     request_registration,
 )
 from bot.regulations import send_next_regulation
-from config.chats import get_all_bindings, get_project_for_chat, register_chat, unregister_chat
+from config.chats import get_all_bindings, get_all_thread_bindings, get_project_for_chat, register_chat, unregister_chat
 from config.settings import OWNER_TELEGRAM_IDS
 from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS, BLOCK_MEETINGS, BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_TASKS, MANAGER_POSITIONS
 from monitoring.db import reset_market_players
@@ -276,13 +276,30 @@ async def on_manager_legacy_remove_confirm(update: Update, context: ContextTypes
     await query.edit_message_text(_list_view_text(managers, legacy), reply_markup=_manager_list_keyboard(managers, legacy))
 
 
-def _chat_bindings_keyboard(bindings: list[tuple[int, str, str]]) -> InlineKeyboardMarkup:
+def _chat_bindings_keyboard(bindings: list[tuple[int, str, str]], thread_bindings: list[tuple[int, int, str]]) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(f"{project} — {chat_id}", callback_data=f"mgr_chat_select:{chat_id}")]
         for chat_id, project, _source in bindings
     ]
+    rows += [
+        [InlineKeyboardButton(f"{project} — {chat_id} (ветка {thread_id})", callback_data=f"mgr_chatthread_select:{chat_id}:{thread_id}")]
+        for chat_id, thread_id, project in thread_bindings
+    ]
     rows.append([InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")])
     return InlineKeyboardMarkup(rows)
+
+
+def _chat_thread_card_text(chat_id: int, thread_id: int, project: str) -> str:
+    return f"Чат {chat_id}\nВетка (топик): {thread_id}\nПроект: {project}\nПривязано через /register_project — только эта ветка"
+
+
+def _chat_thread_card_keyboard(chat_id: int, thread_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🗑 Отвязать", callback_data=f"mgr_chatthread_unbind:{chat_id}:{thread_id}")],
+            [InlineKeyboardButton("↩️ К чатам", callback_data="mgr_chats")],
+        ]
+    )
 
 
 def _chat_card_text(chat_id: int, project: str, source: str) -> str:
@@ -313,7 +330,8 @@ async def on_manager_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     await query.answer()
     bindings = get_all_bindings()
-    if not bindings:
+    thread_bindings = get_all_thread_bindings()
+    if not bindings and not thread_bindings:
         await query.edit_message_text(
             "Нет привязанных чатов. Чтобы привязать группу к проекту — вызовите /register_project внутри неё.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")]]),
@@ -321,7 +339,7 @@ async def on_manager_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     await query.edit_message_text(
         "💬 Привязанные чаты. Чтобы привязать новый — вызовите /register_project внутри него.",
-        reply_markup=_chat_bindings_keyboard(bindings),
+        reply_markup=_chat_bindings_keyboard(bindings, thread_bindings),
     )
 
 
@@ -397,13 +415,73 @@ async def on_manager_chat_unbind_confirm(update: Update, context: ContextTypes.D
     unregister_chat(chat_id)
     await query.answer("Отвязано")
     bindings = get_all_bindings()
-    if not bindings:
+    thread_bindings = get_all_thread_bindings()
+    if not bindings and not thread_bindings:
         await query.edit_message_text(
             "Нет привязанных чатов. Чтобы привязать группу к проекту — вызовите /register_project внутри неё.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")]]),
         )
         return
-    await query.edit_message_text("💬 Привязанные чаты:", reply_markup=_chat_bindings_keyboard(bindings))
+    await query.edit_message_text("💬 Привязанные чаты:", reply_markup=_chat_bindings_keyboard(bindings, thread_bindings))
+
+
+async def on_manager_chat_thread_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    _, chat_id_str, thread_id_str = query.data.split(":")
+    chat_id, thread_id = int(chat_id_str), int(thread_id_str)
+    binding = next((b for b in get_all_thread_bindings() if b[0] == chat_id and b[1] == thread_id), None)
+    if not binding:
+        await query.answer("Не найдено", show_alert=True)
+        return
+    await query.answer()
+    _, _, project = binding
+    await query.edit_message_text(
+        _chat_thread_card_text(chat_id, thread_id, project), reply_markup=_chat_thread_card_keyboard(chat_id, thread_id)
+    )
+
+
+async def on_manager_chat_thread_unbind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    _, chat_id_str, thread_id_str = query.data.split(":")
+    chat_id, thread_id = int(chat_id_str), int(thread_id_str)
+    await query.answer()
+    await query.edit_message_text(
+        f"Точно отвязать ветку {thread_id} чата {chat_id} от проекта?",
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("🗑 Да, отвязать", callback_data=f"mgr_chatthread_unbind_confirm:{chat_id}:{thread_id}"),
+                    InlineKeyboardButton("↩️ Отмена", callback_data=f"mgr_chatthread_select:{chat_id}:{thread_id}"),
+                ]
+            ]
+        ),
+    )
+
+
+async def on_manager_chat_thread_unbind_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    _, chat_id_str, thread_id_str = query.data.split(":")
+    chat_id, thread_id = int(chat_id_str), int(thread_id_str)
+    unregister_chat(chat_id, thread_id)
+    await query.answer("Отвязано")
+    bindings = get_all_bindings()
+    thread_bindings = get_all_thread_bindings()
+    if not bindings and not thread_bindings:
+        await query.edit_message_text(
+            "Нет привязанных чатов. Чтобы привязать группу к проекту — вызовите /register_project внутри неё.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")]]),
+        )
+        return
+    await query.edit_message_text("💬 Привязанные чаты:", reply_markup=_chat_bindings_keyboard(bindings, thread_bindings))
 
 
 async def on_manager_onboarded(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -1,7 +1,7 @@
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from config.chats import get_all_bindings
+from config.chats import get_all_bindings, get_all_thread_bindings
 from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS
 from monitoring.managers import get_manager_blocks, is_owner, list_managers
 from monitoring.markets import get_market
@@ -87,20 +87,34 @@ def _registered_chats() -> list[dict]:
     напрямую. Чат финпартнёров сюда не входит: там внешние люди, писать
     туда через эту команду не предполагается."""
     chats = [
-        {"chat_id": chat_id, "label": f"📋 {project} — рабочий чат"}
+        {"chat_id": chat_id, "message_thread_id": None, "label": f"📋 {project} — рабочий чат"}
         for chat_id, project, _source in get_all_bindings()
+    ]
+    chats += [
+        {"chat_id": chat_id, "message_thread_id": thread_id, "label": f"📋 {project} — рабочий чат (ветка)"}
+        for chat_id, thread_id, project in get_all_thread_bindings()
     ]
     for row in list_report_chats():
         if row["role"] != "team":
             continue
         market = get_market(row["market_id"])
         market_name = market["name"] if market else f"#{row['market_id']}"
-        chats.append({"chat_id": row["chat_id"], "label": f"👥 {market_name} — команда точки"})
+        chats.append(
+            {"chat_id": row["chat_id"], "message_thread_id": row.get("message_thread_id"), "label": f"👥 {market_name} — команда точки"}
+        )
     return chats
 
 
+def _chat_key(chat: dict) -> str:
+    """chat_id один в один не годится в ключ: у чата с ветками разные
+    записи (рабочий чат проекта / чат команды точки) могут физически жить
+    в одном chat_id, но в разных топиках — различаем по паре chat_id+ветка."""
+    thread = chat.get("message_thread_id")
+    return f"{chat['chat_id']}:{thread if thread is not None else 0}"
+
+
 def _chats_pick_keyboard(chats: list[dict]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton(c["label"], callback_data=f"msgchat_pick:{c['chat_id']}")] for c in chats])
+    return InlineKeyboardMarkup([[InlineKeyboardButton(c["label"], callback_data=f"msgchat_pick:{_chat_key(c)}")] for c in chats])
 
 
 async def on_message_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -120,13 +134,17 @@ async def on_message_chat_pick(update: Update, context: ContextTypes.DEFAULT_TYP
     if not is_owner(query.from_user.id):
         await query.answer()
         return
-    chat_id = int(query.data.split(":", 1)[1])
-    chats = {c["chat_id"]: c for c in _registered_chats()}
-    chat = chats.get(chat_id)
+    key = query.data.split(":", 1)[1]
+    chats = {_chat_key(c): c for c in _registered_chats()}
+    chat = chats.get(key)
     if not chat:
         await query.answer("Чат больше не зарегистрирован", show_alert=True)
         return
-    _awaiting_chat_message[str(query.from_user.id)] = {"chat_id": chat_id, "chat_label": chat["label"]}
+    _awaiting_chat_message[str(query.from_user.id)] = {
+        "chat_id": chat["chat_id"],
+        "message_thread_id": chat.get("message_thread_id"),
+        "chat_label": chat["label"],
+    }
     await query.answer()
     await query.edit_message_text(f"Напиши сообщение для «{chat['label']}» — отправлю от твоего имени:")
 
@@ -142,7 +160,9 @@ async def on_message_chat_reply(update: Update, context: ContextTypes.DEFAULT_TY
 
     text = update.effective_message.text or ""
     try:
-        await context.bot.send_message(chat_id=state["chat_id"], text=f"На связи Havana Standart!\n\n{text}")
+        await context.bot.send_message(
+            chat_id=state["chat_id"], text=f"На связи Havana Standart!\n\n{text}", message_thread_id=state.get("message_thread_id")
+        )
         await update.effective_message.reply_text(f"✅ Отправлено в «{state['chat_label']}».")
     except Exception as e:
         await update.effective_message.reply_text(f"⚠️ Не смог отправить в «{state['chat_label']}»: {e}")

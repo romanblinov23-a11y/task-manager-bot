@@ -132,15 +132,19 @@ def list_reports_by_status_and_date(report_date: str, status: str) -> list[dict]
         conn.close()
 
 
-def set_report_chat(market_id: int, role: str, chat_id: int, mention: str = "") -> None:
+def set_report_chat(market_id: int, role: str, chat_id: int, mention: str = "", message_thread_id: int | None = None) -> None:
+    """message_thread_id — id ветки (топика) форума, если /register_report_chat
+    запускали внутри конкретной ветки, а не в общем чате; None — обычный
+    чат без топиков, отчёт уходит в чат целиком, без указания ветки."""
     conn = get_connection()
     try:
         conn.execute(
             """
-            INSERT INTO report_chat (market_id, role, chat_id, mention) VALUES (?, ?, ?, ?)
-            ON CONFLICT (market_id, role) DO UPDATE SET chat_id = excluded.chat_id, mention = excluded.mention
+            INSERT INTO report_chat (market_id, role, chat_id, mention, message_thread_id) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (market_id, role) DO UPDATE SET
+                chat_id = excluded.chat_id, mention = excluded.mention, message_thread_id = excluded.message_thread_id
             """,
-            (market_id, role, chat_id, mention),
+            (market_id, role, chat_id, mention, message_thread_id),
         )
         conn.commit()
     finally:
@@ -148,13 +152,16 @@ def set_report_chat(market_id: int, role: str, chat_id: int, mention: str = "") 
 
 
 def get_report_chat(market_id: int, role: str) -> dict | None:
-    """Возвращает {"chat_id":, "mention":} — mention (например,
-    @Motus_control_group_bot) ставится первой строкой перед отчётом, чтобы
-    бот финпартнёров подхватил сообщение из чата (см. /register_report_chat)."""
+    """Возвращает {"chat_id":, "mention":, "message_thread_id":} — mention
+    (например, @Motus_control_group_bot) ставится первой строкой перед
+    отчётом, чтобы бот финпартнёров подхватил сообщение из чата;
+    message_thread_id — конкретная ветка форума, если она была указана при
+    /register_report_chat (см. bot.report_chat_registration)."""
     conn = get_connection()
     try:
         row = conn.execute(
-            "SELECT chat_id, mention FROM report_chat WHERE market_id = ? AND role = ?", (market_id, role)
+            "SELECT chat_id, mention, message_thread_id FROM report_chat WHERE market_id = ? AND role = ?",
+            (market_id, role),
         ).fetchone()
         return dict(row) if row else None
     finally:
