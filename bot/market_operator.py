@@ -1,9 +1,8 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from monitoring.managers import get_managers_for_market, is_owner
+from monitoring.managers import is_owner
 from monitoring.markets import get_market, list_markets, set_market_consent_text, set_market_operator
-from personal_data.consent import has_consent
 
 _FIELD_KEYS = {
     "название": "operator_name",
@@ -39,7 +38,7 @@ def _instructions_text(market_name: str) -> str:
         "ИНН: 1234567890\n"
         "ОГРН: 1234567890123\n"
         "Адрес: г. Москва, ул. Примерная, д. 1\n\n"
-        "Это нужно для текста согласия на обработку персональных данных, который увидят стажёры "
+        "Это нужно для текста согласия на обработку персональных данных, который увидят сотрудники "
         "этой точки — оператором является само юрлицо/ИП, а не Рома и не бот.\n\n"
         "Если у оператора уже есть готовый текст согласия от своих юристов — грузите его целиком "
         "командой /set_consent_text, он заменит собранный отсюда."
@@ -48,7 +47,7 @@ def _instructions_text(market_name: str) -> str:
 
 async def on_set_operator_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/set_operator — владелец указывает реквизиты юрлица/ИП, которое
-    юридически владеет точкой (оператор персональных данных стажёров этой
+    юридически владеет точкой (оператор персональных данных сотрудников этой
     точки) — нужно для текста согласия на обработку ПДн."""
     if not is_owner(update.effective_user.id):
         return
@@ -79,7 +78,7 @@ async def on_set_operator_market_choice(update: Update, context: ContextTypes.DE
     await query.message.reply_text(_instructions_text(market["name"]))
 
 
-def _parse_operator_paste(text: str) -> dict[str, str]:
+def parse_operator_paste(text: str) -> dict[str, str]:
     fields: dict[str, str] = {}
     for raw_line in text.splitlines():
         if ":" not in raw_line:
@@ -101,7 +100,7 @@ async def on_set_operator_reply(update: Update, context: ContextTypes.DEFAULT_TY
         return False
 
     text = update.effective_message.text or ""
-    fields = _parse_operator_paste(text)
+    fields = parse_operator_paste(text)
     del _awaiting_paste[owner_id]
 
     missing = [label for label, key in {"Название": "operator_name", "ИНН": "operator_inn", "Адрес": "operator_address"}.items() if key not in fields]
@@ -125,19 +124,14 @@ async def on_set_operator_reply(update: Update, context: ContextTypes.DEFAULT_TY
     return True
 
 
-async def _unblock_waiting_trainees(bot, market_id: int) -> None:
-    """После того как реквизиты заполнены, стажёры этой точки, которые уже
-    были подтверждены владельцем, но ждали текст согласия (см.
-    bot.trainee_onboarding.start_trainee_track), получают его сейчас же —
-    не нужно ничего донбордивать вручную."""
-    from bot.trainee_onboarding import start_trainee_track
+async def _unblock_waiting_employees(bot, market_id: int) -> None:
+    """После того как реквизиты или текст согласия заполнены, все активные
+    сотрудники этой точки (любая должность, не только «Стажёр»), у кого ещё
+    нет согласия, получают его сейчас же — не нужно ничего донбордивать
+    вручную (см. bot.consent_flow._request_consents_for_market)."""
+    from bot.consent_flow import _request_consents_for_market
 
-    for manager in get_managers_for_market(market_id):
-        if manager["status"] != "active" or manager["position"] != "Стажёр":
-            continue
-        if has_consent(manager["telegram_user_id"]):
-            continue
-        await start_trainee_track(bot, manager["telegram_user_id"])
+    await _request_consents_for_market(bot, market_id)
 
 
 async def on_set_operator_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -159,7 +153,7 @@ async def on_set_operator_confirm(update: Update, context: ContextTypes.DEFAULT_
     )
     market = get_market(state["market_id"])
     await query.edit_message_text(f"✅ Реквизиты сохранены для «{market['name']}».")
-    await _unblock_waiting_trainees(context.bot, state["market_id"])
+    await _unblock_waiting_employees(context.bot, state["market_id"])
 
 
 async def on_set_operator_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -278,7 +272,7 @@ async def on_set_consent_text_confirm(update: Update, context: ContextTypes.DEFA
         await query.edit_message_text(f"✅ Для «{market['name']}» снова используется автосгенерированный текст согласия.")
     else:
         await query.edit_message_text(f"✅ Текст согласия от юристов сохранён для «{market['name']}».")
-    await _unblock_waiting_trainees(context.bot, state["market_id"])
+    await _unblock_waiting_employees(context.bot, state["market_id"])
 
 
 async def on_set_consent_text_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

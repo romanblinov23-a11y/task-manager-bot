@@ -1,6 +1,8 @@
 from telegram import BotCommand, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from bot.consent_flow import send_consent_request
+from bot.market_operator import parse_operator_paste
 from bot.market_schedule import start_schedule_flow
 from bot.onboarding import (
     get_onboarded_employees,
@@ -31,10 +33,12 @@ from monitoring.managers import (
     set_manager_market,
     set_manager_position,
 )
-from monitoring.markets import create_market, get_market, get_market_by_name, list_markets
+from monitoring.markets import create_market, get_market, get_market_by_name, list_markets, set_market_consent_text, set_market_operator
 
 # telegram_user_id (str) владельца -> True, если ждём от него название нового проекта
-_awaiting_new_project: set[str] = set()
+# telegram_user_id (str) владельца -> {"step": "name"|"operator"|"consent_text", "name", "operator_fields"} —
+# состояние цепочки /add_project (название → реквизиты → текст согласия)
+_awaiting_new_project: dict[str, dict] = {}
 
 # telegram_user_id (str) владельца -> {"uid": int, "selected": set[str]} — сессия редактирования блоков
 _pending_blocks: dict[str, dict] = {}
@@ -838,6 +842,7 @@ async def on_manager_blocks_done(update: Update, context: ContextTypes.DEFAULT_T
         await _notify_approved(context.bot, manager, uid)
         await sync_employee_commands(context.bot, uid)
         await send_next_regulation(_ChatMessenger(context.bot, uid), uid)
+        await send_consent_request(context.bot, uid)
         return
 
     manager = get_manager(uid)
@@ -932,33 +937,95 @@ async def on_manager_remove_confirm(update: Update, context: ContextTypes.DEFAUL
         pass
 
 
+_OPERATOR_REQUIRED_LABELS = {"Название": "operator_name", "ИНН": "operator_inn", "Адрес": "operator_address"}
+
+
 async def on_add_project_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/add_project — цепочка из трёх шагов, прежде чем рынок реально
+    появится в боте: название → реквизиты юрлица-оператора ПДн → текст
+    согласия (готовый от юристов или автогенерация). Так у нового рынка
+    сразу есть всё нужное для согласия сотрудников, а не задним числом
+    через /set_operator//set_consent_text."""
     if not is_owner(update.effective_user.id):
         return
-    _awaiting_new_project.add(str(update.effective_user.id))
+    _awaiting_new_project[str(update.effective_user.id)] = {"step": "name"}
     await update.effective_message.reply_text("Название нового проекта/точки Surf?")
 
 
 async def on_manager_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Забирает текстовый ответ на /add_project, если он ожидается от этого
-    пользователя. Возвращает True, если сообщение обработано (по конвенции
-    остальных «claim or pass» хендлеров в on_private_text)."""
+    """Забирает текстовые ответы цепочки /add_project (название → реквизиты
+    → текст согласия), если она ожидается от этого пользователя. Возвращает
+    True, если сообщение обработано (по конвенции остальных «claim or pass»
+    хендлеров в on_private_text)."""
     user_id = str(update.effective_user.id)
-    if user_id not in _awaiting_new_project:
+    state = _awaiting_new_project.get(user_id)
+    if not state:
         return False
 
-    _awaiting_new_project.discard(user_id)
-    name = update.effective_message.text.strip()
-    if not name:
-        await update.effective_message.reply_text("Пустое название, отменил добавление проекта.")
-        return True
-    if get_market_by_name(name):
-        await update.effective_message.reply_text(f"Проект «{name}» уже существует.")
+    text = (update.effective_message.text or "").strip()
+
+    if state["step"] == "name":
+        if not text:
+            del _awaiting_new_project[user_id]
+            await update.effective_message.reply_text("Пустое название, отменил добавление проекта.")
+            return True
+        if get_market_by_name(text):
+            del _awaiting_new_project[user_id]
+            await update.effective_message.reply_text(f"Проект «{text}» уже существует.")
+            return True
+        state["name"] = text
+        state["step"] = "operator"
+        await update.effective_message.reply_text(
+            f"Реквизиты юрлица/ИП — оператора персональных данных для «{text}» — одним сообщением, "
+            "по строке на поле:\n\n"
+            "Название: ООО «Ромашка»\nИНН: 1234567890\nОГРН: 1234567890123\nАдрес: г. Москва, ул. Примерная, д. 1\n\n"
+            "Если реквизитов пока нет под рукой — напиши «пропустить», добавишь позже через /set_operator "
+            "(без них согласие сотрудников собирать не получится)."
+        )
         return True
 
-    create_market(name)
+    if state["step"] == "operator":
+        if text.lower() in ("пропустить", "-", "нет"):
+            state["operator_fields"] = {}
+        else:
+            fields = parse_operator_paste(text)
+            missing = [label for label, key in _OPERATOR_REQUIRED_LABELS.items() if key not in fields]
+            if missing:
+                await update.effective_message.reply_text(
+                    f"🤔 Не хватает полей: {', '.join(missing)}. Проверь формат, вставь ещё раз, или напиши «пропустить»."
+                )
+                return True
+            state["operator_fields"] = fields
+        state["step"] = "consent_text"
+        await update.effective_message.reply_text(
+            "Есть готовый текст согласия на обработку персональных данных от юристов оператора? "
+            "Пришли целиком одним сообщением — или напиши «нет», тогда бот соберёт текст сам из реквизитов "
+            "(если они заданы)."
+        )
+        return True
+
+    # state["step"] == "consent_text"
+    del _awaiting_new_project[user_id]
+    consent_text = "" if text.lower() in ("нет", "-", "пропустить") else text
+    market = create_market(state["name"])
+    fields = state.get("operator_fields") or {}
+    if fields:
+        set_market_operator(
+            market["id"], fields.get("operator_name", ""), fields.get("operator_inn", ""),
+            fields.get("operator_ogrn", ""), fields.get("operator_address", ""),
+        )
+    if consent_text:
+        set_market_consent_text(market["id"], consent_text)
+
+    ready = bool(consent_text) or bool(fields.get("operator_name"))
+    note = (
+        ""
+        if ready
+        else "\n\n⚠️ Текст согласия ещё не готов — заполните /set_operator или /set_consent_text, "
+        "прежде чем добавлять сотрудников."
+    )
     await update.effective_message.reply_text(
-        f"✅ Проект «{name}» добавлен — теперь появится в онбординге через /start."
+        f"✅ Проект «{state['name']}» добавлен — теперь появится в онбординге через /start.{note}"
     )
     return True
 

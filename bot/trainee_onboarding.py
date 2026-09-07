@@ -1,6 +1,7 @@
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from bot.consent_flow import send_consent_request
 from config.settings import ROMAN_TELEGRAM_ID
 from monitoring.constants import TRAINEE_ONBOARDING_STAGES
 from monitoring.managers import (
@@ -12,8 +13,8 @@ from monitoring.managers import (
     set_manager_position,
     set_onboarding_stage,
 )
-from monitoring.markets import get_market, has_consent_text_ready
-from personal_data.consent import has_consent, record_consent, render_consent_text
+from monitoring.markets import get_market
+from personal_data.consent import has_consent
 
 
 def _is_market_supervisor(user_id: int, market_id: int) -> bool:
@@ -32,96 +33,39 @@ def _first_market_id(uid: int) -> int | None:
     return markets[0]["id"] if markets else None
 
 
-def _consent_keyboard(uid: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("✅ Согласен(на)", callback_data=f"trainee_consent:{uid}:yes"),
-                InlineKeyboardButton("❌ Не согласен(на)", callback_data=f"trainee_consent:{uid}:no"),
-            ]
-        ]
-    )
-
-
 async def start_trainee_track(bot: Bot, uid: int) -> None:
     """Запускается сразу после того, как владелец подтвердил заявку
     сотрудника с позицией «Стажёр» (см. bot.manager_admin.on_manager_approve),
-    а также повторно — как только для рынка заполнены реквизиты юрлица (см.
-    bot.market_operator._unblock_waiting_trainees). Вместо обычных блоков и
-    регламентов стажёр сначала должен дать согласие на обработку персональных
-    данных — оператором в тексте согласия указывается юрлицо/ИП точки
-    (market.operator_*), а не Рома и не бот, и только потом получает первый
-    этап программы онбординга."""
+    а также повторно — как только для рынка становится готов текст согласия
+    (см. bot.consent_flow._request_consents_for_market). Вместо обычных
+    блоков и регламентов стажёр сначала должен дать согласие на обработку
+    персональных данных (см. bot.consent_flow.send_consent_request и
+    on_pdn_consent — согласие теперь общее для всех должностей, не только
+    стажёров), и только потом получает первый этап программы онбординга."""
     if has_consent(uid):
         await _begin_stages(bot, uid)
         return
 
-    market_id = _first_market_id(uid)
-    market = get_market(market_id) if market_id else None
-    manager = get_manager(uid)
-    if not market or not has_consent_text_ready(market):
-        market_label = f"«{market['name']}»" if market else "неизвестного рынка"
-        name_label = manager["name"] if manager else str(uid)
-        try:
-            await bot.send_message(
-                chat_id=ROMAN_TELEGRAM_ID,
-                text=(
-                    f"⚠️ Для {market_label} не готов текст согласия (заполните /set_operator или загрузите "
-                    f"текст от юристов через /set_consent_text) — {name_label} не может получить согласие "
-                    "на обработку персональных данных, пока это не сделано."
-                ),
-            )
-        except Exception:
-            pass
+    sent = await send_consent_request(bot, uid)
+    if sent:
         return
 
+    manager = get_manager(uid)
+    market_id = _first_market_id(uid)
+    market = get_market(market_id) if market_id else None
+    market_label = f"«{market['name']}»" if market else "неизвестного рынка"
+    name_label = manager["name"] if manager else str(uid)
     try:
-        await bot.send_message(chat_id=uid, text=render_consent_text(market), reply_markup=_consent_keyboard(uid))
+        await bot.send_message(
+            chat_id=ROMAN_TELEGRAM_ID,
+            text=(
+                f"⚠️ Для {market_label} не готов текст согласия (заполните /set_operator или загрузите "
+                f"текст от юристов через /set_consent_text) — {name_label} не может получить согласие "
+                "на обработку персональных данных, пока это не сделано."
+            ),
+        )
     except Exception:
         pass
-
-
-async def on_trainee_consent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    _, uid_str, choice = query.data.split(":")
-    uid = int(uid_str)
-    if query.from_user.id != uid:
-        await query.answer()
-        return
-
-    await query.answer()
-    await query.edit_message_reply_markup(reply_markup=None)
-
-    if choice == "no":
-        await query.message.reply_text(
-            "Понимаю. Без согласия на обработку персональных данных стажировку через бота продолжить не получится — "
-            "свяжись с управляющим точки, чтобы обсудить оформление лично."
-        )
-        manager = get_manager(uid)
-        if manager:
-            market_id = _first_market_id(uid)
-            supervisor = get_market_supervisor(market_id) if market_id else None
-            target_id = supervisor["telegram_user_id"] if supervisor else ROMAN_TELEGRAM_ID
-            try:
-                await context.bot.send_message(
-                    chat_id=target_id,
-                    text=f"⚠️ {manager['name']} не дал(а) согласие на обработку персональных данных — стажировка через бота приостановлена.",
-                )
-            except Exception:
-                pass
-        return
-
-    market_id = _first_market_id(uid)
-    market = get_market(market_id) if market_id else None
-    if not market:
-        # Рынок пропал между вопросом и ответом — крайне
-        # маловероятно, но без рынка нечего писать в текст согласия.
-        await query.message.reply_text("Не нашёл твой рынок — напиши управляющему, разберёмся.")
-        return
-
-    record_consent(uid, market_id, render_consent_text(market))
-    await query.message.reply_text("Спасибо! Начинаем программу онбординга.")
-    await _begin_stages(context.bot, uid)
 
 
 def _stage_label(stage_index: int) -> str:

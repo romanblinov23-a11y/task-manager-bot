@@ -32,6 +32,7 @@ from bot.confirmation import (
     on_set_category,
 )
 from bot.daily_report import send_daily_report
+from bot.consent_flow import on_pdn_consent, on_request_consents_command, on_request_consents_market_choice
 from bot.dashboard_cmd import on_dashboard_aggregate_choice, on_dashboard_command, on_dashboard_market_choice
 from bot.data_export import (
     on_export_operator_data_command,
@@ -150,7 +151,7 @@ from bot.monthly_plan_flow import (
     send_monthly_plan_requests,
 )
 from bot.onboarding import on_force_onboard, on_help, on_project_choice, on_role_choice, on_start
-from bot.trainee_onboarding import on_trainee_advance, on_trainee_consent, on_trainee_graduate
+from bot.trainee_onboarding import on_trainee_advance, on_trainee_graduate
 from bot.private import on_private_document, on_private_text, on_project_selected
 from bot.regulations import on_regulations_command, on_regulations_view
 from bot.mytasks_manage import on_mytasks_callback, on_mytasks_command
@@ -336,6 +337,7 @@ _ROMAN_COMMANDS = [
     BotCommand("set_operator", "Указать реквизиты юрлица-оператора ПДн для рынка"),
     BotCommand("set_consent_text", "Загрузить готовый текст согласия на ПДн от юристов"),
     BotCommand("export_operator_data", "Выгрузить/удалить персональные данные рынка (передача заказчику)"),
+    BotCommand("request_consents", "Разослать запрос согласия на ПДн сотрудникам рынка"),
     BotCommand("reset_shift_report", "⚠️ Сбросить сегодняшний отчёт по смене"),
     BotCommand("message", "Написать в личку сотруднику через бота"),
     BotCommand("message_chat", "Написать в зарегистрированный чат через бота"),
@@ -409,6 +411,7 @@ def main() -> None:
     app.add_handler(CommandHandler("set_operator", on_set_operator_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_consent_text", on_set_consent_text_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("export_operator_data", on_export_operator_data_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("request_consents", on_request_consents_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, on_group_message))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))
@@ -422,7 +425,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_status_button, pattern=r"^status:"))
     app.add_handler(CallbackQueryHandler(on_project_choice, pattern=r"^onb_project:"))
     app.add_handler(CallbackQueryHandler(on_role_choice, pattern=r"^onb_role:"))
-    app.add_handler(CallbackQueryHandler(on_trainee_consent, pattern=r"^trainee_consent:"))
+    app.add_handler(CallbackQueryHandler(on_pdn_consent, pattern=r"^pdn_consent:"))
+    app.add_handler(CallbackQueryHandler(on_request_consents_market_choice, pattern=r"^reqconsent_market:"))
     app.add_handler(CallbackQueryHandler(on_trainee_advance, pattern=r"^trainee_advance:"))
     app.add_handler(CallbackQueryHandler(on_trainee_graduate, pattern=r"^trainee_graduate:"))
     app.add_handler(CallbackQueryHandler(on_manager_select, pattern=r"^mgr_select:"))
