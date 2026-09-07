@@ -104,6 +104,10 @@ from bot.meetings import (
     send_meeting_confirmations,
 )
 from bot.market_operator import (
+    on_set_consent_text_cancel,
+    on_set_consent_text_command,
+    on_set_consent_text_confirm,
+    on_set_consent_text_market_choice,
     on_set_operator_cancel,
     on_set_operator_command,
     on_set_operator_confirm,
@@ -323,6 +327,7 @@ _ROMAN_COMMANDS = [
     BotCommand("send_morning_report", "Отправить утреннее напоминание команде сейчас (проверка формата)"),
     BotCommand("set_meeting_schedule", "Настроить ритм собраний"),
     BotCommand("set_operator", "Указать реквизиты юрлица-оператора ПДн для рынка"),
+    BotCommand("set_consent_text", "Загрузить готовый текст согласия на ПДн от юристов"),
     BotCommand("reset_shift_report", "⚠️ Сбросить сегодняшний отчёт по смене"),
     BotCommand("message", "Написать в личку сотруднику через бота"),
     BotCommand("message_chat", "Написать в зарегистрированный чат через бота"),
@@ -394,6 +399,7 @@ def main() -> None:
     app.add_handler(CommandHandler("broadcast", on_broadcast_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_meeting_schedule", on_set_meeting_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_operator", on_set_operator_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("set_consent_text", on_set_consent_text_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, on_group_message))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))
@@ -519,6 +525,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_set_operator_market_choice, pattern=r"^setop_market:"))
     app.add_handler(CallbackQueryHandler(on_set_operator_confirm, pattern=r"^setop_confirm$"))
     app.add_handler(CallbackQueryHandler(on_set_operator_cancel, pattern=r"^setop_cancel$"))
+    app.add_handler(CallbackQueryHandler(on_set_consent_text_market_choice, pattern=r"^setconsent_market:"))
+    app.add_handler(CallbackQueryHandler(on_set_consent_text_confirm, pattern=r"^setconsent_confirm$"))
+    app.add_handler(CallbackQueryHandler(on_set_consent_text_cancel, pattern=r"^setconsent_cancel$"))
     app.add_handler(CallbackQueryHandler(on_meeting_schedule_market_choice, pattern=r"^meetsched_market:"))
     app.add_handler(CallbackQueryHandler(on_meeting_schedule_type_choice, pattern=r"^meetsched_type:"))
     app.add_handler(CallbackQueryHandler(on_meeting_confirm, pattern=r"^meet_confirm:"))

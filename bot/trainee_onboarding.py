@@ -12,7 +12,7 @@ from monitoring.managers import (
     set_manager_position,
     set_onboarding_stage,
 )
-from monitoring.markets import get_market, has_operator_info
+from monitoring.markets import get_market, has_consent_text_ready
 from personal_data.consent import has_consent, record_consent, render_consent_text
 
 
@@ -59,15 +59,16 @@ async def start_trainee_track(bot: Bot, uid: int) -> None:
     market_id = _first_market_id(uid)
     market = get_market(market_id) if market_id else None
     manager = get_manager(uid)
-    if not market or not has_operator_info(market):
+    if not market or not has_consent_text_ready(market):
         market_label = f"«{market['name']}»" if market else "неизвестного рынка"
         name_label = manager["name"] if manager else str(uid)
         try:
             await bot.send_message(
                 chat_id=ROMAN_TELEGRAM_ID,
                 text=(
-                    f"⚠️ Для {market_label} не заполнены реквизиты юрлица (/set_operator) — "
-                    f"{name_label} не может получить согласие на обработку персональных данных, пока это не сделано."
+                    f"⚠️ Для {market_label} не готов текст согласия (заполните /set_operator или загрузите "
+                    f"текст от юристов через /set_consent_text) — {name_label} не может получить согласие "
+                    "на обработку персональных данных, пока это не сделано."
                 ),
             )
         except Exception:

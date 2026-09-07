@@ -6,7 +6,7 @@ from bot.confirmation import on_deadline_reply, on_edit_reply, send_confirmation
 from bot.fix_reading import on_fix_reading_reply
 from bot.import_readings import on_import_readings_reply
 from bot.manager_admin import on_manager_admin_reply
-from bot.market_operator import on_set_operator_reply
+from bot.market_operator import on_set_consent_text_reply, on_set_operator_reply
 from bot.meetings import on_meeting_agenda_reply, on_meeting_postpone_reply, on_meeting_schedule_reply
 from bot.messaging import on_broadcast_text_reply, on_message_chat_reply, on_message_reply
 from bot.monitoring_flow import on_monitoring_reply
@@ -116,6 +116,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if await on_set_operator_reply(update, context):
+        return
+
+    if await on_set_consent_text_reply(update, context):
         return
 
     if await on_meeting_schedule_reply(update, context):

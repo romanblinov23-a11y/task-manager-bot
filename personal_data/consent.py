@@ -21,6 +21,13 @@ _CONSENT_TEMPLATE = (
 
 
 def render_consent_text(market: dict) -> str:
+    """Если для рынка загружен готовый текст от юристов оператора
+    (market.custom_consent_text, см. /set_consent_text) — используется он
+    как есть, без подстановок. Иначе — автогенерация по реквизитам
+    оператора (/set_operator)."""
+    custom = (market.get("custom_consent_text") or "").strip()
+    if custom:
+        return custom
     return _CONSENT_TEMPLATE.format(
         operator_name=market.get("operator_name") or "—",
         operator_inn=market.get("operator_inn") or "—",

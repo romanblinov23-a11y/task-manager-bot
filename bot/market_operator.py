@@ -2,7 +2,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from monitoring.managers import get_managers_for_market, is_owner
-from monitoring.markets import get_market, list_markets, set_market_operator
+from monitoring.markets import get_market, list_markets, set_market_consent_text, set_market_operator
 from personal_data.consent import has_consent
 
 _FIELD_KEYS = {
@@ -40,7 +40,9 @@ def _instructions_text(market_name: str) -> str:
         "ОГРН: 1234567890123\n"
         "Адрес: г. Москва, ул. Примерная, д. 1\n\n"
         "Это нужно для текста согласия на обработку персональных данных, который увидят стажёры "
-        "этой точки — оператором является само юрлицо/ИП, а не Рома и не бот."
+        "этой точки — оператором является само юрлицо/ИП, а не Рома и не бот.\n\n"
+        "Если у оператора уже есть готовый текст согласия от своих юристов — грузите его целиком "
+        "командой /set_consent_text, он заменит собранный отсюда."
     )
 
 
@@ -165,3 +167,122 @@ async def on_set_operator_cancel(update: Update, context: ContextTypes.DEFAULT_T
     _pending_confirm.pop(str(query.from_user.id), None)
     await query.answer()
     await query.edit_message_text("Отменено, реквизиты не сохранены.")
+
+
+# telegram_user_id (str) владельца -> {"market_id": int} — ждём вставки текста согласия
+_awaiting_consent_paste: dict[str, dict] = {}
+
+# telegram_user_id (str) -> {"market_id": int, "text": str | None} — text=None означает сброс на автогенерацию
+_pending_consent_confirm: dict[str, dict] = {}
+
+
+def _consent_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"setconsent_market:{m['id']}")] for m in markets])
+
+
+def _consent_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("✅ Сохранить", callback_data="setconsent_confirm"), InlineKeyboardButton("❌ Отмена", callback_data="setconsent_cancel")]]
+    )
+
+
+def _consent_instructions_text(market_name: str) -> str:
+    return (
+        f"Пришли готовый текст согласия на обработку персональных данных для «{market_name}» — "
+        "именно тот, что подготовили юристы оператора — одним сообщением целиком. Он заменит "
+        "текст, который бот собирает сам из реквизитов (/set_operator).\n\n"
+        "Чтобы вернуться к автогенерации — напиши «сброс»."
+    )
+
+
+async def on_set_consent_text_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/set_consent_text — владелец загружает готовый текст согласия на
+    обработку ПДн от юристов оператора вместо того, который бот собирает
+    сам из реквизитов юрлица (/set_operator)."""
+    if not is_owner(update.effective_user.id):
+        return
+    markets = list_markets()
+    if not markets:
+        await update.effective_message.reply_text("Пока нет ни одного рынка.")
+        return
+    if len(markets) == 1:
+        _awaiting_consent_paste[str(update.effective_user.id)] = {"market_id": markets[0]["id"]}
+        await update.effective_message.reply_text(_consent_instructions_text(markets[0]["name"]))
+        return
+    await update.effective_message.reply_text(
+        "По какому рынку загружаем текст согласия?", reply_markup=_consent_market_pick_keyboard(markets)
+    )
+
+
+async def on_set_consent_text_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(f"Рынок: {market['name']}")
+    _awaiting_consent_paste[str(query.from_user.id)] = {"market_id": market_id}
+    await query.message.reply_text(_consent_instructions_text(market["name"]))
+
+
+async def on_set_consent_text_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Забирает вставленный текст согласия (или запрос на сброс).
+    Возвращает True, если сообщение обработано — по конвенции остальных
+    claim-хендлеров в on_private_text."""
+    owner_id = str(update.effective_user.id)
+    state = _awaiting_consent_paste.pop(owner_id, None)
+    if not state:
+        return False
+
+    text = (update.effective_message.text or "").strip()
+    market = get_market(state["market_id"])
+
+    if text.lower() in ("сброс", "reset", "-"):
+        _pending_consent_confirm[owner_id] = {"market_id": state["market_id"], "text": None}
+        await update.effective_message.reply_text(
+            f"Вернуть автосгенерированный текст согласия для «{market['name']}» (по реквизитам из /set_operator)?",
+            reply_markup=_consent_confirm_keyboard(),
+        )
+        return True
+
+    if not text:
+        _awaiting_consent_paste[owner_id] = state
+        await update.effective_message.reply_text("Текст не может быть пустым — пришли ещё раз.")
+        return True
+
+    _pending_consent_confirm[owner_id] = {"market_id": state["market_id"], "text": text}
+    await update.effective_message.reply_text(
+        f"Вот что сохраню для «{market['name']}» как текст согласия:\n\n{text}\n\nСохранить?",
+        reply_markup=_consent_confirm_keyboard(),
+    )
+    return True
+
+
+async def on_set_consent_text_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    owner_id = str(query.from_user.id)
+    state = _pending_consent_confirm.pop(owner_id, None)
+    if not state:
+        await query.answer("Сессия неактуальна", show_alert=True)
+        return
+
+    await query.answer("Сохраняю…")
+    set_market_consent_text(state["market_id"], state["text"] or "")
+    market = get_market(state["market_id"])
+    if state["text"] is None:
+        await query.edit_message_text(f"✅ Для «{market['name']}» снова используется автосгенерированный текст согласия.")
+    else:
+        await query.edit_message_text(f"✅ Текст согласия от юристов сохранён для «{market['name']}».")
+    await _unblock_waiting_trainees(context.bot, state["market_id"])
+
+
+async def on_set_consent_text_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    _pending_consent_confirm.pop(str(query.from_user.id), None)
+    await query.answer()
+    await query.edit_message_text("Отменено.")

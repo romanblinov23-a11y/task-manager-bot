@@ -183,6 +183,9 @@ def init_schema() -> None:
         _ensure_column(conn, "market", "operator_inn", "operator_inn TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "market", "operator_ogrn", "operator_ogrn TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "market", "operator_address", "operator_address TEXT NOT NULL DEFAULT ''")
+        # Готовый текст согласия от юристов оператора — если задан, используется
+        # вместо текста, собранного автоматически из operator_* полей выше.
+        _ensure_column(conn, "market", "custom_consent_text", "custom_consent_text TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "report_chat", "mention", "mention TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "report_chat", "message_thread_id", "message_thread_id INTEGER")
         # Разовая миграция данных: блок "Отчёты по смене" появился позже

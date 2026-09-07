@@ -54,6 +54,25 @@ def has_operator_info(market: dict) -> bool:
     return bool(market.get("operator_name"))
 
 
+def set_market_consent_text(market_id: int, text: str) -> None:
+    """Готовый текст согласия на обработку ПДн от юристов оператора —
+    если задан, используется вместо автосгенерированного по реквизитам
+    (см. personal_data.consent.render_consent_text). Пустая строка
+    возвращает к автогенерации."""
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE market SET custom_consent_text = ? WHERE id = ?", (text, market_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def has_consent_text_ready(market: dict) -> bool:
+    """Можно ли уже показать стажёру текст согласия — либо загружен
+    готовый текст от юристов, либо заполнены реквизиты для автогенерации."""
+    return bool(market.get("custom_consent_text")) or has_operator_info(market)
+
+
 def create_market(name: str, city: str = "", our_point_name: str | None = None) -> dict:
     """Добавляет новый рынок/проект — используется владельцем через /add_project.
     Рынок и проект в системе — одна сущность: как только он появляется здесь,
