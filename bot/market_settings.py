@@ -2,19 +2,22 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from monitoring.managers import is_owner
-from monitoring.markets import get_market, list_markets
+from monitoring.markets import get_market, list_markets, set_market_send_to_finance
 
 
 def _market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"msett_market:{m['id']}")] for m in markets])
 
 
-def _actions_keyboard(market_id: int) -> InlineKeyboardMarkup:
-    """Каждая кнопка использует ровно тот же callback_data, что и шаг
-    «рынок выбран» соответствующей отдельной команды (setop_market:,
-    sched_market: и т.д.) — так все существующие хендлеры и их права
-    доступа переиспользуются без изменений, здесь просто пропускается
-    отдельный экран выбора рынка."""
+def _actions_keyboard(market: dict) -> InlineKeyboardMarkup:
+    """Каждая кнопка (кроме переключателя финпартнёров) использует ровно тот
+    же callback_data, что и шаг «рынок выбран» соответствующей отдельной
+    команды (setop_market:, sched_market: и т.д.) — так все существующие
+    хендлеры и их права доступа переиспользуются без изменений, здесь
+    просто пропускается отдельный экран выбора рынка."""
+    market_id = market["id"]
+    finance_on = market.get("send_to_finance", 1)
+    finance_label = "💰 Финпартнёры: включено (нажми, чтобы выключить)" if finance_on else "💰 Финпартнёры: выключено (нажми, чтобы включить)"
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("🏷 Реквизиты оператора (ПДн)", callback_data=f"setop_market:{market_id}")],
@@ -26,7 +29,9 @@ def _actions_keyboard(market_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton("♻️ Сбросить конкурентов", callback_data=f"reset_monitoring_market:{market_id}")],
             [InlineKeyboardButton("📅 График смен", callback_data=f"shsched_market:{market_id}")],
             [InlineKeyboardButton("💰 Финплан на месяц", callback_data=f"monthplan_market:{market_id}")],
+            [InlineKeyboardButton("🌙 Настроить вечерний отчёт", callback_data=f"evrep_market:{market_id}")],
             [InlineKeyboardButton("🤝 Ритм собраний", callback_data=f"meetsched_market:{market_id}")],
+            [InlineKeyboardButton(finance_label, callback_data=f"msett_togglefinance:{market_id}")],
             [InlineKeyboardButton("💰 Чат финпартнёров", callback_data=f"shrc_view:{market_id}:finance")],
             [InlineKeyboardButton("👥 Чат команды точки", callback_data=f"shrc_view:{market_id}:team")],
             [InlineKeyboardButton("↩️ Другой рынок", callback_data="msett_back")],
@@ -46,7 +51,7 @@ async def on_market_settings_command(update: Update, context: ContextTypes.DEFAU
         return
     if len(markets) == 1:
         await update.effective_message.reply_text(
-            f"Рынок: {markets[0]['name']}. Что настраиваем?", reply_markup=_actions_keyboard(markets[0]["id"])
+            f"Рынок: {markets[0]['name']}. Что настраиваем?", reply_markup=_actions_keyboard(markets[0])
         )
         return
     await update.effective_message.reply_text("Какой рынок настраиваем?", reply_markup=_market_pick_keyboard(markets))
@@ -63,7 +68,23 @@ async def on_market_settings_market_choice(update: Update, context: ContextTypes
         await query.answer("Рынок не найден", show_alert=True)
         return
     await query.answer()
-    await query.edit_message_text(f"Рынок: {market['name']}. Что настраиваем?", reply_markup=_actions_keyboard(market_id))
+    await query.edit_message_text(f"Рынок: {market['name']}. Что настраиваем?", reply_markup=_actions_keyboard(market))
+
+
+async def on_market_settings_toggle_finance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    set_market_send_to_finance(market_id, not market.get("send_to_finance", 1))
+    market = get_market(market_id)
+    await query.answer("Включено" if market.get("send_to_finance", 1) else "Выключено")
+    await query.edit_message_text(f"Рынок: {market['name']}. Что настраиваем?", reply_markup=_actions_keyboard(market))
 
 
 async def on_market_settings_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

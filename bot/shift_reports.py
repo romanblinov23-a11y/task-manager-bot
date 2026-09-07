@@ -7,8 +7,9 @@ from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from bot.onboarding import get_display_name
-from config.settings import ROMAN_TELEGRAM_ID
-from config.timeutil import fmt_date
+from config.settings import ROMAN_TELEGRAM_ID, SHIFT_REPORT_ESCALATE_OFFSET_MINUTES
+from config.timeutil import add_minutes_to_hhmm, fmt_date
+from config.timeutil import now as tz_now
 from config.timeutil import today as tz_today
 from monitoring.managers import (
     get_market_supervisor,
@@ -17,7 +18,7 @@ from monitoring.managers import (
     is_owner,
     market_reports_enabled,
 )
-from monitoring.markets import get_market, list_markets
+from monitoring.markets import get_effective_shift_report_time, get_market, list_markets
 from monitoring.monthly_plan import get_daily_plan
 from monitoring.shift_reports import (
     create_or_get_draft,
@@ -301,6 +302,15 @@ def _approval_keyboard_owner(report_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def _fyi_keyboard_owner(report_id: int) -> InlineKeyboardMarkup:
+    """Для рынков, не подключённых к чату финпартнёров (market.send_to_finance
+    = 0, решает Рома, см. bot.market_settings) — согласование не нужно,
+    отчёт приходит только для ознакомления, но с той же возможностью
+    задать уточняющий вопрос управляющему, что и «💬 Запросить дополнения»
+    у обычного согласования (см. on_shift_report_more_info)."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton("❓ Задать вопрос управляющему", callback_data=f"shrep_moreinfo:{report_id}")]])
+
+
 def _edit_field_keyboard(report: dict) -> InlineKeyboardMarkup:
     report_id = report["id"]
     buttons = [
@@ -549,15 +559,32 @@ async def _send_for_supervisor_approval(bot: Bot, report_id: int) -> None:
 
 
 async def _send_for_owner_approval(bot: Bot, report_id: int) -> None:
+    """Не у каждого рынка есть чат финпартнёров (market.send_to_finance,
+    решает Рома — см. bot.market_settings). Если его нет — отчёт всё равно
+    приходит Роме, но только для ознакомления: без обязательного
+    согласования (статус сразу 'approved', так что и утренняя эскалация
+    его не тронет) и без реальной рассылки в чат (см. send_pending_reports),
+    только с возможностью задать управляющему уточняющий вопрос."""
     report = get_report(report_id)
     market = get_market(report["market_id"])
-    set_report_status(report_id, "awaiting_owner")
     text = render_finance_report(market, report["report_date"], report["data"])
-    await bot.send_message(
-        chat_id=ROMAN_TELEGRAM_ID,
-        text=f"📋 Отчёт за {fmt_date(report['report_date'])} на согласование:\n\n{text}",
-        reply_markup=_approval_keyboard_owner(report_id),
-    )
+    if market.get("send_to_finance", 1):
+        set_report_status(report_id, "awaiting_owner")
+        await bot.send_message(
+            chat_id=ROMAN_TELEGRAM_ID,
+            text=f"📋 Отчёт за {fmt_date(report['report_date'])} на согласование:\n\n{text}",
+            reply_markup=_approval_keyboard_owner(report_id),
+        )
+    else:
+        set_report_status(report_id, "approved")
+        await bot.send_message(
+            chat_id=ROMAN_TELEGRAM_ID,
+            text=(
+                f"📋 Отчёт за {fmt_date(report['report_date'])} по «{market['name']}» — для ознакомления "
+                f"(рынок не подключён к чату финпартнёров):\n\n{text}"
+            ),
+            reply_markup=_fyi_keyboard_owner(report_id),
+        )
 
 
 def _build_questions(report_date: str, answers: dict) -> list[dict]:
@@ -797,7 +824,7 @@ async def _send_report_now(bot: Bot, message, market: dict) -> None:
         return
 
     sent = []
-    if finance_chat:
+    if finance_chat and market.get("send_to_finance", 1):
         text = render_finance_report(market, date_iso, report["data"])
         if finance_chat.get("mention"):
             text = f"{finance_chat['mention']}\n\n{text}"
@@ -1270,26 +1297,39 @@ async def on_shift_report_more_info_reply(update: Update, context: ContextTypes.
 
 
 async def send_shift_report_kickoffs(bot: Bot) -> None:
-    """22:00 — для каждого рынка с записью в графике на сегодня предлагает
-    назначенному менеджеру заполнить отчёт (см. main.py). Пропускает рынки,
-    у которых Управляющему сейчас отключён блок «Отчёты по смене» —
-    владелец сознательно ещё не подключил рынок к отчётности."""
+    """Каждая точка закрывается в своё время (см. market.shift_report_time,
+    /set_evening_report) — эта функция вызывается раз в минуту (см. main.py)
+    и для каждого рынка с записью в графике на сегодня сверяет, не наступило
+    ли именно СЕЙЧАС его собственное время сбора отчёта; если да —
+    предлагает назначенному менеджеру заполнить отчёт. Пропускает рынки, у
+    которых Управляющему сейчас отключён блок «Отчёты по смене» — владелец
+    сознательно ещё не подключил рынок к отчётности."""
     date_iso = tz_today().isoformat()
+    now_hhmm = tz_now().strftime("%H:%M")
     for market in list_markets_with_shift(date_iso):
         if not market_reports_enabled(market["id"]):
+            continue
+        if get_effective_shift_report_time(market) != now_hhmm:
             continue
         await _offer_report_or_absence(bot, market["scheduled_manager_id"], market, date_iso)
 
 
 async def send_shift_report_escalations(bot: Bot) -> None:
-    """23:30 — если по рынку с сегодняшней записью в графике отчёт так и не
-    начали сдавать управляющему, сообщает управляющему (или владельцу, если
+    """Эскалация — не в абсолютное время, а через SHIFT_REPORT_ESCALATE_
+    OFFSET_MINUTES минут после СВОЕГО времени сбора отчёта каждой точки
+    (см. market.shift_report_time). Вызывается раз в минуту (см. main.py).
+    Если по рынку с сегодняшней записью в графике отчёт так и не начали
+    сдавать управляющему, сообщает управляющему (или владельцу, если
     управляющего нет) и предлагает те же две кнопки (см. main.py). Рынки с
     отключённым у Управляющего блоком «Отчёты по смене» пропускаются —
     см. market_reports_enabled."""
     date_iso = tz_today().isoformat()
+    now_hhmm = tz_now().strftime("%H:%M")
     for market in list_markets_with_shift(date_iso):
         if not market_reports_enabled(market["id"]):
+            continue
+        escalate_time = add_minutes_to_hhmm(get_effective_shift_report_time(market), SHIFT_REPORT_ESCALATE_OFFSET_MINUTES)
+        if escalate_time != now_hhmm:
             continue
         report = get_report_by_date(market["id"], date_iso)
         if report and report["status"] != "collecting":
@@ -1347,14 +1387,18 @@ async def send_pending_reports(bot: Bot) -> None:
     """10:00 — рассылает вчерашние согласованные отчёты в зарегистрированный
     чат финпартнёров (см. main.py, bot/report_chat_registration.py). Чат
     команды точки сюда не входит — тот отчёт уже ушёл сразу после сбора,
-    без согласований (см. _dispatch_team_report_now)."""
+    без согласований (см. _dispatch_team_report_now). Рынки с
+    market.send_to_finance = 0 тоже проходят через статус 'approved' (см.
+    _send_for_owner_approval — там это автоматическое, не ручное
+    согласование), но реальной отправки для них не происходит — Рома уже
+    получил их только для ознакомления."""
     yesterday = (tz_today() - timedelta(days=1)).isoformat()
     for report in list_reports_by_status_and_date(yesterday, "approved"):
         market = get_market(report["market_id"])
         if not market:
             continue
 
-        finance_chat = get_report_chat(report["market_id"], "finance")
+        finance_chat = get_report_chat(report["market_id"], "finance") if market.get("send_to_finance", 1) else None
         if finance_chat:
             text = render_finance_report(market, report["report_date"], report["data"])
             if finance_chat.get("mention"):

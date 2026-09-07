@@ -122,6 +122,16 @@ def parse_date(user_input: str) -> str | None:
     return None
 
 
+def add_minutes_to_hhmm(hhmm: str, minutes: int) -> str:
+    """«22:00» + 90 → «23:30» — используется, чтобы посчитать время
+    эскалации отчёта по смене от собственного времени сбора каждой точки
+    (см. SHIFT_REPORT_ESCALATE_OFFSET_MINUTES), а не от единого глобального
+    времени. Переход через полночь оборачивается в пределах суток."""
+    hour, minute = (int(part) for part in hhmm.split(":"))
+    total = (hour * 60 + minute + minutes) % (24 * 60)
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
 def fmt_date(iso_date: str | None) -> str:
     """Конвертирует ISO-дату YYYY-MM-DD в читаемый ДД.ММ.ГГГГ для показа людям.
     Внутреннее хранение в Sheets и передача в Claude остаются в ISO-формате."""

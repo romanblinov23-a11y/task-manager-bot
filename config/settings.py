@@ -60,8 +60,14 @@ EXTRACTION_CONTEXT_HOURS = int(os.getenv("EXTRACTION_CONTEXT_HOURS", "2"))
 # собирать отчёт у ответственного менеджера, когда эскалировать управляющему,
 # если отчёт не собран, и когда рассылать готовый отчёт дальше.
 SHIFT_SCHEDULE_REMINDER_TIME = os.getenv("SHIFT_SCHEDULE_REMINDER_TIME", "10:00")
+# Точки закрываются в разное время — управляющий задаёт своё время сбора
+# отчёта для точки через /set_evening_report (см. monitoring.markets.
+# get_effective_shift_report_time); это значение — только дефолт для точек,
+# которые ещё не настроили своё.
 SHIFT_REPORT_START_TIME = os.getenv("SHIFT_REPORT_START_TIME", "22:00")
-SHIFT_REPORT_ESCALATE_TIME = os.getenv("SHIFT_REPORT_ESCALATE_TIME", "23:30")
+# Эскалация управляющему — не абсолютное время, а сколько минут ждать после
+# СВОЕГО времени сбора отчёта точки, прежде чем подключать управляющего.
+SHIFT_REPORT_ESCALATE_OFFSET_MINUTES = int(os.getenv("SHIFT_REPORT_ESCALATE_OFFSET_MINUTES", "90"))
 # Если к этому времени вчерашний отчёт так и не согласован Романом — бот
 # сообщает ему напрямую, независимо от того, сработали ли предыдущие
 # эскалации управляющему.

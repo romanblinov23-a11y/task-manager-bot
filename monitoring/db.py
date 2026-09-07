@@ -186,6 +186,12 @@ def init_schema() -> None:
         # Готовый текст согласия от юристов оператора — если задан, используется
         # вместо текста, собранного автоматически из operator_* полей выше.
         _ensure_column(conn, "market", "custom_consent_text", "custom_consent_text TEXT NOT NULL DEFAULT ''")
+        # Своё время сбора вечернего отчёта на точке (пусто — берём глобальный
+        # дефолт SHIFT_REPORT_START_TIME) и решение Романа, уходит ли отчёт
+        # этой точки в чат финпартнёров вообще (см. /set_evening_report,
+        # bot.market_settings). Не у всех точек финпартнёры есть.
+        _ensure_column(conn, "market", "shift_report_time", "shift_report_time TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "market", "send_to_finance", "send_to_finance INTEGER NOT NULL DEFAULT 1")
         _ensure_column(conn, "report_chat", "mention", "mention TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "report_chat", "message_thread_id", "message_thread_id INTEGER")
         # Разовая миграция данных: блок "Отчёты по смене" появился позже

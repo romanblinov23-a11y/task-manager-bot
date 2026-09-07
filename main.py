@@ -127,7 +127,12 @@ from bot.market_schedule import (
     on_schedule_done,
     on_schedule_market_choice,
 )
-from bot.market_settings import on_market_settings_back, on_market_settings_command, on_market_settings_market_choice
+from bot.market_settings import (
+    on_market_settings_back,
+    on_market_settings_command,
+    on_market_settings_market_choice,
+    on_market_settings_toggle_finance,
+)
 from bot.monitoring_flow import (
     on_monitoring_assign_choice,
     on_monitoring_category_choice,
@@ -199,6 +204,12 @@ from bot.shift_reports import (
     send_shift_report_owner_escalations,
     send_team_morning_messages,
 )
+from bot.shift_report_setup import (
+    on_set_evening_report_command,
+    on_set_evening_report_market_choice,
+    on_set_evening_report_next,
+    on_set_evening_report_reply,
+)
 from bot.shift_schedule_flow import (
     on_set_shift_schedule_cancel,
     on_set_shift_schedule_command,
@@ -217,9 +228,7 @@ from config.settings import (
     MONTHLY_PLAN_REMINDER_TIME,
     OWNER_TELEGRAM_IDS,
     SHIFT_REPORT_DISPATCH_TIME,
-    SHIFT_REPORT_ESCALATE_TIME,
     SHIFT_REPORT_OWNER_ESCALATE_TIME,
-    SHIFT_REPORT_START_TIME,
     SHIFT_SCHEDULE_REMINDER_TIME,
     STATUS_CHECK_TIME,
     TEAM_MORNING_REPORT_TIME,
@@ -388,6 +397,7 @@ def main() -> None:
     app.add_handler(CommandHandler("dashboard_market", on_dashboard_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("dashboard_tasks", on_dashboard_tasks_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_shift_schedule", on_set_shift_schedule_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("set_evening_report", on_set_evening_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_monthly_plan", on_set_monthly_plan_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("register_report_chat", on_register_report_chat, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("report_chats", on_report_chats_command, filters=filters.ChatType.PRIVATE))
@@ -495,6 +505,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_set_shift_schedule_market_choice, pattern=r"^shsched_market:"))
     app.add_handler(CallbackQueryHandler(on_set_shift_schedule_confirm, pattern=r"^shsched_confirm$"))
     app.add_handler(CallbackQueryHandler(on_set_shift_schedule_cancel, pattern=r"^shsched_cancel$"))
+    app.add_handler(CallbackQueryHandler(on_set_evening_report_market_choice, pattern=r"^evrep_market:"))
+    app.add_handler(CallbackQueryHandler(on_set_evening_report_next, pattern=r"^evrep_next:"))
     app.add_handler(CallbackQueryHandler(on_set_monthly_plan_market_choice, pattern=r"^monthplan_market:"))
     app.add_handler(CallbackQueryHandler(on_set_monthly_plan_confirm, pattern=r"^monthplan_confirm$"))
     app.add_handler(CallbackQueryHandler(on_set_monthly_plan_cancel, pattern=r"^monthplan_cancel$"))
@@ -528,6 +540,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_broadcast_confirm, pattern=r"^bcast_confirm$"))
     app.add_handler(CallbackQueryHandler(on_broadcast_cancel, pattern=r"^bcast_cancel$"))
     app.add_handler(CallbackQueryHandler(on_market_settings_market_choice, pattern=r"^msett_market:"))
+    app.add_handler(CallbackQueryHandler(on_market_settings_toggle_finance, pattern=r"^msett_togglefinance:"))
     app.add_handler(CallbackQueryHandler(on_market_settings_back, pattern=r"^msett_back$"))
     app.add_handler(CallbackQueryHandler(on_set_operator_market_choice, pattern=r"^setop_market:"))
     app.add_handler(CallbackQueryHandler(on_set_operator_confirm, pattern=r"^setop_confirm$"))
@@ -556,8 +569,11 @@ def main() -> None:
     app.job_queue.run_daily(_monitoring_reminder_job, time=_parse_time(MONITORING_REMINDER_TIME, TZ))
     app.job_queue.run_daily(_task_retention_job, time=_parse_time(STATUS_CHECK_TIME, TZ))
     app.job_queue.run_daily(_shift_schedule_reminder_job, time=_parse_time(SHIFT_SCHEDULE_REMINDER_TIME, TZ))
-    app.job_queue.run_daily(_shift_report_kickoff_job, time=_parse_time(SHIFT_REPORT_START_TIME, TZ))
-    app.job_queue.run_daily(_shift_report_escalate_job, time=_parse_time(SHIFT_REPORT_ESCALATE_TIME, TZ))
+    # Каждая точка сама задаёт своё время сбора отчёта (/set_evening_report,
+    # market.shift_report_time) — единого времени на всех больше нет, поэтому
+    # кикофф и эскалация сверяются раз в минуту, а не по одному общему run_daily.
+    app.job_queue.run_repeating(_shift_report_kickoff_job, interval=60, first=0)
+    app.job_queue.run_repeating(_shift_report_escalate_job, interval=60, first=0)
     app.job_queue.run_daily(_shift_report_owner_escalate_job, time=_parse_time(SHIFT_REPORT_OWNER_ESCALATE_TIME, TZ))
     app.job_queue.run_daily(_shift_report_dispatch_job, time=_parse_time(SHIFT_REPORT_DISPATCH_TIME, TZ))
     app.job_queue.run_daily(_team_morning_report_job, time=_parse_time(TEAM_MORNING_REPORT_TIME, TZ))

@@ -1,3 +1,4 @@
+from config.settings import SHIFT_REPORT_START_TIME
 from monitoring.db import get_connection
 
 
@@ -71,6 +72,36 @@ def has_consent_text_ready(market: dict) -> bool:
     """Можно ли уже показать стажёру текст согласия — либо загружен
     готовый текст от юристов, либо заполнены реквизиты для автогенерации."""
     return bool(market.get("custom_consent_text")) or has_operator_info(market)
+
+
+def set_market_shift_report_time(market_id: int, time_str: str) -> None:
+    """Своё время начала сбора вечернего отчёта на точке (управляющий
+    задаёт через /set_evening_report) — точки закрываются в разное время,
+    единого времени на всех не бывает. Пустая строка возвращает к
+    глобальному дефолту SHIFT_REPORT_START_TIME (см. get_effective_shift_report_time)."""
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE market SET shift_report_time = ? WHERE id = ?", (time_str, market_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_effective_shift_report_time(market: dict) -> str:
+    return market.get("shift_report_time") or SHIFT_REPORT_START_TIME
+
+
+def set_market_send_to_finance(market_id: int, enabled: bool) -> None:
+    """Решает Рома (не Управляющий) — не у каждой точки есть отдельный чат
+    финпартнёров. Когда выключено, отчёт финпартнёрам всё равно приходит
+    Роме, но только для ознакомления — без обязательного согласования и
+    без реальной отправки в чат (см. bot.shift_reports._send_for_owner_approval)."""
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE market SET send_to_finance = ? WHERE id = ?", (1 if enabled else 0, market_id))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def create_market(name: str, city: str = "", our_point_name: str | None = None) -> dict:

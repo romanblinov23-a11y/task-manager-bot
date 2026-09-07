@@ -14,6 +14,7 @@ from bot.monthly_plan_flow import on_set_monthly_plan_reply
 from bot.mytasks_manage import on_mytasks_manage_reply
 from bot.onboarding import on_employee_message
 from bot.report_chat_registration import on_register_report_chat_mention_reply
+from bot.shift_report_setup import on_set_evening_report_reply
 from bot.shift_reports import (
     on_shift_report_edit_reply,
     on_shift_report_more_info_reply,
@@ -89,6 +90,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if await on_set_shift_schedule_reply(update, context):
+        return
+
+    if await on_set_evening_report_reply(update, context):
         return
 
     if await on_set_monthly_plan_reply(update, context):
