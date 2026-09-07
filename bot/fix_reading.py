@@ -3,19 +3,23 @@ from telegram.ext import ContextTypes
 
 from config.timeutil import fmt_date, parse_date, today
 from monitoring.competitors import list_competitors
-from monitoring.managers import is_owner
+from monitoring.managers import get_markets_for_manager, is_market_editor, is_owner
 from monitoring.markets import get_market, list_markets
 from monitoring.readings import get_latest_reading, update_reading
 
-# telegram_user_id (str) владельца -> {"market_id": int, "competitor_id": int, "reading_id": int} —
+# telegram_user_id (str) владельца/управляющего -> {"market_id": int, "competitor_id": int, "reading_id": int} —
 # ждём новую дату для конкретного снятия
 _awaiting_date: dict[str, dict] = {}
 
 
-def _market_pick_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(m["name"], callback_data=f"fixr_market:{m['id']}")] for m in list_markets()]
-    )
+def _available_markets(user_id: int) -> list[dict]:
+    if is_owner(user_id):
+        return list_markets()
+    return get_markets_for_manager(user_id)
+
+
+def _market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"fixr_market:{m['id']}")] for m in markets])
 
 
 def _competitor_pick_keyboard(market_id: int) -> InlineKeyboardMarkup:
@@ -32,28 +36,30 @@ def _competitor_pick_keyboard(market_id: int) -> InlineKeyboardMarkup:
 
 
 async def on_fix_reading_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/fix_reading — владелец точечно исправляет дату последнего снятия
-    конкретной точки, не сбрасывая весь рынок через /reset_monitoring.
-    Нужна, когда снятие однажды внесли с неверной датой (например, в
-    будущем) — раньше это можно было поправить только прямым запросом
-    к базе."""
-    if not is_owner(update.effective_user.id):
+    """/fix_reading — владелец или Управляющий точечно исправляет дату
+    последнего снятия конкретной точки, не сбрасывая весь рынок через
+    /reset_monitoring. Нужна, когда снятие однажды внесли с неверной датой
+    (например, в будущем) — раньше это можно было поправить только прямым
+    запросом к базе."""
+    user = update.effective_user
+    if not is_market_editor(user.id):
+        await update.effective_message.reply_text("Исправлять дату снятия может только владелец или Управляющий рынка.")
         return
-    markets = list_markets()
+    markets = _available_markets(user.id)
     if not markets:
-        await update.effective_message.reply_text("Пока нет ни одного рынка.")
+        await update.effective_message.reply_text("Нет доступных рынков — сначала пройдите онбординг через /start.")
         return
-    await update.effective_message.reply_text("На каком рынке исправить дату снятия?", reply_markup=_market_pick_keyboard())
+    await update.effective_message.reply_text("На каком рынке исправить дату снятия?", reply_markup=_market_pick_keyboard(markets))
 
 
 async def on_fix_reading_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if not is_owner(query.from_user.id):
+    if not is_market_editor(query.from_user.id):
         await query.answer()
         return
     market_id = int(query.data.split(":", 1)[1])
     market = get_market(market_id)
-    if not market:
+    if not market or market_id not in {m["id"] for m in _available_markets(query.from_user.id)}:
         await query.answer("Рынок не найден", show_alert=True)
         return
 
@@ -67,7 +73,7 @@ async def on_fix_reading_market_choice(update: Update, context: ContextTypes.DEF
 
 async def on_fix_reading_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if not is_owner(query.from_user.id):
+    if not is_market_editor(query.from_user.id):
         await query.answer()
         return
     _, market_id_str, competitor_id_str = query.data.split(":")

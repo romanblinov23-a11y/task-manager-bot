@@ -16,6 +16,7 @@ from monitoring.managers import (
     get_markets_for_manager,
     has_reports_access,
     is_owner,
+    is_reports_editor,
     market_reports_enabled,
 )
 from monitoring.markets import get_effective_shift_report_time, get_market, list_markets
@@ -806,147 +807,10 @@ async def on_shift_report_manual_market_choice(update: Update, context: ContextT
     await _start_manual_report(query.message, market)
 
 
-def _send_now_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"shrep_sendmarket:{m['id']}")] for m in markets])
-
-
-async def _send_report_now(bot: Bot, message, market: dict) -> None:
-    date_iso = tz_today().isoformat()
-    report = get_report_by_date(market["id"], date_iso)
-    if not report:
-        await message.reply_text(f"На «{market['name']}» ещё нет отчёта за сегодня.")
-        return
-
-    finance_chat = get_report_chat(market["id"], "finance")
-    team_chat = get_report_chat(market["id"], "team")
-    if not finance_chat and not team_chat:
-        await message.reply_text(f"Для «{market['name']}» не привязан ни один чат — сначала /register_report_chat.")
-        return
-
-    sent = []
-    if finance_chat and market.get("send_to_finance", 1):
-        text = render_finance_report(market, date_iso, report["data"])
-        if finance_chat.get("mention"):
-            text = f"{finance_chat['mention']}\n\n{text}"
-        try:
-            await bot.send_message(
-                chat_id=finance_chat["chat_id"], text=text, message_thread_id=finance_chat.get("message_thread_id")
-            )
-            sent.append("финпартнёры")
-        except Exception as e:
-            await message.reply_text(f"⚠️ Не смог отправить в чат финпартнёров: {e}")
-
-    if team_chat:
-        text = render_team_report(market, date_iso, report["data"])
-        if team_chat.get("mention"):
-            text = f"{team_chat['mention']}\n\n{text}"
-        try:
-            await bot.send_message(
-                chat_id=team_chat["chat_id"], text=text, parse_mode="HTML", message_thread_id=team_chat.get("message_thread_id")
-            )
-            sent.append("команда точки")
-        except Exception as e:
-            await message.reply_text(f"⚠️ Не смог отправить в чат команды точки: {e}")
-
-    if sent:
-        await message.reply_text(
-            f"✅ Отправил сегодняшний отчёт по «{market['name']}» в: {', '.join(sent)}.\n"
-            f"Статус отчёта (сейчас: {report['status']}) не менялся — автоматическая рассылка завтра в 10:00 всё равно сработает как обычно."
-        )
-
-
-async def on_send_shift_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/send_shift_report — владелец сразу отправляет сегодняшний отчёт в
-    привязанные чаты (финпартнёры/команда точки), не дожидаясь
-    автоматической рассылки в 10:00 следующего дня — удобно, чтобы
-    проверить формат. Статус отчёта при этом не меняется."""
-    if not is_owner(update.effective_user.id):
-        return
-    markets = list_markets()
-    if not markets:
-        await update.effective_message.reply_text("Пока нет ни одного рынка.")
-        return
-    if len(markets) == 1:
-        await _send_report_now(context.bot, update.effective_message, markets[0])
-        return
-    await update.effective_message.reply_text(
-        "По какому рынку отправить сегодняшний отчёт?", reply_markup=_send_now_market_pick_keyboard(markets)
-    )
-
-
-async def on_send_shift_report_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    if not is_owner(query.from_user.id):
-        await query.answer()
-        return
-    market_id = int(query.data.split(":", 1)[1])
-    market = get_market(market_id)
-    if not market:
-        await query.answer("Рынок не найден", show_alert=True)
-        return
-    await query.answer()
-    await query.edit_message_text(f"Рынок: {market['name']}")
-    await _send_report_now(context.bot, query.message, market)
-
-
-def _send_morning_now_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"shrep_sendmorning:{m['id']}")] for m in markets])
-
-
-async def _send_morning_report_now(bot: Bot, message, market: dict) -> None:
-    date_iso = tz_today().isoformat()
-    team_chat = get_report_chat(market["id"], "team")
-    if not team_chat:
-        await message.reply_text(f"Для «{market['name']}» не привязан чат команды точки — сначала /register_report_chat.")
-        return
-
-    text = render_team_morning_message(market, date_iso)
-    if text is None:
-        await message.reply_text(f"На «{market['name']}» ещё не загружен план на сегодня — сначала /set_monthly_plan.")
-        return
-
-    if team_chat.get("mention"):
-        text = f"{team_chat['mention']}\n\n{text}"
-    try:
-        await bot.send_message(
-            chat_id=team_chat["chat_id"], text=text, parse_mode="HTML", message_thread_id=team_chat.get("message_thread_id")
-        )
-        await message.reply_text(f"✅ Отправил утреннее напоминание по «{market['name']}» в чат команды точки.")
-    except Exception as e:
-        await message.reply_text(f"⚠️ Не смог отправить в чат команды точки: {e}")
-
-
-async def on_send_morning_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/send_morning_report — владелец разово шлёт сегодняшнее утреннее
-    напоминание в чат команды точки прямо сейчас, не дожидаясь 07:00 —
-    удобно, чтобы проверить формат/план, не трогая обычное расписание."""
-    if not is_owner(update.effective_user.id):
-        return
-    markets = list_markets()
-    if not markets:
-        await update.effective_message.reply_text("Пока нет ни одного рынка.")
-        return
-    if len(markets) == 1:
-        await _send_morning_report_now(context.bot, update.effective_message, markets[0])
-        return
-    await update.effective_message.reply_text(
-        "По какому рынку отправить утреннее напоминание?", reply_markup=_send_morning_now_market_pick_keyboard(markets)
-    )
-
-
-async def on_send_morning_report_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    if not is_owner(query.from_user.id):
-        await query.answer()
-        return
-    market_id = int(query.data.split(":", 1)[1])
-    market = get_market(market_id)
-    if not market:
-        await query.answer("Рынок не найден", show_alert=True)
-        return
-    await query.answer()
-    await query.edit_message_text(f"Рынок: {market['name']}")
-    await _send_morning_report_now(context.bot, query.message, market)
+def _reset_available_markets(user_id: int) -> list[dict]:
+    if is_owner(user_id):
+        return list_markets()
+    return get_markets_for_manager(user_id)
 
 
 def _reset_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
@@ -965,14 +829,19 @@ def _reset_confirm_keyboard(market_id: int) -> InlineKeyboardMarkup:
 
 
 async def on_reset_shift_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/reset_shift_report — владелец удаляет сегодняшний отчёт целиком
-    (собранные ответы или согласование), чтобы прогнать /shift_report
-    заново — например, для тестирования."""
-    if not is_owner(update.effective_user.id):
+    """/reset_shift_report — владелец или Управляющий удаляет сегодняшний
+    отчёт целиком (собранные ответы или согласование), чтобы прогнать
+    /shift_report заново — например, если сегодняшний отчёт завели по
+    ошибке или для тестирования."""
+    user = update.effective_user
+    if not is_reports_editor(user.id):
+        await update.effective_message.reply_text(
+            "Сбрасывать отчёт может только владелец или Управляющий с выданным блоком «Отчёты по смене»."
+        )
         return
-    markets = list_markets()
+    markets = _reset_available_markets(user.id)
     if not markets:
-        await update.effective_message.reply_text("Пока нет ни одного рынка.")
+        await update.effective_message.reply_text("Нет доступных рынков — сначала пройдите онбординг через /start.")
         return
     await update.effective_message.reply_text(
         "По какому рынку сбросить сегодняшний отчёт?", reply_markup=_reset_market_pick_keyboard(markets)
@@ -981,12 +850,12 @@ async def on_reset_shift_report_command(update: Update, context: ContextTypes.DE
 
 async def on_reset_shift_report_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if not is_owner(query.from_user.id):
+    if not is_reports_editor(query.from_user.id):
         await query.answer()
         return
     market_id = int(query.data.split(":", 1)[1])
     market = get_market(market_id)
-    if not market:
+    if not market or market_id not in {m["id"] for m in _reset_available_markets(query.from_user.id)}:
         await query.answer("Рынок не найден", show_alert=True)
         return
     date_iso = tz_today().isoformat()
@@ -1003,12 +872,12 @@ async def on_reset_shift_report_market_choice(update: Update, context: ContextTy
 
 async def on_reset_shift_report_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if not is_owner(query.from_user.id):
+    if not is_reports_editor(query.from_user.id):
         await query.answer()
         return
     market_id = int(query.data.split(":", 1)[1])
     market = get_market(market_id)
-    if not market:
+    if not market or market_id not in {m["id"] for m in _reset_available_markets(query.from_user.id)}:
         await query.answer("Рынок не найден", show_alert=True)
         return
     await query.answer("Сбрасываю…")
@@ -1018,7 +887,7 @@ async def on_reset_shift_report_confirm(update: Update, context: ContextTypes.DE
 
 async def on_reset_shift_report_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if not is_owner(query.from_user.id):
+    if not is_reports_editor(query.from_user.id):
         await query.answer()
         return
     await query.answer()

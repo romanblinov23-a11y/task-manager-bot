@@ -77,6 +77,7 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
             commands.append(BotCommand("add_competitor", "Добавить конкурента на рынок"))
             commands.append(BotCommand("close_competitor", "Закрыть/открыть конкурента"))
             commands.append(BotCommand("schedule", "Настроить дни мониторинга рынка"))
+            commands.append(BotCommand("fix_reading", "Исправить дату снятия у точки"))
         commands.append(BotCommand("monitoring", "Провести мониторинг конкурентов"))
         commands.append(BotCommand("dashboard_market", "Дашборд по рынку"))
     if BLOCK_REPORTS in blocks:
@@ -84,6 +85,7 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
             commands.append(BotCommand("set_shift_schedule", "Загрузить график смен на 2 недели"))
             commands.append(BotCommand("set_monthly_plan", "Загрузить план по выручке/чекам на месяц"))
             commands.append(BotCommand("set_evening_report", "Настроить вечерний отчёт: время сбора и чек-лист"))
+            commands.append(BotCommand("reset_shift_report", "⚠️ Сбросить сегодняшний отчёт по смене"))
         commands.append(BotCommand("shift_report", "Внести отчёт по смене принудительно"))
     if BLOCK_MEETINGS in blocks and manager["position"] == "Управляющий":
         commands.append(BotCommand("set_meeting_schedule", "Настроить ритм собраний"))

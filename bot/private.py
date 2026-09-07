@@ -4,7 +4,6 @@ from telegram.ext import ContextTypes
 from bot.competitors import on_add_competitor_reply
 from bot.confirmation import on_deadline_reply, on_edit_reply, send_confirmation_cards
 from bot.fix_reading import on_fix_reading_reply
-from bot.import_readings import on_import_readings_reply
 from bot.manager_admin import on_manager_admin_reply
 from bot.market_operator import on_set_consent_text_reply, on_set_operator_reply
 from bot.meetings import on_meeting_agenda_reply, on_meeting_postpone_reply, on_meeting_schedule_reply
@@ -75,9 +74,6 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if await on_manager_admin_reply(update, context):
-        return
-
-    if await on_import_readings_reply(update, context):
         return
 
     if await on_fix_reading_reply(update, context):

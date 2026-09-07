@@ -70,43 +70,6 @@ def record_reading(
         conn.close()
 
 
-def import_historical_reading(
-    competitor_id: int, avg_checks_per_day: float, created_by: int, reading_at: str, note: str = ""
-) -> dict:
-    """Вставляет/обновляет снятие на КОНКРЕТНУЮ историческую дату — для
-    массового импорта накопленных данных прошлых недель (/import_readings).
-    В отличие от record_reading, дубль ищется по точной дате reading_at, а
-    не по "последнему снятию за неделю от сегодня" — та логика рассчитана
-    на обычный еженедельный цикл и при бэкфилле задним числом затёрла бы
-    уже внесённые свежие снятия текущей недели."""
-    conn = get_connection()
-    try:
-        existing = conn.execute(
-            "SELECT id FROM daily_avg_reading WHERE competitor_id = ? AND reading_at = ?",
-            (competitor_id, reading_at),
-        ).fetchone()
-        if existing:
-            conn.execute(
-                "UPDATE daily_avg_reading SET avg_checks_per_day = ?, created_by = ?, note = ? WHERE id = ?",
-                (avg_checks_per_day, created_by, note, existing["id"]),
-            )
-            reading_id = existing["id"]
-        else:
-            cursor = conn.execute(
-                """
-                INSERT INTO daily_avg_reading (competitor_id, reading_at, avg_checks_per_day, created_by, note)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (competitor_id, reading_at, avg_checks_per_day, created_by, note),
-            )
-            reading_id = cursor.lastrowid
-        conn.commit()
-        row = conn.execute("SELECT * FROM daily_avg_reading WHERE id = ?", (reading_id,)).fetchone()
-        return dict(row)
-    finally:
-        conn.close()
-
-
 def update_reading(reading_id: int, *, reading_at: str | None = None, avg_checks_per_day: float | None = None) -> None:
     """Точечно исправляет уже сохранённое снятие — дату и/или значение.
     Нужна владельцу, если снятие один раз внесли неверно (например, с

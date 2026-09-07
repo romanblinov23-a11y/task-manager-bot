@@ -44,12 +44,6 @@ from bot.data_export import (
 from bot.dashboard_tasks_cmd import on_dashboard_tasks_command
 from bot.fix_reading import on_fix_reading_command, on_fix_reading_market_choice, on_fix_reading_pick
 from bot.handlers import on_group_message
-from bot.import_readings import (
-    on_import_readings_cancel,
-    on_import_readings_command,
-    on_import_readings_confirm,
-    on_import_readings_market_choice,
-)
 from bot.manager_admin import (
     on_add_project_command,
     on_manager_approve,
@@ -88,6 +82,16 @@ from bot.manager_admin import (
     on_reset_monitoring_market_choice,
     sync_employee_commands,
 )
+from bot.meetings import (
+    on_meeting_cancel,
+    on_meeting_confirm,
+    on_meeting_invite_roman_choice,
+    on_meeting_postpone,
+    on_meeting_schedule_market_choice,
+    on_meeting_schedule_type_choice,
+    on_set_meeting_schedule_command,
+    send_meeting_confirmations,
+)
 from bot.messaging import (
     on_broadcast_block_choice,
     on_broadcast_cancel,
@@ -101,16 +105,7 @@ from bot.messaging import (
     on_message_command,
     on_message_pick,
 )
-from bot.meetings import (
-    on_meeting_cancel,
-    on_meeting_confirm,
-    on_meeting_invite_roman_choice,
-    on_meeting_postpone,
-    on_meeting_schedule_market_choice,
-    on_meeting_schedule_type_choice,
-    on_set_meeting_schedule_command,
-    send_meeting_confirmations,
-)
+from bot.messaging_menu import on_messaging_choice, on_messaging_command
 from bot.market_operator import (
     on_set_consent_text_cancel,
     on_set_consent_text_command,
@@ -179,10 +174,6 @@ from bot.shift_reports import (
     on_reset_shift_report_command,
     on_reset_shift_report_confirm,
     on_reset_shift_report_market_choice,
-    on_send_morning_report_command,
-    on_send_morning_report_market_choice,
-    on_send_shift_report_command,
-    on_send_shift_report_market_choice,
     on_shift_report_absent,
     on_shift_report_command,
     on_shift_report_edit,
@@ -324,15 +315,8 @@ _ROMAN_COMMANDS = [
     BotCommand("managers", "Сотрудники бота и привязки чатов"),
     BotCommand("add_project", "Добавить проект/точку Surf"),
     BotCommand("market_settings", "Настройка рынка: ПДн, финпартнёры, чаты отчётов"),
-    BotCommand("import_readings", "Импорт исторических снятий по рынку"),
-    BotCommand("fix_reading", "Исправить дату снятия у точки"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
-    BotCommand("send_shift_report", "Отправить сегодняшний отчёт сейчас (проверка формата)"),
-    BotCommand("send_morning_report", "Отправить утреннее напоминание команде сейчас (проверка формата)"),
-    BotCommand("reset_shift_report", "⚠️ Сбросить сегодняшний отчёт по смене"),
-    BotCommand("message", "Написать в личку сотруднику через бота"),
-    BotCommand("message_chat", "Написать в зарегистрированный чат через бота"),
-    BotCommand("broadcast", "Разослать сообщение группе сотрудников"),
+    BotCommand("messaging", "Написать сотруднику, в чат или разослать группе"),
     BotCommand("regulations", "Регламенты работы с ботом"),
     BotCommand("help", "Список команд"),
 ]
@@ -379,7 +363,6 @@ def main() -> None:
     app.add_handler(CommandHandler("managers", on_managers_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("add_project", on_add_project_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("reset_monitoring", on_reset_monitoring_command, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("import_readings", on_import_readings_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("fix_reading", on_fix_reading_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("add_competitor", on_add_competitor_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("close_competitor", on_close_competitor_command, filters=filters.ChatType.PRIVATE))
@@ -394,9 +377,8 @@ def main() -> None:
     app.add_handler(CommandHandler("register_report_chat", on_register_report_chat, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("report_chats", on_report_chats_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("shift_report", on_shift_report_command, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("send_shift_report", on_send_shift_report_command, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("send_morning_report", on_send_morning_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("reset_shift_report", on_reset_shift_report_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("messaging", on_messaging_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("message", on_message_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("message_chat", on_message_chat_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("broadcast", on_broadcast_command, filters=filters.ChatType.PRIVATE))
@@ -458,9 +440,6 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_reset_monitoring_cancel, pattern=r"^reset_monitoring_cancel$"))
     app.add_handler(CallbackQueryHandler(on_fix_reading_market_choice, pattern=r"^fixr_market:"))
     app.add_handler(CallbackQueryHandler(on_fix_reading_pick, pattern=r"^fixr_pick:"))
-    app.add_handler(CallbackQueryHandler(on_import_readings_market_choice, pattern=r"^impr_market:"))
-    app.add_handler(CallbackQueryHandler(on_import_readings_confirm, pattern=r"^impr_confirm$"))
-    app.add_handler(CallbackQueryHandler(on_import_readings_cancel, pattern=r"^impr_cancel$"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_market_choice, pattern=r"^addc_market:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_format_choice, pattern=r"^addc_format:"))
     app.add_handler(CallbackQueryHandler(on_add_competitor_reading_choice, pattern=r"^addc_reading:"))
@@ -509,8 +488,6 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_report_chats_view, pattern=r"^shrc_view:"))
     app.add_handler(CallbackQueryHandler(on_report_chats_unbind, pattern=r"^shrc_unbind:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_manual_market_choice, pattern=r"^shrep_manualmarket:"))
-    app.add_handler(CallbackQueryHandler(on_send_shift_report_market_choice, pattern=r"^shrep_sendmarket:"))
-    app.add_handler(CallbackQueryHandler(on_send_morning_report_market_choice, pattern=r"^shrep_sendmorning:"))
     app.add_handler(CallbackQueryHandler(on_reset_shift_report_market_choice, pattern=r"^shrep_resetmarket:"))
     app.add_handler(CallbackQueryHandler(on_reset_shift_report_confirm, pattern=r"^shrep_resetconfirm:"))
     app.add_handler(CallbackQueryHandler(on_reset_shift_report_cancel, pattern=r"^shrep_resetcancel$"))
@@ -524,6 +501,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_shift_report_edit_cancel, pattern=r"^shrep_editcancel:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_edit, pattern=r"^shrep_edit:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_more_info, pattern=r"^shrep_moreinfo:"))
+    app.add_handler(CallbackQueryHandler(on_messaging_choice, pattern=r"^msgmenu:"))
     app.add_handler(CallbackQueryHandler(on_message_pick, pattern=r"^msg_pick:"))
     app.add_handler(CallbackQueryHandler(on_message_chat_pick, pattern=r"^msgchat_pick:"))
     app.add_handler(CallbackQueryHandler(on_broadcast_scope_choice, pattern=r"^bcast_scope:"))
