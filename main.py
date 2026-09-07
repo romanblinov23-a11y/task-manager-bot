@@ -220,6 +220,7 @@ from bot.shift_schedule_flow import (
 )
 from bot.status_cycle import on_status_button, run_status_check
 from bot.task_manage import on_employee_command, on_status_command, on_task_manage_callback
+from bot.task_work import on_task_work_choice, on_task_work_command
 from bot.weekly_report import on_weekly_command, send_weekly_report
 from config.settings import (
     DAILY_REPORT_TIME,
@@ -319,23 +320,13 @@ def _parse_time(value: str, tzinfo) -> dt_time:
 
 
 _ROMAN_COMMANDS = [
-    BotCommand("status", "Открытые задачи по проекту"),
-    BotCommand("employee", "Задачи сотрудника по всем проектам"),
-    BotCommand("stuck", "Подвисшие задачи"),
-    BotCommand("needhelp", "Задачи, где нужна помощь"),
-    BotCommand("dashboard_tasks", "Полная аналитика по задачам (все проекты)"),
-    BotCommand("weekly", "Еженедельная аналитика по запросу"),
+    BotCommand("task_work", "Работа с задачами: статус, сотрудник, подвисшие, дашборд, неделя"),
     BotCommand("managers", "Сотрудники бота и привязки чатов"),
     BotCommand("add_project", "Добавить проект/точку Surf"),
-    BotCommand("market_settings", "Настройка рынка: ПДн, мониторинг, смены, план, встречи, отчёты"),
+    BotCommand("market_settings", "Настройка рынка: ПДн, финпартнёры, чаты отчётов"),
     BotCommand("import_readings", "Импорт исторических снятий по рынку"),
     BotCommand("fix_reading", "Исправить дату снятия у точки"),
-    BotCommand("add_competitor", "Добавить конкурента на рынок"),
-    BotCommand("close_competitor", "Закрыть/открыть конкурента"),
-    BotCommand("monitoring", "Провести мониторинг конкурентов"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
-    BotCommand("register_report_chat", "Привязать чат к рассылке отчётов смены"),
-    BotCommand("shift_report", "Внести отчёт по смене принудительно"),
     BotCommand("send_shift_report", "Отправить сегодняшний отчёт сейчас (проверка формата)"),
     BotCommand("send_morning_report", "Отправить утреннее напоминание команде сейчас (проверка формата)"),
     BotCommand("reset_shift_report", "⚠️ Сбросить сегодняшний отчёт по смене"),
@@ -376,6 +367,7 @@ def main() -> None:
     app.add_handler(CommandHandler("start", on_start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("help", on_help, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("weekly", on_weekly_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("task_work", on_task_work_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("status", on_status_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("employee", on_employee_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("stuck", on_stuck_command, filters=filters.ChatType.PRIVATE))
@@ -501,6 +493,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_dashboard_market_choice, pattern=r"^dash_market:"))
     app.add_handler(CallbackQueryHandler(on_dashboard_aggregate_choice, pattern=r"^dash_all$"))
     app.add_handler(CallbackQueryHandler(on_task_manage_callback, pattern=r"^tmg:"))
+    app.add_handler(CallbackQueryHandler(on_task_work_choice, pattern=r"^taskwork:"))
     app.add_handler(CallbackQueryHandler(on_mytasks_callback, pattern=r"^myt:"))
     app.add_handler(CallbackQueryHandler(on_set_shift_schedule_market_choice, pattern=r"^shsched_market:"))
     app.add_handler(CallbackQueryHandler(on_set_shift_schedule_confirm, pattern=r"^shsched_confirm$"))

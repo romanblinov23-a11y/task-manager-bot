@@ -10,11 +10,13 @@ def _market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
 
 
 def _actions_keyboard(market: dict) -> InlineKeyboardMarkup:
-    """Каждая кнопка (кроме переключателя финпартнёров) использует ровно тот
-    же callback_data, что и шаг «рынок выбран» соответствующей отдельной
-    команды (setop_market:, sched_market: и т.д.) — так все существующие
-    хендлеры и их права доступа переиспользуются без изменений, здесь
-    просто пропускается отдельный экран выбора рынка."""
+    """Только то, что реально принадлежит владельцу (юрлицо-оператор ПДн,
+    отношения с финпартнёрами) — настройка конкурентов, смен, плана и
+    собраний работает через свои отдельные команды, которыми пользуется
+    Управляющий (у него они в его личном меню), не Рома. Каждая кнопка
+    использует ровно тот же callback_data, что и шаг «рынок выбран»
+    соответствующей отдельной команды (setop_market: и т.д.) — так права
+    доступа переиспользуются без изменений."""
     market_id = market["id"]
     finance_on = market.get("send_to_finance", 1)
     finance_label = "💰 Финпартнёры: включено (нажми, чтобы выключить)" if finance_on else "💰 Финпартнёры: выключено (нажми, чтобы включить)"
@@ -24,13 +26,6 @@ def _actions_keyboard(market: dict) -> InlineKeyboardMarkup:
             [InlineKeyboardButton("📄 Текст согласия", callback_data=f"setconsent_market:{market_id}")],
             [InlineKeyboardButton("📤 Экспорт данных сотрудников", callback_data=f"expdata_market:{market_id}")],
             [InlineKeyboardButton("🔁 Запросить согласия у всех", callback_data=f"reqconsent_market:{market_id}")],
-            [InlineKeyboardButton("🎯 Своя точка (мониторинг)", callback_data=f"ownpt_market:{market_id}")],
-            [InlineKeyboardButton("🗓 Дни опроса конкурентов", callback_data=f"sched_market:{market_id}")],
-            [InlineKeyboardButton("♻️ Сбросить конкурентов", callback_data=f"reset_monitoring_market:{market_id}")],
-            [InlineKeyboardButton("📅 График смен", callback_data=f"shsched_market:{market_id}")],
-            [InlineKeyboardButton("💰 Финплан на месяц", callback_data=f"monthplan_market:{market_id}")],
-            [InlineKeyboardButton("🌙 Настроить вечерний отчёт", callback_data=f"evrep_market:{market_id}")],
-            [InlineKeyboardButton("🤝 Ритм собраний", callback_data=f"meetsched_market:{market_id}")],
             [InlineKeyboardButton(finance_label, callback_data=f"msett_togglefinance:{market_id}")],
             [InlineKeyboardButton("💰 Чат финпартнёров", callback_data=f"shrc_view:{market_id}:finance")],
             [InlineKeyboardButton("👥 Чат команды точки", callback_data=f"shrc_view:{market_id}:team")],
@@ -40,9 +35,10 @@ def _actions_keyboard(market: dict) -> InlineKeyboardMarkup:
 
 
 async def on_market_settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/market_settings — единая точка входа во все настройки конкретного
-    рынка (ПДн/согласия, мониторинг конкурентов, смены и план, встречи,
-    чаты отчётов), вместо десятка отдельных команд в меню владельца."""
+    """/market_settings — то, что по-настоящему решает владелец: реквизиты
+    юрлица-оператора ПДн, текст согласия, экспорт данных при передаче
+    точки заказчику, и подключён ли рынок к чату финпартнёров. Настройку
+    конкурентов/смен/плана/собраний ведёт Управляющий своими командами."""
     if not is_owner(update.effective_user.id):
         return
     markets = list_markets()
