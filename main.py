@@ -127,6 +127,7 @@ from bot.market_schedule import (
     on_schedule_done,
     on_schedule_market_choice,
 )
+from bot.market_settings import on_market_settings_back, on_market_settings_command, on_market_settings_market_choice
 from bot.monitoring_flow import (
     on_monitoring_assign_choice,
     on_monitoring_category_choice,
@@ -317,27 +318,17 @@ _ROMAN_COMMANDS = [
     BotCommand("weekly", "Еженедельная аналитика по запросу"),
     BotCommand("managers", "Сотрудники бота и привязки чатов"),
     BotCommand("add_project", "Добавить проект/точку Surf"),
-    BotCommand("reset_monitoring", "⚠️ Обнулить конкурентов на выбранном рынке"),
+    BotCommand("market_settings", "Настройка рынка: ПДн, мониторинг, смены, план, встречи, отчёты"),
     BotCommand("import_readings", "Импорт исторических снятий по рынку"),
     BotCommand("fix_reading", "Исправить дату снятия у точки"),
     BotCommand("add_competitor", "Добавить конкурента на рынок"),
     BotCommand("close_competitor", "Закрыть/открыть конкурента"),
-    BotCommand("set_own_point", "Исправить, какая точка на рынке наша"),
-    BotCommand("schedule", "Настроить дни мониторинга рынка"),
     BotCommand("monitoring", "Провести мониторинг конкурентов"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
-    BotCommand("set_shift_schedule", "Загрузить график смен на 2 недели"),
-    BotCommand("set_monthly_plan", "Загрузить план по выручке/чекам на месяц"),
     BotCommand("register_report_chat", "Привязать чат к рассылке отчётов смены"),
-    BotCommand("report_chats", "Посмотреть/отвязать чаты рассылки отчётов"),
     BotCommand("shift_report", "Внести отчёт по смене принудительно"),
     BotCommand("send_shift_report", "Отправить сегодняшний отчёт сейчас (проверка формата)"),
     BotCommand("send_morning_report", "Отправить утреннее напоминание команде сейчас (проверка формата)"),
-    BotCommand("set_meeting_schedule", "Настроить ритм собраний"),
-    BotCommand("set_operator", "Указать реквизиты юрлица-оператора ПДн для рынка"),
-    BotCommand("set_consent_text", "Загрузить готовый текст согласия на ПДн от юристов"),
-    BotCommand("export_operator_data", "Выгрузить/удалить персональные данные рынка (передача заказчику)"),
-    BotCommand("request_consents", "Разослать запрос согласия на ПДн сотрудникам рынка"),
     BotCommand("reset_shift_report", "⚠️ Сбросить сегодняшний отчёт по смене"),
     BotCommand("message", "Написать в личку сотруднику через бота"),
     BotCommand("message_chat", "Написать в зарегистрированный чат через бота"),
@@ -408,6 +399,7 @@ def main() -> None:
     app.add_handler(CommandHandler("message_chat", on_message_chat_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("broadcast", on_broadcast_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_meeting_schedule", on_set_meeting_schedule_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("market_settings", on_market_settings_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_operator", on_set_operator_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_consent_text", on_set_consent_text_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("export_operator_data", on_export_operator_data_command, filters=filters.ChatType.PRIVATE))
@@ -535,6 +527,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_broadcast_block_choice, pattern=r"^bcast_block:"))
     app.add_handler(CallbackQueryHandler(on_broadcast_confirm, pattern=r"^bcast_confirm$"))
     app.add_handler(CallbackQueryHandler(on_broadcast_cancel, pattern=r"^bcast_cancel$"))
+    app.add_handler(CallbackQueryHandler(on_market_settings_market_choice, pattern=r"^msett_market:"))
+    app.add_handler(CallbackQueryHandler(on_market_settings_back, pattern=r"^msett_back$"))
     app.add_handler(CallbackQueryHandler(on_set_operator_market_choice, pattern=r"^setop_market:"))
     app.add_handler(CallbackQueryHandler(on_set_operator_confirm, pattern=r"^setop_confirm$"))
     app.add_handler(CallbackQueryHandler(on_set_operator_cancel, pattern=r"^setop_cancel$"))
