@@ -133,6 +133,7 @@ from bot.monthly_plan_flow import (
     send_monthly_plan_requests,
 )
 from bot.onboarding import on_force_onboard, on_help, on_project_choice, on_role_choice, on_start
+from bot.trainee_onboarding import on_trainee_advance, on_trainee_consent, on_trainee_graduate
 from bot.private import on_private_document, on_private_text, on_project_selected
 from bot.regulations import on_regulations_command, on_regulations_view
 from bot.mytasks_manage import on_mytasks_callback, on_mytasks_command
@@ -211,6 +212,7 @@ from config.settings import (
 from config.timeutil import today as tz_today
 from monitoring.db import init_schema as init_monitoring_schema
 from monitoring.managers import list_managers
+from personal_data.db import init_schema as init_personal_data_schema
 from tasks.db import init_schema as init_tasks_schema
 from tasks.retention import purge_closed_tasks
 
@@ -346,6 +348,7 @@ async def _set_bot_commands(app) -> None:
 def main() -> None:
     init_monitoring_schema()
     init_tasks_schema()
+    init_personal_data_schema()
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_set_bot_commands).build()
 
     app.add_handler(CommandHandler("start", on_start, filters=filters.ChatType.PRIVATE))
@@ -396,6 +399,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_status_button, pattern=r"^status:"))
     app.add_handler(CallbackQueryHandler(on_project_choice, pattern=r"^onb_project:"))
     app.add_handler(CallbackQueryHandler(on_role_choice, pattern=r"^onb_role:"))
+    app.add_handler(CallbackQueryHandler(on_trainee_consent, pattern=r"^trainee_consent:"))
+    app.add_handler(CallbackQueryHandler(on_trainee_advance, pattern=r"^trainee_advance:"))
+    app.add_handler(CallbackQueryHandler(on_trainee_graduate, pattern=r"^trainee_graduate:"))
     app.add_handler(CallbackQueryHandler(on_manager_select, pattern=r"^mgr_select:"))
     app.add_handler(CallbackQueryHandler(on_manager_nudge, pattern=r"^mgr_nudge:"))
     app.add_handler(CallbackQueryHandler(on_manager_legacy_remove_confirm, pattern=r"^mgr_legacy_remove_confirm:"))

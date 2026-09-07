@@ -485,12 +485,15 @@ async def notify_owners_of_pending(
     на рынке нет Управляющего), либо после того, как Управляющий рынка
     одобрил заявку (см. notify_supervisor_of_pending, bot.manager_admin.
     on_manager_supervisor_approve)."""
+    if position == "Стажёр":
+        approve_note = "При подтверждении блоки бота не выдаются — вместо этого начнётся программа онбординга."
+    else:
+        approve_note = "При подтверждении будут выданы блоки бота по умолчанию — доступные блоки можно изменить позже через /managers."
     text = (
         f"🆕 Новая заявка на доступ к боту:\n"
         f"{name} — «{position}», проект «{market_name}».\n"
         f"Telegram ID: {telegram_user_id}\n\n"
-        "При подтверждении будут выданы блоки бота по умолчанию — доступные блоки "
-        "можно изменить позже через /managers."
+        f"{approve_note}"
     )
     for owner_id in OWNER_TELEGRAM_IDS:
         try:

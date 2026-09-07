@@ -10,6 +10,7 @@ from bot.onboarding import (
     request_registration,
 )
 from bot.regulations import send_next_regulation
+from bot.trainee_onboarding import start_trainee_track
 from config.chats import get_all_bindings, get_all_thread_bindings, get_project_for_chat, register_chat, unregister_chat
 from config.settings import OWNER_TELEGRAM_IDS
 from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS, BLOCK_MEETINGS, BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_TASKS, MANAGER_POSITIONS
@@ -585,6 +586,18 @@ async def on_manager_approve(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     if manager["position"] == "Управляющий" and await _check_supervisor_conflict(query, uid):
+        return
+
+    if manager["position"] == "Стажёр":
+        # "Стажёр" не выбирает блоки — доступа к направлениям бота у этой
+        # позиции нет вообще, вместо этого сразу запускается программа
+        # онбординга (согласие на ПДн → этапы, см. bot.trainee_onboarding).
+        set_manager_blocks(uid, [])
+        approve_manager(uid)
+        await query.answer("Подтверждено")
+        await query.edit_message_text(f"✅ Доступ подтверждён для {manager['name']} (ID {uid}) — «Стажёр».")
+        await sync_employee_commands(context.bot, uid)
+        await start_trainee_track(context.bot, uid)
         return
 
     owner_id = str(query.from_user.id)

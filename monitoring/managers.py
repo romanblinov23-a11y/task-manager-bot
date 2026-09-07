@@ -24,7 +24,12 @@ def register_manager(telegram_user_id: int, name: str, position: str, market_id:
     только после подтверждения владельцем (см. approve_manager). Конфликт
     случается, когда ранее удалённый (status='removed') сотрудник проходит
     онбординг заново — тогда статус тоже сбрасывается в 'pending', чтобы
-    владелец увидел заявку и подтвердил доступ повторно."""
+    владелец увидел заявку и подтвердил доступ повторно.
+
+    "Стажёр" — единственная позиция без блоков по умолчанию: доступа к
+    направлениям бота у неё нет вообще (см. bot.trainee_onboarding), вместо
+    этого при подтверждении запускается программа онбординга."""
+    blocks = "" if position == "Стажёр" else DEFAULT_BLOCKS
     conn = get_connection()
     try:
         conn.execute(
@@ -33,7 +38,7 @@ def register_manager(telegram_user_id: int, name: str, position: str, market_id:
             VALUES (?, ?, 'manager', ?, 'pending', ?)
             ON CONFLICT (telegram_user_id) DO UPDATE SET name = excluded.name, position = excluded.position, status = 'pending'
             """,
-            (telegram_user_id, name, position, DEFAULT_BLOCKS),
+            (telegram_user_id, name, position, blocks),
         )
         conn.execute(
             "INSERT OR IGNORE INTO manager_market (manager_telegram_user_id, market_id) VALUES (?, ?)",
@@ -258,6 +263,24 @@ def set_manager_position(telegram_user_id: int, position: str) -> None:
     try:
         conn.execute(
             "UPDATE manager SET position = ? WHERE telegram_user_id = ?", (position, telegram_user_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_onboarding_stage(telegram_user_id: int) -> int:
+    """Текущий этап программы онбординга «Стажёра» (индекс в
+    TRAINEE_ONBOARDING_STAGES) — см. bot.trainee_onboarding."""
+    manager = get_manager(telegram_user_id)
+    return manager["onboarding_stage"] if manager else 0
+
+
+def set_onboarding_stage(telegram_user_id: int, stage: int) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE manager SET onboarding_stage = ? WHERE telegram_user_id = ?", (stage, telegram_user_id)
         )
         conn.commit()
     finally:

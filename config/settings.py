@@ -31,6 +31,11 @@ MONITORING_DB_PATH = os.getenv("MONITORING_DB_PATH", "data/monitoring.db")
 # Путь к SQLite-базе трекера задач — отдельная база от мониторинга, общие
 # только пользователи (monitoring.manager, по telegram_user_id)
 TASKS_DB_PATH = os.getenv("TASKS_DB_PATH", "data/tasks.db")
+# Путь к базе персональных данных стажёров (согласие, паспорт/СНИЛС/реквизиты) —
+# физически отдельный файл/путь от остальных баз, чтобы можно было позже
+# перенести именно его на сервер в РФ (152-ФЗ, ст.18 ч.5) без переписывания
+# остального кода — достаточно поменять этот путь на РФ-хостинг (Postgres DSN и т.п.)
+PERSONAL_DATA_DB_PATH = os.getenv("PERSONAL_DATA_DB_PATH", "data/personal_data.db")
 # Раз в неделю бот шлёт напоминание-задание по рынкам, у которых сегодня день мониторинга
 MONITORING_REMINDER_TIME = os.getenv("MONITORING_REMINDER_TIME", "09:30")
 
