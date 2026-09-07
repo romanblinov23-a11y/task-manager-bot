@@ -33,6 +33,13 @@ from bot.confirmation import (
 )
 from bot.daily_report import send_daily_report
 from bot.dashboard_cmd import on_dashboard_aggregate_choice, on_dashboard_command, on_dashboard_market_choice
+from bot.data_export import (
+    on_export_operator_data_command,
+    on_export_operator_data_delete,
+    on_export_operator_data_delete_cancel,
+    on_export_operator_data_delete_confirm,
+    on_export_operator_data_market_choice,
+)
 from bot.dashboard_tasks_cmd import on_dashboard_tasks_command
 from bot.fix_reading import on_fix_reading_command, on_fix_reading_market_choice, on_fix_reading_pick
 from bot.handlers import on_group_message
@@ -328,6 +335,7 @@ _ROMAN_COMMANDS = [
     BotCommand("set_meeting_schedule", "Настроить ритм собраний"),
     BotCommand("set_operator", "Указать реквизиты юрлица-оператора ПДн для рынка"),
     BotCommand("set_consent_text", "Загрузить готовый текст согласия на ПДн от юристов"),
+    BotCommand("export_operator_data", "Выгрузить/удалить персональные данные рынка (передача заказчику)"),
     BotCommand("reset_shift_report", "⚠️ Сбросить сегодняшний отчёт по смене"),
     BotCommand("message", "Написать в личку сотруднику через бота"),
     BotCommand("message_chat", "Написать в зарегистрированный чат через бота"),
@@ -400,6 +408,7 @@ def main() -> None:
     app.add_handler(CommandHandler("set_meeting_schedule", on_set_meeting_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_operator", on_set_operator_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_consent_text", on_set_consent_text_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("export_operator_data", on_export_operator_data_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, on_group_message))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))
@@ -528,6 +537,10 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_set_consent_text_market_choice, pattern=r"^setconsent_market:"))
     app.add_handler(CallbackQueryHandler(on_set_consent_text_confirm, pattern=r"^setconsent_confirm$"))
     app.add_handler(CallbackQueryHandler(on_set_consent_text_cancel, pattern=r"^setconsent_cancel$"))
+    app.add_handler(CallbackQueryHandler(on_export_operator_data_market_choice, pattern=r"^expdata_market:"))
+    app.add_handler(CallbackQueryHandler(on_export_operator_data_delete_confirm, pattern=r"^expdata_delete_confirm:"))
+    app.add_handler(CallbackQueryHandler(on_export_operator_data_delete_cancel, pattern=r"^expdata_delete_cancel$"))
+    app.add_handler(CallbackQueryHandler(on_export_operator_data_delete, pattern=r"^expdata_delete:"))
     app.add_handler(CallbackQueryHandler(on_meeting_schedule_market_choice, pattern=r"^meetsched_market:"))
     app.add_handler(CallbackQueryHandler(on_meeting_schedule_type_choice, pattern=r"^meetsched_type:"))
     app.add_handler(CallbackQueryHandler(on_meeting_confirm, pattern=r"^meet_confirm:"))

@@ -76,3 +76,24 @@ def revoke_consent(telegram_user_id: int) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def list_consents_for_market(market_id: int) -> list[dict]:
+    """Все согласия этого рынка — для выгрузки/удаления персональных
+    данных при передаче точки заказчику (см. bot.data_export)."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT * FROM consent WHERE market_id = ?", (market_id,)).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def delete_consents_for_market(market_id: int) -> int:
+    conn = get_connection()
+    try:
+        cursor = conn.execute("DELETE FROM consent WHERE market_id = ?", (market_id,))
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
