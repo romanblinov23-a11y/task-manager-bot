@@ -12,8 +12,8 @@ from monitoring.managers import (
     set_manager_position,
     set_onboarding_stage,
 )
-from monitoring.markets import get_market
-from personal_data.consent import CONSENT_TEXT, has_consent, record_consent
+from monitoring.markets import get_market, has_operator_info
+from personal_data.consent import has_consent, record_consent, render_consent_text
 
 
 def _is_market_supervisor(user_id: int, market_id: int) -> bool:
@@ -45,15 +45,37 @@ def _consent_keyboard(uid: int) -> InlineKeyboardMarkup:
 
 async def start_trainee_track(bot: Bot, uid: int) -> None:
     """Запускается сразу после того, как владелец подтвердил заявку
-    сотрудника с позицией «Стажёр» (см. bot.manager_admin.on_manager_approve) —
-    вместо обычных блоков и регламентов стажёр сначала должен дать согласие
-    на обработку персональных данных, и только потом получает первый этап
-    программы онбординга."""
+    сотрудника с позицией «Стажёр» (см. bot.manager_admin.on_manager_approve),
+    а также повторно — как только для рынка заполнены реквизиты юрлица (см.
+    bot.market_operator._unblock_waiting_trainees). Вместо обычных блоков и
+    регламентов стажёр сначала должен дать согласие на обработку персональных
+    данных — оператором в тексте согласия указывается юрлицо/ИП точки
+    (market.operator_*), а не Рома и не бот, и только потом получает первый
+    этап программы онбординга."""
     if has_consent(uid):
         await _begin_stages(bot, uid)
         return
+
+    market_id = _first_market_id(uid)
+    market = get_market(market_id) if market_id else None
+    manager = get_manager(uid)
+    if not market or not has_operator_info(market):
+        market_label = f"«{market['name']}»" if market else "неизвестного рынка"
+        name_label = manager["name"] if manager else str(uid)
+        try:
+            await bot.send_message(
+                chat_id=ROMAN_TELEGRAM_ID,
+                text=(
+                    f"⚠️ Для {market_label} не заполнены реквизиты юрлица (/set_operator) — "
+                    f"{name_label} не может получить согласие на обработку персональных данных, пока это не сделано."
+                ),
+            )
+        except Exception:
+            pass
+        return
+
     try:
-        await bot.send_message(chat_id=uid, text=CONSENT_TEXT, reply_markup=_consent_keyboard(uid))
+        await bot.send_message(chat_id=uid, text=render_consent_text(market), reply_markup=_consent_keyboard(uid))
     except Exception:
         pass
 
@@ -88,7 +110,15 @@ async def on_trainee_consent(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 pass
         return
 
-    record_consent(uid)
+    market_id = _first_market_id(uid)
+    market = get_market(market_id) if market_id else None
+    if not market:
+        # Рынок пропал между вопросом и ответом — крайне
+        # маловероятно, но без рынка нечего писать в текст согласия.
+        await query.message.reply_text("Не нашёл твой рынок — напиши управляющему, разберёмся.")
+        return
+
+    record_consent(uid, market_id, render_consent_text(market))
     await query.message.reply_text("Спасибо! Начинаем программу онбординга.")
     await _begin_stages(context.bot, uid)
 

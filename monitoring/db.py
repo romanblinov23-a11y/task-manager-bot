@@ -175,6 +175,14 @@ def init_schema() -> None:
         _ensure_column(conn, "manager", "blocks_ack", "blocks_ack TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "manager", "onboarding_stage", "onboarding_stage INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "competitor", "closed_at", "closed_at TEXT")
+        # Реквизиты юрлица/ИП, которое юридически владеет точкой этого рынка —
+        # именно оно, а не Роман и не бот, оператор персональных данных
+        # стажёров этой точки (см. /set_operator, personal_data/consent.py).
+        # Разные рынки могут принадлежать разным юрлицам по разным договорам.
+        _ensure_column(conn, "market", "operator_name", "operator_name TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "market", "operator_inn", "operator_inn TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "market", "operator_ogrn", "operator_ogrn TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "market", "operator_address", "operator_address TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "report_chat", "mention", "mention TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "report_chat", "message_thread_id", "message_thread_id INTEGER")
         # Разовая миграция данных: блок "Отчёты по смене" появился позже

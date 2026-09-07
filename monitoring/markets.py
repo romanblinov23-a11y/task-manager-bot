@@ -34,6 +34,26 @@ def get_market_by_name(name: str) -> dict | None:
         conn.close()
 
 
+def set_market_operator(market_id: int, name: str, inn: str, ogrn: str, address: str) -> None:
+    """Реквизиты юрлица/ИП — юридического оператора персональных данных
+    сотрудников этой точки (см. /set_operator, personal_data/consent.py).
+    Не сам Роман и не бот — конкретное юрлицо, с которым у Романа договор
+    оказания услуг на эту точку."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE market SET operator_name = ?, operator_inn = ?, operator_ogrn = ?, operator_address = ? WHERE id = ?",
+            (name, inn, ogrn, address, market_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def has_operator_info(market: dict) -> bool:
+    return bool(market.get("operator_name"))
+
+
 def create_market(name: str, city: str = "", our_point_name: str | None = None) -> dict:
     """Добавляет новый рынок/проект — используется владельцем через /add_project.
     Рынок и проект в системе — одна сущность: как только он появляется здесь,

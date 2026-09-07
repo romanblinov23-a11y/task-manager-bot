@@ -8,7 +8,8 @@ _DB_PATH = Path(PERSONAL_DATA_DB_PATH)
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS consent (
     telegram_user_id INTEGER PRIMARY KEY,
-    consent_version TEXT NOT NULL,
+    market_id INTEGER NOT NULL,
+    consent_text TEXT NOT NULL,
     agreed_at TEXT NOT NULL DEFAULT (datetime('now')),
     revoked_at TEXT
 );
