@@ -146,7 +146,7 @@ async def on_trainee_advance(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def on_trainee_graduate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Финальный шаг: присваивает позицию «Бариста». Блоки бота при этом не
     меняются — дальнейший перевод в «Менеджер» с выдачей блоков делается
-    вручную через /managers, как для любой другой позиции."""
+    вручную через /employees, как для любой другой позиции."""
     query = update.callback_query
     uid = int(query.data.split(":", 1)[1])
     manager = get_manager(uid)

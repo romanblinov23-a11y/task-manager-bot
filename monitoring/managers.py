@@ -198,7 +198,7 @@ def get_market_supervisor(market_id: int, exclude_telegram_user_id: int | None =
 
 
 def list_managers() -> list[dict]:
-    """Все менеджеры (любого статуса) с их рынками — для /managers."""
+    """Все менеджеры (любого статуса) с их рынками — для /employees."""
     conn = get_connection()
     try:
         rows = conn.execute("SELECT * FROM manager ORDER BY status, name").fetchall()

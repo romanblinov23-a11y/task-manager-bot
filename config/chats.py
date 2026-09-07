@@ -104,7 +104,7 @@ def unregister_chat(chat_id: int, message_thread_id: int | None = None) -> bool:
 
 def get_all_bindings() -> list[tuple[int, str, str]]:
     """Все привязки chat_id -> project НА ВЕСЬ ЧАТ, с указанием источника,
-    для /managers. Привязки конкретных веток форума сюда не входят —
+    для /employees. Привязки конкретных веток форума сюда не входят —
     смотри get_all_thread_bindings."""
     bindings = [(chat_id, project, "env") for chat_id, project in _ENV_MAP.items()]
     bindings += [

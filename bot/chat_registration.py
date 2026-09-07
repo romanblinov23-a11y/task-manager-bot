@@ -25,7 +25,7 @@ async def on_register_project(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Самообслуживание для онбординга чата: владелец вызывает эту команду
     внутри рабочей группы и выбирает проект кнопкой — без ввода названия
     вручную. Посмотреть/сменить/отвязать привязки существующих чатов можно
-    в /managers → «💬 Чаты»."""
+    в /chats → «📋 Рабочие чаты проекта»."""
     if not is_owner(update.effective_user.id):
         return
 

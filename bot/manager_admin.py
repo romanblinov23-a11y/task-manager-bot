@@ -23,10 +23,10 @@ from monitoring.managers import (
     get_acknowledged_blocks,
     get_manager,
     get_manager_blocks,
+    get_managers_for_market,
     get_market_supervisor,
     get_markets_for_manager,
     is_owner,
-    list_managers,
     reject_manager,
     remove_manager,
     set_manager_blocks,
@@ -116,14 +116,12 @@ async def sync_employee_commands(bot, uid: int) -> None:
         pass
 
 
-def _manager_list_keyboard(managers: list[dict], legacy: list[dict]) -> InlineKeyboardMarkup:
+def _manager_list_keyboard(markets: list[dict], legacy: list[dict]) -> InlineKeyboardMarkup:
+    """Стартовый экран /employees — сначала выбор проекта (сотрудники
+    смотрятся по проекту, см. on_employees_market_choice), плюс не
+    привязанные пока ни к одному проекту сотрудники (пришли онбордиться,
+    но не дошли до выбора) и общий список всех, кто хоть раз писал боту."""
     buttons = []
-    for m in managers:
-        icon = {"pending": "🕓", "active": "✅"}[m["status"]]
-        markets_label = ", ".join(mk["name"] for mk in m["markets"]) or "—"
-        buttons.append(
-            [InlineKeyboardButton(f"{icon} {m['name']} — {markets_label}", callback_data=f"mgr_select:{m['telegram_user_id']}")]
-        )
     for e in legacy:
         buttons.append(
             [
@@ -131,7 +129,8 @@ def _manager_list_keyboard(managers: list[dict], legacy: list[dict]) -> InlineKe
                 InlineKeyboardButton("🗑", callback_data=f"mgr_legacy_remove:{e['user_id']}"),
             ]
         )
-    buttons.append([InlineKeyboardButton("💬 Чаты", callback_data="mgr_chats")])
+    for m in markets:
+        buttons.append([InlineKeyboardButton(m["name"], callback_data=f"empl_market:{m['id']}")])
     buttons.append([InlineKeyboardButton("📋 Все, кто писал боту", callback_data="mgr_onboarded")])
     return InlineKeyboardMarkup(buttons)
 
@@ -200,25 +199,28 @@ def _blocks_keyboard(uid: int, selected: set[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def _list_view_text(managers: list[dict], legacy: list[dict]) -> str:
-    if not managers and not legacy:
-        return "Пока нет ни одного сотрудника с ролью — но ниже можно посмотреть привязки чатов и всех, кто писал боту."
-    text = "Сотрудники бота:"
+def _list_view_text(markets: list[dict], legacy: list[dict]) -> str:
+    if not markets and not legacy:
+        return "Пока нет ни одного рынка — сначала /add_project."
+    text = "Сотрудники — по какому проекту?"
     if legacy:
         text += (
-            "\n\n📨 — уже писали боту раньше, но не выбрали проект и роль для мониторинга. "
+            "\n\n📨 — уже писали боту раньше, но не выбрали проект и роль. "
             "Нажмите на имя, чтобы прислать им этот вопрос сейчас."
         )
     return text
 
 
 async def _reply_manager_list(message) -> None:
-    managers = list_managers()
+    markets = list_markets()
     legacy = list_legacy_employees()
-    await message.reply_text(_list_view_text(managers, legacy), reply_markup=_manager_list_keyboard(managers, legacy))
+    await message.reply_text(_list_view_text(markets, legacy), reply_markup=_manager_list_keyboard(markets, legacy))
 
 
-async def on_managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def on_employees_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/employees — сотрудники бота, сгруппированные по проекту. Список
+    конкретного менеджера (роль, блоки, проект) — карточка mgr_select не
+    поменялась, поменялся только вход в неё."""
     if not is_owner(update.effective_user.id):
         return
     await _reply_manager_list(update.effective_message)
@@ -230,9 +232,36 @@ async def on_manager_back_to_list(update: Update, context: ContextTypes.DEFAULT_
         await query.answer()
         return
     await query.answer()
-    managers = list_managers()
+    markets = list_markets()
     legacy = list_legacy_employees()
-    await query.edit_message_text(_list_view_text(managers, legacy), reply_markup=_manager_list_keyboard(managers, legacy))
+    await query.edit_message_text(_list_view_text(markets, legacy), reply_markup=_manager_list_keyboard(markets, legacy))
+
+
+def _market_employees_keyboard(market_id: int, managers: list[dict]) -> InlineKeyboardMarkup:
+    buttons = []
+    for m in managers:
+        icon = {"pending": "🕓", "active": "✅"}[m["status"]]
+        buttons.append(
+            [InlineKeyboardButton(f"{icon} {m['name']} ({m['position'] or '—'})", callback_data=f"mgr_select:{m['telegram_user_id']}")]
+        )
+    buttons.append([InlineKeyboardButton("↩️ Другой проект", callback_data="mgr_list")])
+    return InlineKeyboardMarkup(buttons)
+
+
+async def on_employees_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    managers = get_managers_for_market(market_id)
+    await query.answer()
+    text = f"Сотрудники «{market['name']}»:" if managers else f"На «{market['name']}» пока нет ни одного сотрудника."
+    await query.edit_message_text(text, reply_markup=_market_employees_keyboard(market_id, managers))
 
 
 async def on_manager_nudge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -279,21 +308,23 @@ async def on_manager_legacy_remove_confirm(update: Update, context: ContextTypes
     user_id = int(query.data.split(":", 1)[1])
     removed = remove_legacy_employee(user_id)
     await query.answer("Удалено" if removed else "Уже не найден")
-    managers = list_managers()
+    markets = list_markets()
     legacy = list_legacy_employees()
-    await query.edit_message_text(_list_view_text(managers, legacy), reply_markup=_manager_list_keyboard(managers, legacy))
+    await query.edit_message_text(_list_view_text(markets, legacy), reply_markup=_manager_list_keyboard(markets, legacy))
 
 
-def _chat_bindings_keyboard(bindings: list[tuple[int, str, str]], thread_bindings: list[tuple[int, int, str]]) -> InlineKeyboardMarkup:
+def _project_chat_bindings_keyboard(market_id: int, project: str) -> InlineKeyboardMarkup:
+    bindings = [(chat_id, p, source) for chat_id, p, source in get_all_bindings() if p == project]
+    thread_bindings = [(chat_id, thread_id, p) for chat_id, thread_id, p in get_all_thread_bindings() if p == project]
     rows = [
-        [InlineKeyboardButton(f"{project} — {chat_id}", callback_data=f"mgr_chat_select:{chat_id}")]
-        for chat_id, project, _source in bindings
+        [InlineKeyboardButton(f"{chat_id}", callback_data=f"mgr_chat_select:{chat_id}")]
+        for chat_id, _project, _source in bindings
     ]
     rows += [
-        [InlineKeyboardButton(f"{project} — {chat_id} (ветка {thread_id})", callback_data=f"mgr_chatthread_select:{chat_id}:{thread_id}")]
-        for chat_id, thread_id, project in thread_bindings
+        [InlineKeyboardButton(f"{chat_id} (ветка {thread_id})", callback_data=f"mgr_chatthread_select:{chat_id}:{thread_id}")]
+        for chat_id, thread_id, _project in thread_bindings
     ]
-    rows.append([InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")])
+    rows.append([InlineKeyboardButton("↩️ Назад", callback_data=f"chats_market:{market_id}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -305,7 +336,7 @@ def _chat_thread_card_keyboard(chat_id: int, thread_id: int) -> InlineKeyboardMa
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("🗑 Отвязать", callback_data=f"mgr_chatthread_unbind:{chat_id}:{thread_id}")],
-            [InlineKeyboardButton("↩️ К чатам", callback_data="mgr_chats")],
+            [InlineKeyboardButton("↩️ К чатам", callback_data="chats_list")],
         ]
     )
 
@@ -319,7 +350,7 @@ def _chat_card_keyboard(chat_id: int, source: str) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton("🔁 Сменить проект", callback_data=f"mgr_chat_market:{chat_id}")]]
     if source == "runtime":
         rows.append([InlineKeyboardButton("🗑 Отвязать", callback_data=f"mgr_chat_unbind:{chat_id}")])
-    rows.append([InlineKeyboardButton("↩️ К чатам", callback_data="mgr_chats")])
+    rows.append([InlineKeyboardButton("↩️ К чатам", callback_data="chats_list")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -331,24 +362,103 @@ def _chat_market_pick_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
-async def on_manager_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def _chats_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"chats_market:{m['id']}")] for m in markets])
+
+
+def _chats_menu_keyboard(market_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📋 Рабочие чаты проекта", callback_data=f"chats_work:{market_id}")],
+            [InlineKeyboardButton("📨 Чаты рассылок отчётов", callback_data=f"chats_reports:{market_id}")],
+            [InlineKeyboardButton("↩️ Другой проект", callback_data="chats_list")],
+        ]
+    )
+
+
+def _report_chats_keyboard(market_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("💰 Чат финпартнёров", callback_data=f"shrc_view:{market_id}:finance")],
+            [InlineKeyboardButton("👥 Чат команды точки", callback_data=f"shrc_view:{market_id}:team")],
+            [InlineKeyboardButton("↩️ Назад", callback_data=f"chats_market:{market_id}")],
+        ]
+    )
+
+
+async def on_chats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/chats — чаты по проекту: отдельно рабочий чат (куда бот собирает
+    задачи, /register_project) и чаты рассылок отчётов по смене
+    (финпартнёры/команда точки, /register_report_chat)."""
+    if not is_owner(update.effective_user.id):
+        return
+    markets = list_markets()
+    if not markets:
+        await update.effective_message.reply_text("Пока нет ни одного рынка — сначала /add_project.")
+        return
+    await update.effective_message.reply_text("Чаты — по какому проекту?", reply_markup=_chats_market_pick_keyboard(markets))
+
+
+async def on_chats_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not is_owner(query.from_user.id):
         await query.answer()
         return
     await query.answer()
-    bindings = get_all_bindings()
-    thread_bindings = get_all_thread_bindings()
-    if not bindings and not thread_bindings:
+    markets = list_markets()
+    if not markets:
+        await query.edit_message_text("Пока нет ни одного рынка.")
+        return
+    await query.edit_message_text("Чаты — по какому проекту?", reply_markup=_chats_market_pick_keyboard(markets))
+
+
+async def on_chats_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(f"Проект: {market['name']}. Какие чаты?", reply_markup=_chats_menu_keyboard(market_id))
+
+
+async def on_chats_work(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    await query.answer()
+    keyboard = _project_chat_bindings_keyboard(market_id, market["name"])
+    if len(keyboard.inline_keyboard) == 1:
         await query.edit_message_text(
-            "Нет привязанных чатов. Чтобы привязать группу к проекту — вызовите /register_project внутри неё.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")]]),
+            f"Для «{market['name']}» нет привязанных рабочих чатов. Чтобы привязать — вызовите /register_project внутри нужной группы.",
+            reply_markup=keyboard,
         )
         return
-    await query.edit_message_text(
-        "💬 Привязанные чаты. Чтобы привязать новый — вызовите /register_project внутри него.",
-        reply_markup=_chat_bindings_keyboard(bindings, thread_bindings),
-    )
+    await query.edit_message_text(f"Рабочие чаты «{market['name']}»:", reply_markup=keyboard)
+
+
+async def on_chats_reports(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(f"Чаты рассылок отчётов «{market['name']}»:", reply_markup=_report_chats_keyboard(market_id))
 
 
 async def on_manager_chat_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -422,15 +532,10 @@ async def on_manager_chat_unbind_confirm(update: Update, context: ContextTypes.D
     chat_id = int(query.data.split(":", 1)[1])
     unregister_chat(chat_id)
     await query.answer("Отвязано")
-    bindings = get_all_bindings()
-    thread_bindings = get_all_thread_bindings()
-    if not bindings and not thread_bindings:
-        await query.edit_message_text(
-            "Нет привязанных чатов. Чтобы привязать группу к проекту — вызовите /register_project внутри неё.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")]]),
-        )
-        return
-    await query.edit_message_text("💬 Привязанные чаты:", reply_markup=_chat_bindings_keyboard(bindings, thread_bindings))
+    await query.edit_message_text(
+        f"✅ Чат {chat_id} отвязан.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ К чатам", callback_data="chats_list")]]),
+    )
 
 
 async def on_manager_chat_thread_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -481,15 +586,10 @@ async def on_manager_chat_thread_unbind_confirm(update: Update, context: Context
     chat_id, thread_id = int(chat_id_str), int(thread_id_str)
     unregister_chat(chat_id, thread_id)
     await query.answer("Отвязано")
-    bindings = get_all_bindings()
-    thread_bindings = get_all_thread_bindings()
-    if not bindings and not thread_bindings:
-        await query.edit_message_text(
-            "Нет привязанных чатов. Чтобы привязать группу к проекту — вызовите /register_project внутри неё.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ К списку", callback_data="mgr_list")]]),
-        )
-        return
-    await query.edit_message_text("💬 Привязанные чаты:", reply_markup=_chat_bindings_keyboard(bindings, thread_bindings))
+    await query.edit_message_text(
+        f"✅ Ветка {thread_id} чата {chat_id} отвязана.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ К чатам", callback_data="chats_list")]]),
+    )
 
 
 async def on_manager_onboarded(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -543,7 +643,7 @@ async def _check_supervisor_conflict(query, uid: int) -> bool:
         if existing:
             await query.answer(
                 f"На проекте «{market['name']}» (он же рынок для мониторинга) уже есть Управляющий — {existing['name']}. "
-                "Сначала смените его роль через /managers, потом назначайте нового.",
+                "Сначала смените его роль через /employees, потом назначайте нового.",
                 show_alert=True,
             )
             return True
@@ -762,7 +862,7 @@ async def on_manager_set_market(update: Update, context: ContextTypes.DEFAULT_TY
         if existing:
             await query.answer(
                 f"На проекте «{market['name']}» (он же рынок для мониторинга) уже есть Управляющий — {existing['name']}. "
-                "Сначала смените его роль через /managers.",
+                "Сначала смените его роль через /employees.",
                 show_alert=True,
             )
             return

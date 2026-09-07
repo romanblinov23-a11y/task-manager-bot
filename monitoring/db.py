@@ -197,7 +197,7 @@ def init_schema() -> None:
         # Разовая миграция данных: блок "Отчёты по смене" появился позже
         # tasks/monitoring, у уже активных сотрудников его нет в списке —
         # добавляем, чтобы функция сразу заработала без ручной правки
-        # владельцем через /managers. Новые сотрудники получают его
+        # владельцем через /employees. Новые сотрудники получают его
         # автоматически через DEFAULT_BLOCKS (см. register_manager).
         for row in conn.execute("SELECT telegram_user_id, blocks FROM manager WHERE status = 'active'").fetchall():
             blocks = [b for b in (row["blocks"] or "").split(",") if b]
