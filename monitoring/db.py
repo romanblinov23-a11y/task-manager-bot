@@ -143,6 +143,13 @@ CREATE TABLE IF NOT EXISTS meeting_instance (
     updated_at TEXT,
     UNIQUE (market_id, meeting_type, meeting_date)
 );
+
+CREATE TABLE IF NOT EXISTS monitor_chat (
+    chat_id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    triggers TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 

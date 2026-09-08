@@ -1,6 +1,6 @@
 import logging
 
-from telegram import Chat, Update
+from telegram import Bot, Chat, Update
 from telegram.ext import ContextTypes
 
 from bot.buffer import BufferedMessage, MessageBuffer, format_context
@@ -8,6 +8,7 @@ from bot.confirmation import send_confirmation_cards
 from bot.onboarding import record_group_member
 from config.chats import get_project_for_chat
 from config.settings import EXTRACTION_CONTEXT_HOURS, ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
+from monitoring.monitor_chats import get_monitor_chat
 from prompts.extraction import extract_tasks
 
 _buffer = MessageBuffer()
@@ -33,6 +34,45 @@ def _is_trigger(update: Update, bot_username: str) -> bool:
                 if mention.lstrip("@") == bot_username:
                     return True
     return False
+
+
+def _monitor_trigger_match(text: str, triggers: list[str]) -> str | None:
+    """Упоминание владельца проверяется всегда, вне зависимости от того,
+    настроены ли для чата свои триггерные слова (см. bot.monitor_chats).
+    Совпадение — по вхождению подстроки, не по целому слову: у русского
+    языка богатая морфология («жалоба»/«жалобу»/«жалобы»), и точное
+    совпадение слова целиком пропустило бы почти все реальные упоминания,
+    кроме именительного падежа. Разумная плата за это — считать вхождением
+    и часть другого слова (например, триггер «иск» поймает «искать»); если
+    это будет мешать, стоит выбирать более длинные/специфичные слова."""
+    low = text.lower()
+    if ROMAN_CHAT_NAME.lower() in low:
+        return f"упоминание «{ROMAN_CHAT_NAME}»"
+    for trigger in triggers:
+        if trigger.lower() in low:
+            return f"триггер «{trigger}»"
+    return None
+
+
+async def _check_monitor_chat(bot: Bot, chat: Chat, message, sender, sender_name: str) -> None:
+    if sender and str(sender.id) == str(ROMAN_TELEGRAM_ID):
+        return
+    monitor_chat = get_monitor_chat(chat.id)
+    if not monitor_chat:
+        return
+    matched = _monitor_trigger_match(message.text, monitor_chat["trigger_list"])
+    if not matched:
+        return
+    try:
+        await bot.send_message(
+            chat_id=ROMAN_TELEGRAM_ID,
+            text=(
+                f"👀 «{monitor_chat['title']}» — сработал {matched}\n\n"
+                f"{sender_name}: {message.text}\n\n{_message_link(chat, message.message_id)}"
+            ),
+        )
+    except Exception:
+        pass
 
 
 async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -62,6 +102,8 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         link=_message_link(chat, message.message_id),
     )
     _buffer.add(buffer_key, buffered)
+
+    await _check_monitor_chat(context.bot, chat, message, sender, sender_name)
 
     if not _is_trigger(update, context.bot.username):
         return

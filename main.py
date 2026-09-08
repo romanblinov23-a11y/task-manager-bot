@@ -133,6 +133,15 @@ from bot.market_settings import (
     on_market_settings_market_choice,
     on_market_settings_toggle_finance,
 )
+from bot.monitor_chats import (
+    on_monitor_chats_command,
+    on_monitor_chats_edit,
+    on_monitor_chats_list,
+    on_monitor_chats_remove,
+    on_monitor_chats_remove_confirm,
+    on_monitor_chats_select,
+    on_register_monitor_chat,
+)
 from bot.monitoring_flow import (
     on_monitoring_assign_choice,
     on_monitoring_category_choice,
@@ -319,6 +328,7 @@ _ROMAN_COMMANDS = [
     BotCommand("task_work", "Работа с задачами: статус, сотрудник, подвисшие, дашборд, неделя"),
     BotCommand("employees", "Сотрудники бота — по проекту"),
     BotCommand("chats", "Чаты — по проекту: рабочий и рассылки отчётов"),
+    BotCommand("monitor_chats", "Чаты под мониторингом триггерных слов"),
     BotCommand("add_project", "Добавить проект/точку Surf"),
     BotCommand("market_settings", "Настройка рынка: ПДн, финпартнёры, чаты отчётов"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
@@ -363,11 +373,13 @@ def main() -> None:
     app.add_handler(CommandHandler("stuck", on_stuck_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("needhelp", on_needhelp_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("register_project", on_register_project, filters=filters.ChatType.GROUPS))
+    app.add_handler(CommandHandler("register_monitor_chat", on_register_monitor_chat, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("onboard", on_force_onboard, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("mytasks", on_mytasks_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("regulations", on_regulations_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("employees", on_employees_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("chats", on_chats_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("monitor_chats", on_monitor_chats_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("add_project", on_add_project_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("reset_monitoring", on_reset_monitoring_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("fix_reading", on_fix_reading_command, filters=filters.ChatType.PRIVATE))
@@ -436,6 +448,11 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_chats_market_choice, pattern=r"^chats_market:"))
     app.add_handler(CallbackQueryHandler(on_chats_work, pattern=r"^chats_work:"))
     app.add_handler(CallbackQueryHandler(on_chats_reports, pattern=r"^chats_reports:"))
+    app.add_handler(CallbackQueryHandler(on_monitor_chats_list, pattern=r"^monchat_list$"))
+    app.add_handler(CallbackQueryHandler(on_monitor_chats_select, pattern=r"^monchat_select:"))
+    app.add_handler(CallbackQueryHandler(on_monitor_chats_edit, pattern=r"^monchat_edit:"))
+    app.add_handler(CallbackQueryHandler(on_monitor_chats_remove_confirm, pattern=r"^monchat_removeconfirm:"))
+    app.add_handler(CallbackQueryHandler(on_monitor_chats_remove, pattern=r"^monchat_remove:"))
     app.add_handler(CallbackQueryHandler(on_manager_chat_unbind_confirm, pattern=r"^mgr_chat_unbind_confirm:"))
     app.add_handler(CallbackQueryHandler(on_manager_chat_unbind, pattern=r"^mgr_chat_unbind:"))
     app.add_handler(CallbackQueryHandler(on_manager_chat_set_market, pattern=r"^mgr_chat_setmarket:"))
