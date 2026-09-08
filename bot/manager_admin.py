@@ -89,6 +89,7 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
         commands.append(BotCommand("shift_report", "Внести отчёт по смене принудительно"))
     if BLOCK_MEETINGS in blocks and manager["position"] == "Управляющий":
         commands.append(BotCommand("set_meeting_schedule", "Настроить ритм собраний"))
+        commands.append(BotCommand("announce_meeting", "Собрать повестку и разослать ближайшее собрание"))
     if commands:
         commands.append(BotCommand("regulations", "Регламенты работы с ботом"))
     return commands

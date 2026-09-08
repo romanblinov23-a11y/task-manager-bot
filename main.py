@@ -88,6 +88,9 @@ from bot.manager_admin import (
     sync_employee_commands,
 )
 from bot.meetings import (
+    on_announce_meeting_command,
+    on_announce_meeting_market_choice,
+    on_announce_meeting_type_choice,
     on_meeting_cancel,
     on_meeting_confirm,
     on_meeting_invite_roman_choice,
@@ -402,6 +405,7 @@ def main() -> None:
     app.add_handler(CommandHandler("message_chat", on_message_chat_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("broadcast", on_broadcast_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_meeting_schedule", on_set_meeting_schedule_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("announce_meeting", on_announce_meeting_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("market_settings", on_market_settings_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_operator", on_set_operator_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_consent_text", on_set_consent_text_command, filters=filters.ChatType.PRIVATE))
@@ -553,6 +557,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_export_operator_data_delete, pattern=r"^expdata_delete:"))
     app.add_handler(CallbackQueryHandler(on_meeting_schedule_market_choice, pattern=r"^meetsched_market:"))
     app.add_handler(CallbackQueryHandler(on_meeting_schedule_type_choice, pattern=r"^meetsched_type:"))
+    app.add_handler(CallbackQueryHandler(on_announce_meeting_market_choice, pattern=r"^announce_market:"))
+    app.add_handler(CallbackQueryHandler(on_announce_meeting_type_choice, pattern=r"^announce_type:"))
     app.add_handler(CallbackQueryHandler(on_meeting_confirm, pattern=r"^meet_confirm:"))
     app.add_handler(CallbackQueryHandler(on_meeting_cancel, pattern=r"^meet_cancel:"))
     app.add_handler(CallbackQueryHandler(on_meeting_postpone, pattern=r"^meet_postpone:"))

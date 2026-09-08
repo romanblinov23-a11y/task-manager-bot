@@ -6,6 +6,7 @@ from telegram.ext import ContextTypes
 
 from config.settings import ROMAN_TELEGRAM_ID
 from config.timeutil import fmt_date, parse_date
+from config.timeutil import now as tz_now
 from config.timeutil import today as tz_today
 from monitoring.managers import (
     get_managers_for_market,
@@ -218,6 +219,127 @@ async def send_meeting_confirmations(bot: Bot) -> None:
             )
         except Exception:
             pass
+
+
+_INSTANCE_STATUS_LABELS = {
+    "confirmed": "уже согласовано, ждёт повестки и рассылки",
+    "dispatched": "уже разослано",
+    "cancelled": "уже отменено",
+}
+
+
+def _next_occurrence_date(weekday: int, time_str: str) -> str:
+    """Ближайшая дата этого дня недели — сегодня, если сегодня как раз
+    нужный день и время ещё не прошло, иначе следующий раз через неделю (не
+    сегодня-плюс-1, как в send_meeting_confirmations — тот джоб всегда
+    целится ровно на завтра, а здесь нужна САМАЯ ближайшая дата вообще,
+    команда может быть вызвана в любой момент)."""
+    today = tz_today()
+    days_ahead = (weekday - today.weekday()) % 7
+    if days_ahead == 0:
+        hour, minute = (int(p) for p in time_str.split(":"))
+        now = tz_now()
+        if (now.hour, now.minute) >= (hour, minute):
+            days_ahead = 7
+    return (today + timedelta(days=days_ahead)).isoformat()
+
+
+def _announce_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"announce_market:{m['id']}")] for m in markets])
+
+
+def _announce_type_keyboard(market_id: int, types: list[str]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(_MEETING_TYPE_LABELS[t], callback_data=f"announce_type:{market_id}:{t}")] for t in types]
+    )
+
+
+async def _start_announce(message, market: dict, meeting_type: str) -> None:
+    schedule = get_meeting_schedule(market["id"], meeting_type)
+    date_iso = _next_occurrence_date(schedule["weekday"], schedule["time"])
+    instance = create_or_get_instance(market["id"], meeting_type, date_iso, schedule["time"])
+    if instance["status"] != "pending_confirmation":
+        label = _INSTANCE_STATUS_LABELS.get(instance["status"], instance["status"])
+        await message.reply_text(
+            f"Собрание «{_MEETING_TYPE_LABELS[meeting_type]}» на «{market['name']}» ({fmt_date(date_iso)}) {label}."
+        )
+        return
+    set_instance_status(instance["id"], "confirmed")
+    await message.reply_text(
+        f"Собрание «{_MEETING_TYPE_LABELS[meeting_type]}» на «{market['name']}» — {fmt_date(date_iso)} в {schedule['time']}."
+    )
+    await _ask_invite_roman(message, instance["id"])
+
+
+async def _offer_meeting_types(message, market: dict) -> None:
+    types = [t for t in _MEETING_TYPE_LABELS if get_meeting_schedule(market["id"], t)]
+    if not types:
+        await message.reply_text(f"Для «{market['name']}» ещё не настроен ритм собраний — сначала /set_meeting_schedule.")
+        return
+    if len(types) == 1:
+        await _start_announce(message, market, types[0])
+        return
+    await message.reply_text(f"Рынок: {market['name']}. Какое собрание?", reply_markup=_announce_type_keyboard(market["id"], types))
+
+
+async def on_announce_meeting_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/announce_meeting — вручную запускает тот же путь, что и обычный
+    ежедневный джоб за сутки (см. send_meeting_confirmations): собрать
+    повестку и разослать собрание нужной аудитории. Нужна, когда ритм
+    собраний настроили только что и ждать автоматического напоминания уже
+    некогда — например, если ближайшее собрание уже завтра, а сегодняшний
+    прогон джоба мог его не застать. В отличие от автоматического
+    напоминания, здесь сразу считается, что собрание состоится — шаг
+    подтверждения/отмены/переноса пропускается."""
+    user = update.effective_user
+    if not is_meetings_editor(user.id):
+        await update.effective_message.reply_text(
+            "Запускать собрания может только владелец или Управляющий с выданным блоком «Собрания»."
+        )
+        return
+
+    markets = _available_markets(user.id)
+    if not markets:
+        await update.effective_message.reply_text("Нет доступных рынков — сначала пройдите онбординг через /start.")
+        return
+
+    if len(markets) == 1:
+        await _offer_meeting_types(update.effective_message, markets[0])
+        return
+    await update.effective_message.reply_text("По какому рынку?", reply_markup=_announce_market_pick_keyboard(markets))
+
+
+async def on_announce_meeting_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_meetings_editor(query.from_user.id):
+        await query.answer()
+        return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    allowed_ids = {m["id"] for m in _available_markets(query.from_user.id)}
+    if not market or market_id not in allowed_ids:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(f"Рынок: {market['name']}")
+    await _offer_meeting_types(query.message, market)
+
+
+async def on_announce_meeting_type_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_meetings_editor(query.from_user.id):
+        await query.answer()
+        return
+    _, market_id_str, meeting_type = query.data.split(":")
+    market_id = int(market_id_str)
+    market = get_market(market_id)
+    allowed_ids = {m["id"] for m in _available_markets(query.from_user.id)}
+    if not market or market_id not in allowed_ids:
+        await query.answer("Недоступно", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_reply_markup(reply_markup=None)
+    await _start_announce(query.message, market, meeting_type)
 
 
 def _invite_roman_keyboard(instance_id: int) -> InlineKeyboardMarkup:
