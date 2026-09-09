@@ -5,6 +5,13 @@ from datetime import time as dt_time
 from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
+from bot.accounting_flow import (
+    on_accounting_command,
+    on_accounting_fact_choice,
+    on_accounting_market_choice,
+    on_accounting_menu_choice,
+    on_accounting_plan_choice,
+)
 from bot.chat_registration import on_register_project, on_register_project_choice, on_register_project_scope_choice
 from bot.competitors import (
     on_add_competitor_command,
@@ -429,6 +436,7 @@ def main() -> None:
     app.add_handler(CommandHandler("reset_shift_report", on_reset_shift_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("messaging", on_messaging_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("revenue", on_revenue_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("accounting", on_accounting_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("message", on_message_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("message_chat", on_message_chat_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("broadcast", on_broadcast_command, filters=filters.ChatType.PRIVATE))
@@ -568,6 +576,10 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_revenue_plan_spot_choice, pattern=r"^rev_plans:"))
     app.add_handler(CallbackQueryHandler(on_revenue_fact_month_choice, pattern=r"^rev_factm:"))
     app.add_handler(CallbackQueryHandler(on_revenue_fact_spot_choice, pattern=r"^rev_facts:"))
+    app.add_handler(CallbackQueryHandler(on_accounting_market_choice, pattern=r"^acct_market:"))
+    app.add_handler(CallbackQueryHandler(on_accounting_menu_choice, pattern=r"^acct_menu:"))
+    app.add_handler(CallbackQueryHandler(on_accounting_plan_choice, pattern=r"^acct_planm:"))
+    app.add_handler(CallbackQueryHandler(on_accounting_fact_choice, pattern=r"^acct_factm:"))
     app.add_handler(CallbackQueryHandler(on_message_pick, pattern=r"^msg_pick:"))
     app.add_handler(CallbackQueryHandler(on_message_chat_pick, pattern=r"^msgchat_pick:"))
     app.add_handler(CallbackQueryHandler(on_broadcast_scope_choice, pattern=r"^bcast_scope:"))

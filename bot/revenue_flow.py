@@ -10,7 +10,7 @@ from monitoring.managers import is_owner
 from revenue.claude_commentary import ClaudeCommentary
 from revenue.daily_report import run_daily_report
 from revenue.monthly_report import run_monthly_report
-from revenue.plan_report import MONTH_NAMES_RU, run_fact_report, run_plan_report
+from revenue.plan_report import MONTH_NAMES_RU, fact_month_options, plan_month_options, run_fact_report, run_plan_report
 from revenue.sheets_exporter import export_pnl_spot, export_pnl_to_sheets
 from revenue.surfcoffee_client import SurfCoffeeClient
 from revenue.weekly_report import run_weekly_report
@@ -136,18 +136,8 @@ def _pnl_keyboard() -> InlineKeyboardMarkup:
 
 
 def _plan_month_keyboard() -> InlineKeyboardMarkup:
-    """Те же 4 месяца, что предлагал /plan у Ивана: 2 назад, текущий, 1 вперёд —
-    план обычно вносят заранее, поэтому есть и будущий месяц."""
-    today = date.today()
-    months = []
-    for delta in (-2, -1, 0, 1):
-        m = today.month + delta
-        y = today.year + (m - 1) // 12
-        m = (m - 1) % 12 + 1
-        months.append((y, m))
-
     rows, row_buf = [], []
-    for y, m in months:
+    for y, m in plan_month_options():
         row_buf.append(InlineKeyboardButton(f"{MONTH_NAMES_RU[m]} {y}", callback_data=f"rev_planm:{y}-{m:02d}"))
         if len(row_buf) == 2:
             rows.append(row_buf)
@@ -158,11 +148,9 @@ def _plan_month_keyboard() -> InlineKeyboardMarkup:
 
 
 def _fact_month_keyboard() -> InlineKeyboardMarkup:
-    """Факт есть только за уже прошедшие месяцы текущего года — от января до текущего."""
-    today = date.today()
     rows, row_buf = [], []
-    for m in range(1, today.month + 1):
-        row_buf.append(InlineKeyboardButton(MONTH_NAMES_RU[m], callback_data=f"rev_factm:{today.year}-{m:02d}"))
+    for y, m in fact_month_options():
+        row_buf.append(InlineKeyboardButton(MONTH_NAMES_RU[m], callback_data=f"rev_factm:{y}-{m:02d}"))
         if len(row_buf) == 3:
             rows.append(row_buf)
             row_buf = []

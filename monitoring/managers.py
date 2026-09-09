@@ -1,5 +1,5 @@
 from config.settings import OWNER_TELEGRAM_IDS
-from monitoring.constants import BLOCK_MEETINGS, BLOCK_MONITORING, BLOCK_REPORTS, DEFAULT_BLOCKS
+from monitoring.constants import BLOCK_ACCOUNTING, BLOCK_MEETINGS, BLOCK_MONITORING, BLOCK_REPORTS, DEFAULT_BLOCKS
 from monitoring.db import get_connection
 
 
@@ -181,6 +181,24 @@ def meetings_enabled_for_market(market_id: int) -> bool:
     отличие от отчётов по смене, здесь нет сценария «без Управляющего»)."""
     supervisor = get_market_supervisor(market_id)
     return bool(supervisor) and _has_meetings_block(supervisor)
+
+
+def _has_accounting_block(manager: dict | None) -> bool:
+    if not manager or manager["status"] != "active":
+        return False
+    return BLOCK_ACCOUNTING in (manager.get("blocks") or "").split(",")
+
+
+def is_accounting_editor(telegram_user_id: int) -> bool:
+    """True для владельца и для активных Управляющих с выданным блоком
+    «Работа с системой учёта» — только им доступен /accounting (план/факт
+    по выручке своей точки, см. bot.accounting_flow). Как и «Собрания», не
+    выдаётся по умолчанию — финансовые данные, владелец включает вручную
+    по конкретному Управляющему (см. DEFAULT_BLOCKS)."""
+    if is_owner(telegram_user_id):
+        return True
+    manager = get_manager(telegram_user_id)
+    return _has_accounting_block(manager) and manager["position"] == "Управляющий"
 
 
 def get_market_supervisor(market_id: int, exclude_telegram_user_id: int | None = None) -> dict | None:

@@ -33,12 +33,17 @@ BLOCK_TASKS = "tasks"
 BLOCK_MONITORING = "monitoring"
 BLOCK_REPORTS = "reports"
 BLOCK_MEETINGS = "meetings"
-AVAILABLE_BLOCKS = [BLOCK_TASKS, BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_MEETINGS]
+# Как и "Собрания" — не выдаётся по умолчанию: план/факт по выручке
+# (см. bot.accounting_flow, /accounting) — финансовые данные, владелец
+# включает конкретному Управляющему вручную.
+BLOCK_ACCOUNTING = "accounting"
+AVAILABLE_BLOCKS = [BLOCK_TASKS, BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_MEETINGS, BLOCK_ACCOUNTING]
 BLOCK_LABELS = {
     BLOCK_TASKS: "Задачи (трекер)",
     BLOCK_MONITORING: "Мониторинг конкурентов",
     BLOCK_REPORTS: "Отчёты по смене",
     BLOCK_MEETINGS: "Собрания",
+    BLOCK_ACCOUNTING: "Работа с системой учёта",
 }
 DEFAULT_BLOCKS = f"{BLOCK_TASKS},{BLOCK_MONITORING},{BLOCK_REPORTS}"
 

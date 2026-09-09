@@ -21,6 +21,27 @@ MONTH_NAMES_RU = {
 DAYS_RU = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
 
 
+def plan_month_options(today: date | None = None) -> list[tuple[int, int]]:
+    """(год, месяц) для кнопок выбора месяца плана — 2 назад, текущий, 1
+    вперёд: план обычно вносят заранее, поэтому есть и будущий месяц.
+    Общая для владельца (/revenue) и Управляющего (/accounting)."""
+    today = today or date.today()
+    months = []
+    for delta in (-2, -1, 0, 1):
+        m = today.month + delta
+        y = today.year + (m - 1) // 12
+        m = (m - 1) % 12 + 1
+        months.append((y, m))
+    return months
+
+
+def fact_month_options(today: date | None = None) -> list[tuple[int, int]]:
+    """(год, месяц) для кнопок выбора месяца факта — от января до текущего
+    месяца этого года (факта за будущее не бывает)."""
+    today = today or date.today()
+    return [(today.year, m) for m in range(1, today.month + 1)]
+
+
 @dataclass
 class DayPlanRow:
     date: date
