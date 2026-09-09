@@ -186,6 +186,18 @@ from bot.report_chat_registration import (
     on_report_chats_unbind,
     on_report_chats_view,
 )
+from bot.revenue_flow import (
+    on_revenue_choice,
+    on_revenue_command,
+    on_revenue_fact_month_choice,
+    on_revenue_fact_spot_choice,
+    on_revenue_plan_month_choice,
+    on_revenue_plan_spot_choice,
+    on_revenue_pnl_choice,
+    send_daily_revenue_report,
+    send_monthly_revenue_report,
+    send_weekly_revenue_report,
+)
 from bot.shift_reports import (
     on_reset_shift_report_cancel,
     on_reset_shift_report_command,
@@ -236,6 +248,7 @@ from config.settings import (
     MONITORING_REMINDER_TIME,
     MONTHLY_PLAN_REMINDER_TIME,
     OWNER_TELEGRAM_IDS,
+    REVENUE_REPORT_TIME,
     SHIFT_REPORT_DISPATCH_TIME,
     SHIFT_REPORT_OWNER_ESCALATE_TIME,
     SHIFT_SCHEDULE_REMINDER_TIME,
@@ -322,6 +335,19 @@ async def _meeting_confirmation_job(context) -> None:
     await send_meeting_confirmations(context.bot)
 
 
+async def _revenue_daily_job(context) -> None:
+    await send_daily_revenue_report(context.bot)
+
+
+async def _revenue_weekly_job(context) -> None:
+    await send_weekly_revenue_report(context.bot)
+
+
+async def _revenue_monthly_job(context) -> None:
+    if tz_today().day == 1:
+        await send_monthly_revenue_report(context.bot)
+
+
 def _parse_time(value: str, tzinfo) -> dt_time:
     hour, minute = (int(part) for part in value.split(":"))
     return dt_time(hour=hour, minute=minute, tzinfo=tzinfo)
@@ -335,6 +361,7 @@ _ROMAN_COMMANDS = [
     BotCommand("add_project", "Добавить проект/точку Surf"),
     BotCommand("market_settings", "Настройка рынка: ПДн, финпартнёры, чаты отчётов"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
+    BotCommand("revenue", "Выручка: отчёты, план/факт, P&L"),
     BotCommand("messaging", "Написать сотруднику, в чат или разослать группе"),
     BotCommand("regulations", "Регламенты работы с ботом"),
     BotCommand("help", "Список команд"),
@@ -401,6 +428,7 @@ def main() -> None:
     app.add_handler(CommandHandler("shift_report", on_shift_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("reset_shift_report", on_reset_shift_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("messaging", on_messaging_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("revenue", on_revenue_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("message", on_message_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("message_chat", on_message_chat_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("broadcast", on_broadcast_command, filters=filters.ChatType.PRIVATE))
@@ -534,6 +562,12 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_shift_report_edit, pattern=r"^shrep_edit:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_more_info, pattern=r"^shrep_moreinfo:"))
     app.add_handler(CallbackQueryHandler(on_messaging_choice, pattern=r"^msgmenu:"))
+    app.add_handler(CallbackQueryHandler(on_revenue_choice, pattern=r"^revenue:"))
+    app.add_handler(CallbackQueryHandler(on_revenue_pnl_choice, pattern=r"^rev_pnl:"))
+    app.add_handler(CallbackQueryHandler(on_revenue_plan_month_choice, pattern=r"^rev_planm:"))
+    app.add_handler(CallbackQueryHandler(on_revenue_plan_spot_choice, pattern=r"^rev_plans:"))
+    app.add_handler(CallbackQueryHandler(on_revenue_fact_month_choice, pattern=r"^rev_factm:"))
+    app.add_handler(CallbackQueryHandler(on_revenue_fact_spot_choice, pattern=r"^rev_facts:"))
     app.add_handler(CallbackQueryHandler(on_message_pick, pattern=r"^msg_pick:"))
     app.add_handler(CallbackQueryHandler(on_message_chat_pick, pattern=r"^msgchat_pick:"))
     app.add_handler(CallbackQueryHandler(on_broadcast_scope_choice, pattern=r"^bcast_scope:"))
@@ -584,6 +618,20 @@ def main() -> None:
     app.job_queue.run_daily(_team_morning_report_job, time=_parse_time(TEAM_MORNING_REPORT_TIME, TZ))
     app.job_queue.run_daily(_monthly_plan_reminder_job, time=_parse_time(MONTHLY_PLAN_REMINDER_TIME, TZ))
     app.job_queue.run_daily(_meeting_confirmation_job, time=_parse_time(MEETING_CONFIRM_TIME, TZ))
+    # Выручка (revenue/, перенесено из "Аналитика Ивана"): вт-вс — ежедневный
+    # отчёт (по понедельникам не нужен, его покрывает недельный), пн — недельный,
+    # 1-е число (самофильтрация внутри job'а) — месячный. Все три — в одно время.
+    app.job_queue.run_daily(
+        _revenue_daily_job,
+        time=_parse_time(REVENUE_REPORT_TIME, TZ),
+        days=(_WEEKDAYS["tue"], _WEEKDAYS["wed"], _WEEKDAYS["thu"], _WEEKDAYS["fri"], _WEEKDAYS["sat"], _WEEKDAYS["sun"]),
+    )
+    app.job_queue.run_daily(
+        _revenue_weekly_job,
+        time=_parse_time(REVENUE_REPORT_TIME, TZ),
+        days=(_WEEKDAYS["mon"],),
+    )
+    app.job_queue.run_daily(_revenue_monthly_job, time=_parse_time(REVENUE_REPORT_TIME, TZ))
 
     app.run_polling()
 

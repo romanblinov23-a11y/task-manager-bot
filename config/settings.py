@@ -83,3 +83,14 @@ TEAM_MORNING_REPORT_TIME = os.getenv("TEAM_MORNING_REPORT_TIME", "07:00")
 # Собрания: во сколько ежедневно проверять, нет ли завтра собрания по
 # настроенному Управляющим ритму, и просить подтверждения
 MEETING_CONFIRM_TIME = os.getenv("MEETING_CONFIRM_TIME", "10:00")
+
+# Модуль "Выручка" (revenue/) — перенесён из отдельного бота "Аналитик Иван".
+# Логин в закрытое API Surf Coffee (surfis.surfcoffee.ru) для ежедневного/
+# недельного/месячного отчёта и план/факт/P&L. Только для владельца.
+SURF_EMAIL = os.getenv("SURF_EMAIL")
+SURF_PASSWORD = os.getenv("SURF_PASSWORD")
+# JSON сервисного аккаунта Google (как строка) — для экспорта P&L в Google Sheets.
+GOOGLE_SHEETS_CREDENTIALS = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
+# Ежедневный/недельный/месячный отчёт по выручке — все три в одно и то же
+# время, как было у "Аналитика Ивана".
+REVENUE_REPORT_TIME = os.getenv("REVENUE_REPORT_TIME", "10:00")

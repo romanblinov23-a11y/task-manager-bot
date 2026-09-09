@@ -12,10 +12,12 @@ def get_client() -> Anthropic:
     return _client
 
 
-def ask_claude(prompt: str, max_tokens: int = 4096) -> str:
+def ask_claude(prompt: str, max_tokens: int = 4096, system: str | None = None) -> str:
+    kwargs = {"system": system} if system is not None else {}
     response = get_client().messages.create(
         model=ANTHROPIC_MODEL,
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": prompt}],
+        **kwargs,
     )
     return response.content[0].text

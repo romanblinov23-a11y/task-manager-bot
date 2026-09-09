@@ -8,7 +8,7 @@ _DB_PATH = Path(MONITORING_DB_PATH)
 # Рынок и проект — одна сущность (см. monitoring.markets.list_market_names).
 # Это стартовый список для первого запуска на пустой базе; дальше новые
 # проекты/рынки заводятся владельцем через /add_project, а не правкой кода.
-_BOOTSTRAP_MARKETS = ["Парк Горького", "Окко", "Аврора"]
+_BOOTSTRAP_MARKETS = ["Парк Горького", "Окко", "Yandex"]
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS market (
@@ -201,6 +201,11 @@ def init_schema() -> None:
         _ensure_column(conn, "market", "send_to_finance", "send_to_finance INTEGER NOT NULL DEFAULT 1")
         _ensure_column(conn, "report_chat", "mention", "mention TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "report_chat", "message_thread_id", "message_thread_id INTEGER")
+        # Разовое переименование: "Аврора" и "Yandex" — одна и та же точка,
+        # называем её везде "Yandex" (совпадает с тем, как её называет
+        # модуль revenue/, перенесённый из бота "Аналитик Иван"). Идемпотентно —
+        # после первого запуска строк с "Аврора" уже не останется.
+        conn.execute("UPDATE market SET name = 'Yandex' WHERE name = 'Аврора'")
         # Разовая миграция данных: блок "Отчёты по смене" появился позже
         # tasks/monitoring, у уже активных сотрудников его нет в списке —
         # добавляем, чтобы функция сразу заработала без ручной правки
