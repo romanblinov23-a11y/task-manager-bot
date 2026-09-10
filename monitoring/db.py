@@ -113,6 +113,17 @@ CREATE TABLE IF NOT EXISTS report_chat (
     PRIMARY KEY (market_id, role)
 );
 
+-- Ручной план по выручке/чекам — только для рынков БЕЗ привязки к Surf
+-- Coffee (market.surf_spot_key пуст, см. /add_project). Для подключённых
+-- рынков план забирается напрямую из Surf Coffee (см. revenue/daily_plan.py).
+CREATE TABLE IF NOT EXISTS monthly_plan (
+    market_id INTEGER NOT NULL REFERENCES market(id),
+    plan_date TEXT NOT NULL,
+    revenue_plan REAL NOT NULL,
+    checks_plan INTEGER NOT NULL,
+    PRIMARY KEY (market_id, plan_date)
+);
+
 CREATE TABLE IF NOT EXISTS meeting_schedule (
     market_id INTEGER NOT NULL REFERENCES market(id),
     meeting_type TEXT NOT NULL CHECK (meeting_type IN ('team', 'managers')),
@@ -198,6 +209,17 @@ def init_schema() -> None:
         # модуль revenue/, перенесённый из бота "Аналитик Иван"). Идемпотентно —
         # после первого запуска строк с "Аврора" уже не останется.
         conn.execute("UPDATE market SET name = 'Yandex' WHERE name = 'Аврора'")
+        # Ключ точки в системе учёта Surf Coffee (см. revenue.surfcoffee_client.SPOTS)
+        # — пусто, если рынок НЕ подключён (план вносится вручную, см.
+        # /set_monthly_plan). Задаётся при /add_project; для трёх точек,
+        # заведённых до появления этого вопроса, проставляем один раз явно —
+        # идемпотентно, дальше эти рынки уже не будут пустыми.
+        _ensure_column(conn, "market", "surf_spot_key", "surf_spot_key TEXT NOT NULL DEFAULT ''")
+        for _name, _spot_key in (("Yandex", "yandex"), ("Окко", "okko"), ("Парк Горького", "park_gorkogo")):
+            conn.execute(
+                "UPDATE market SET surf_spot_key = ? WHERE name = ? AND surf_spot_key = ''",
+                (_spot_key, _name),
+            )
         # Разовая миграция данных: блок "Отчёты по смене" появился позже
         # tasks/monitoring, у уже активных сотрудников его нет в списке —
         # добавляем, чтобы функция сразу заработала без ручной правки

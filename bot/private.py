@@ -10,6 +10,7 @@ from bot.meetings import on_meeting_agenda_reply, on_meeting_postpone_reply, on_
 from bot.messaging import on_broadcast_text_reply, on_message_chat_reply, on_message_reply
 from bot.monitor_chats import on_register_monitor_chat_triggers_reply
 from bot.monitoring_flow import on_monitoring_reply
+from bot.monthly_plan_flow import on_set_monthly_plan_reply
 from bot.mytasks_manage import on_mytasks_manage_reply
 from bot.onboarding import on_employee_message
 from bot.report_chat_registration import on_register_report_chat_mention_reply
@@ -89,6 +90,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if await on_set_evening_report_reply(update, context):
+        return
+
+    if await on_set_monthly_plan_reply(update, context):
         return
 
     if await on_shift_report_reply(update, context):

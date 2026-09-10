@@ -33,7 +33,19 @@ from monitoring.managers import (
     set_manager_market,
     set_manager_position,
 )
-from monitoring.markets import create_market, get_market, get_market_by_name, list_markets, set_market_consent_text, set_market_operator
+from monitoring.markets import (
+    create_market,
+    get_market,
+    get_market_by_name,
+    list_markets,
+    set_market_consent_text,
+    set_market_operator,
+    set_market_surf_spot_key,
+)
+from revenue.market_mapping import available_spot_keys
+from revenue.surfcoffee_client import SPOTS
+
+
 
 # telegram_user_id (str) владельца -> True, если ждём от него название нового проекта
 # telegram_user_id (str) владельца -> {"step": "name"|"operator"|"consent_text", "name", "operator_fields"} —
@@ -66,7 +78,10 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
     редактирования списка конкурентов и расписания пользуется только
     Управляющий, остальные роли ходят только на сам мониторинг. Блок
     открывается в меню только после того, как выдан владельцем И сотрудник
-    подтвердил, что прочитал его регламент (см. send_next_regulation)."""
+    подтвердил, что прочитал его регламент (см. send_next_regulation).
+    /set_monthly_plan показывается Управляющему только если хотя бы один
+    из его рынков НЕ подключён к Surf Coffee (см. market.surf_spot_key,
+    /add_project) — для подключённых план бот забирает сам."""
     uid = manager["telegram_user_id"]
     blocks = set(get_manager_blocks(uid)) & set(get_acknowledged_blocks(uid))
     commands: list[BotCommand] = []
@@ -85,6 +100,8 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
             commands.append(BotCommand("set_shift_schedule", "Загрузить график смен на 2 недели"))
             commands.append(BotCommand("set_evening_report", "Настроить вечерний отчёт: время сбора и чек-лист"))
             commands.append(BotCommand("reset_shift_report", "⚠️ Сбросить сегодняшний отчёт по смене"))
+            if any(not m.get("surf_spot_key") for m in get_markets_for_manager(uid)):
+                commands.append(BotCommand("set_monthly_plan", "Загрузить план по выручке/чекам на месяц"))
         commands.append(BotCommand("shift_report", "Внести отчёт по смене принудительно"))
     if BLOCK_MEETINGS in blocks and manager["position"] == "Управляющий":
         commands.append(BotCommand("set_meeting_schedule", "Настроить ритм собраний"))
@@ -1045,16 +1062,29 @@ async def on_manager_remove_confirm(update: Update, context: ContextTypes.DEFAUL
 _OPERATOR_REQUIRED_LABELS = {"Название": "operator_name", "ИНН": "operator_inn", "Адрес": "operator_address"}
 
 
+def _operator_prompt(project_name: str) -> str:
+    return (
+        f"Реквизиты юрлица/ИП — оператора персональных данных для «{project_name}» — одним сообщением, "
+        "по строке на поле:\n\n"
+        "Название: ООО «Ромашка»\nИНН: 1234567890\nОГРН: 1234567890123\nАдрес: г. Москва, ул. Примерная, д. 1\n\n"
+        "Если реквизитов пока нет под рукой — напиши «пропустить», добавишь позже через /set_operator "
+        "(без них согласие сотрудников собирать не получится)."
+    )
+
+
 async def on_add_project_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/add_project — цепочка из трёх шагов, прежде чем рынок реально
-    появится в боте: название → реквизиты юрлица-оператора ПДн → текст
-    согласия (готовый от юристов или автогенерация). Так у нового рынка
-    сразу есть всё нужное для согласия сотрудников, а не задним числом
-    через /set_operator//set_consent_text."""
+    """/add_project — цепочка шагов, прежде чем рынок реально появится в
+    боте: название → привязка к Surf Coffee (да/нет, и если да — какая
+    точка) → реквизиты юрлица-оператора ПДн → текст согласия (готовый от
+    юристов или автогенерация). Привязка к Surf Coffee решает, будет ли
+    план по выручке/чекам тянуться автоматически (revenue.daily_plan) или
+    его придётся вносить вручную через /set_monthly_plan — а также какой
+    текст регламента «Отчёт по смене» увидит Управляющий этой точки (см.
+    bot/regulations.py)."""
     if not is_owner(update.effective_user.id):
         return
     _awaiting_new_project[str(update.effective_user.id)] = {"step": "name"}
-    await update.effective_message.reply_text("Название нового проекта/точки Surf?")
+    await update.effective_message.reply_text("Название нового проекта/точки?")
 
 
 async def on_manager_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -1079,14 +1109,48 @@ async def on_manager_admin_reply(update: Update, context: ContextTypes.DEFAULT_T
             await update.effective_message.reply_text(f"Проект «{text}» уже существует.")
             return True
         state["name"] = text
-        state["step"] = "operator"
+        state["step"] = "surf_check"
         await update.effective_message.reply_text(
-            f"Реквизиты юрлица/ИП — оператора персональных данных для «{text}» — одним сообщением, "
-            "по строке на поле:\n\n"
-            "Название: ООО «Ромашка»\nИНН: 1234567890\nОГРН: 1234567890123\nАдрес: г. Москва, ул. Примерная, д. 1\n\n"
-            "Если реквизитов пока нет под рукой — напиши «пропустить», добавишь позже через /set_operator "
-            "(без них согласие сотрудников собирать не получится)."
+            f"«{text}» — это точка Surf Coffee? Если да, план по выручке и чекам бот будет забирать сам "
+            "из системы учёта. Если нет — план придётся вносить вручную через /set_monthly_plan.\n\n"
+            "Ответь «да» или «нет»."
         )
+        return True
+
+    if state["step"] == "surf_check":
+        answer = text.lower()
+        if answer in ("нет", "no", "-", "н"):
+            state["surf_spot_key"] = ""
+            state["step"] = "operator"
+            await update.effective_message.reply_text(_operator_prompt(state["name"]))
+            return True
+        if answer in ("да", "yes", "y", "д"):
+            available = available_spot_keys()
+            if not available:
+                state["surf_spot_key"] = ""
+                state["step"] = "operator"
+                await update.effective_message.reply_text(
+                    "Все известные точки Surf Coffee в системе учёта уже привязаны к другим проектам — "
+                    "план для этого проекта придётся вносить вручную через /set_monthly_plan."
+                )
+                await update.effective_message.reply_text(_operator_prompt(state["name"]))
+                return True
+            state["available_spots"] = available
+            state["step"] = "surf_spot"
+            options = "\n".join(f"{i}. {SPOTS[key]['title']}" for i, key in enumerate(available, start=1))
+            await update.effective_message.reply_text(f"Какая именно точка? Ответь номером:\n\n{options}")
+            return True
+        await update.effective_message.reply_text("Не понял ответ, ответь «да» или «нет».")
+        return True
+
+    if state["step"] == "surf_spot":
+        available = state.get("available_spots", [])
+        if not text.isdigit() or not (1 <= int(text) <= len(available)):
+            await update.effective_message.reply_text(f"Ответь числом от 1 до {len(available)}.")
+            return True
+        state["surf_spot_key"] = available[int(text) - 1]
+        state["step"] = "operator"
+        await update.effective_message.reply_text(_operator_prompt(state["name"]))
         return True
 
     if state["step"] == "operator":
@@ -1113,6 +1177,8 @@ async def on_manager_admin_reply(update: Update, context: ContextTypes.DEFAULT_T
     del _awaiting_new_project[user_id]
     consent_text = "" if text.lower() in ("нет", "-", "пропустить") else text
     market = create_market(state["name"])
+    if state.get("surf_spot_key"):
+        set_market_surf_spot_key(market["id"], state["surf_spot_key"])
     fields = state.get("operator_fields") or {}
     if fields:
         set_market_operator(

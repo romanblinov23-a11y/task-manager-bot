@@ -104,6 +104,19 @@ def set_market_send_to_finance(market_id: int, enabled: bool) -> None:
         conn.close()
 
 
+def set_market_surf_spot_key(market_id: int, spot_key: str) -> None:
+    """Привязка рынка к точке в системе учёта Surf Coffee (см.
+    revenue.surfcoffee_client.SPOTS) — задаётся при /add_project. Пустая
+    строка — рынок не подключён, план по выручке/чекам вносится вручную
+    (см. /set_monthly_plan) вместо автоматической подтяжки из Surf Coffee."""
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE market SET surf_spot_key = ? WHERE id = ?", (spot_key, market_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def create_market(name: str, city: str = "", our_point_name: str | None = None) -> dict:
     """Добавляет новый рынок/проект — используется владельцем через /add_project.
     Рынок и проект в системе — одна сущность: как только он появляется здесь,
