@@ -113,14 +113,6 @@ CREATE TABLE IF NOT EXISTS report_chat (
     PRIMARY KEY (market_id, role)
 );
 
-CREATE TABLE IF NOT EXISTS monthly_plan (
-    market_id INTEGER NOT NULL REFERENCES market(id),
-    plan_date TEXT NOT NULL,
-    revenue_plan REAL NOT NULL,
-    checks_plan INTEGER NOT NULL,
-    PRIMARY KEY (market_id, plan_date)
-);
-
 CREATE TABLE IF NOT EXISTS meeting_schedule (
     market_id INTEGER NOT NULL REFERENCES market(id),
     meeting_type TEXT NOT NULL CHECK (meeting_type IN ('team', 'managers')),

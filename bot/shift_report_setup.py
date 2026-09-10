@@ -1,4 +1,3 @@
-import calendar
 import re
 from datetime import timedelta
 
@@ -12,13 +11,14 @@ from config.timeutil import today as tz_today
 from monitoring.constants import BLOCK_REPORTS
 from monitoring.managers import get_managers_for_market, get_markets_for_manager, is_owner, is_reports_editor
 from monitoring.markets import get_effective_shift_report_time, get_market, list_markets, set_market_shift_report_time
-from monitoring.monthly_plan import get_daily_plan
 from monitoring.shift_reports import get_report_chat
 from monitoring.shift_schedule import get_scheduled_manager
 
 _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
-_STEPS = ["managers", "team_chat", "monthly_plan", "schedule", "final"]
+# План на месяц ушёл из чек-листа — теперь бот сам забирает его из Surf
+# Coffee (см. revenue.daily_plan), Управляющему вносить нечего.
+_STEPS = ["managers", "team_chat", "schedule", "final"]
 
 # telegram_user_id (str) управляющего/владельца -> {"market_id": int} — ждём время сбора отчёта
 _awaiting_time: dict[str, dict] = {}
@@ -65,32 +65,13 @@ def _check_team_chat(market: dict) -> tuple[bool, str]:
     )
 
 
-def _check_monthly_plan(market: dict) -> tuple[bool, str]:
-    today = tz_today()
-    last_day = calendar.monthrange(today.year, today.month)[1]
-    missing = []
-    d = today
-    while d.month == today.month:
-        if not get_daily_plan(market["id"], d.isoformat()):
-            missing.append(d.isoformat())
-        if d.day == last_day:
-            break
-        d = d + timedelta(days=1)
-    if not missing:
-        return True, "3️⃣ План на месяц — ✅\nВнесён на все оставшиеся дни месяца."
-    return False, (
-        f"3️⃣ План на месяц — ❌ (не хватает {len(missing)} дн., начиная с {fmt_date(missing[0])})\n\n"
-        "Что сделать: команда /set_monthly_plan — пришли построчно «ДД.ММ.ГГГГ - выручка - чеки» на каждый день месяца."
-    )
-
-
 def _check_schedule(market: dict) -> tuple[bool, str]:
     today = tz_today()
     missing = [d for d in ((today + timedelta(days=i)).isoformat() for i in range(14)) if not get_scheduled_manager(market["id"], d)]
     if not missing:
-        return True, "4️⃣ График ответственных — ✅\nЗаполнен минимум на 2 недели вперёд."
+        return True, "3️⃣ График ответственных — ✅\nЗаполнен минимум на 2 недели вперёд."
     return False, (
-        f"4️⃣ График ответственных — ❌ (не хватает {len(missing)} дн., начиная с {fmt_date(missing[0])})\n\n"
+        f"3️⃣ График ответственных — ❌ (не хватает {len(missing)} дн., начиная с {fmt_date(missing[0])})\n\n"
         "Что сделать: команда /set_shift_schedule — пришли построчно «ДД.ММ.ГГГГ - @username» минимум на 2 недели вперёд."
     )
 
@@ -98,14 +79,12 @@ def _check_schedule(market: dict) -> tuple[bool, str]:
 _CHECKS = {
     "managers": _check_managers,
     "team_chat": _check_team_chat,
-    "monthly_plan": _check_monthly_plan,
     "schedule": _check_schedule,
 }
 
 _STEP_WARN_ROMAN = {
     "managers": "ещё нет сотрудников с доступом к отчётам по смене",
     "team_chat": "ещё не привязал чат команды точки",
-    "monthly_plan": "ещё не внёс план на все оставшиеся дни месяца",
     "schedule": "ещё не заполнил график ответственных на 2 недели вперёд",
 }
 
@@ -121,9 +100,10 @@ def _final_text(market: dict) -> str:
             "только Роме для ознакомления, без обязательного согласования, но он может задать тебе уточняющий вопрос."
         )
     return (
-        "5️⃣ Как это будет работать дальше\n\n"
+        "4️⃣ Как это будет работать дальше\n\n"
         f"• Каждый день в {time_str} я сам напишу сотруднику по графику с кнопками «📝 Заполню сам» / «🚫 Не работаю сегодня».\n"
         f"• Если к {escalate} отчёт так и не начат — подключу тебя, с теми же двумя кнопками.\n"
+        "• План на день (выручка/чеки) я сам беру из системы учёта Surf Coffee — вносить его больше не нужно.\n"
         "• Как только анкета заполнена — отчёт для команды точки уходит в чат сразу, без согласований, каждый день без исключений.\n"
         f"• Отчёт для финпартнёров сначала приходит на согласование тебе — можно поправить любое поле. {finance_line}\n\n"
         "Настройка сохранена. Если что-то из пунктов выше ещё не готово — донастрой в любой момент и просто "
@@ -167,7 +147,8 @@ async def _ask_time(message, user_id: str, market: dict) -> None:
 async def on_set_evening_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/set_evening_report — управляющий настраивает время сбора вечернего
     отчёта для своей точки и проходит чек-лист готовности (сотрудники в
-    боте, чат команды точки, план на месяц, график ответственных)."""
+    боте, чат команды точки, график ответственных). План на месяц в
+    чек-лист не входит — бот сам забирает его из Surf Coffee."""
     user = update.effective_user
     if not is_reports_editor(user.id):
         await update.effective_message.reply_text(

@@ -83,7 +83,6 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
     if BLOCK_REPORTS in blocks:
         if manager["position"] == "Управляющий":
             commands.append(BotCommand("set_shift_schedule", "Загрузить график смен на 2 недели"))
-            commands.append(BotCommand("set_monthly_plan", "Загрузить план по выручке/чекам на месяц"))
             commands.append(BotCommand("set_evening_report", "Настроить вечерний отчёт: время сбора и чек-лист"))
             commands.append(BotCommand("reset_shift_report", "⚠️ Сбросить сегодняшний отчёт по смене"))
         commands.append(BotCommand("shift_report", "Внести отчёт по смене принудительно"))

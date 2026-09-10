@@ -74,9 +74,6 @@ SHIFT_REPORT_ESCALATE_OFFSET_MINUTES = int(os.getenv("SHIFT_REPORT_ESCALATE_OFFS
 SHIFT_REPORT_OWNER_ESCALATE_TIME = os.getenv("SHIFT_REPORT_OWNER_ESCALATE_TIME", "09:00")
 SHIFT_REPORT_DISPATCH_TIME = os.getenv("SHIFT_REPORT_DISPATCH_TIME", "10:00")
 
-# Когда просить у управляющего план по выручке/чекам на следующий месяц (25-е
-# число); ручной ввод через /set_monthly_plan доступен в любой день.
-MONTHLY_PLAN_REMINDER_TIME = os.getenv("MONTHLY_PLAN_REMINDER_TIME", "10:00")
 # Утреннее напоминание команде точки — план на день + старт/стоп-листы со вчера
 TEAM_MORNING_REPORT_TIME = os.getenv("TEAM_MORNING_REPORT_TIME", "07:00")
 

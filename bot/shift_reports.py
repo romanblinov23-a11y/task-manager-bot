@@ -1,3 +1,4 @@
+import asyncio
 import html
 import re
 from datetime import date as _date
@@ -20,7 +21,6 @@ from monitoring.managers import (
     market_reports_enabled,
 )
 from monitoring.markets import get_effective_shift_report_time, get_market, list_markets
-from monitoring.monthly_plan import get_daily_plan
 from monitoring.shift_reports import (
     create_or_get_draft,
     delete_report,
@@ -33,6 +33,7 @@ from monitoring.shift_reports import (
     set_report_status,
 )
 from monitoring.shift_schedule import list_markets_with_shift
+from revenue.daily_plan import fetch_daily_plan
 
 _WEEKDAY_RU = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
 
@@ -448,17 +449,19 @@ def _plan_count_sentence(label: str, data: dict, key: str, plan_value: int | Non
     return f"{label}: {current_str} (план {_format_count(plan_value)}{delta_part})"
 
 
-def render_team_report(market: dict, report_date: str, data: dict) -> str:
+def render_team_report(market: dict, report_date: str, data: dict, plan: dict | None) -> str:
     """Вечерний отчёт для чата команды точки — уходит сразу после сбора,
     без цепочки согласований (см. _dispatch_team_report_now). Выручка/чеки/
-    средний чек сравниваются с планом на месяц (см. monitoring.monthly_plan),
-    а не с прошлой неделей, как в отчёте для финпартнёров. «Чеки» — то же
-    поле «Гости», что и в остальном отчёте (отдельно чеки не считаем).
+    средний чек сравниваются с планом на месяц — план забирается из Surf
+    Coffee (см. revenue.daily_plan.fetch_daily_plan, вызывающий код
+    получает его заранее и передаёт сюда готовым, т.к. сам запрос
+    асинхронный/сетевой, а эта функция — чистое форматирование), а не с
+    прошлой неделей, как в отчёте для финпартнёров. «Чеки» — то же поле
+    «Гости», что и в остальном отчёте (отдельно чеки не считаем).
     Формат — «френдли», под аудиторию (в основном молодые сотрудники): по
     метрике на строку с эмодзи вместо плотного текста, реальный жирный
     через HTML (см. _dispatch_team_report_now — parse_mode="HTML"), без
     строгих требований к формату, в отличие от отчёта финпартнёрам."""
-    plan = get_daily_plan(market["id"], report_date)
     plan_revenue = plan["revenue_plan"] if plan else None
     plan_checks = plan["checks_plan"] if plan else None
     plan_avg_check = (plan_revenue / plan_checks) if plan and plan_checks else None
@@ -490,14 +493,16 @@ def render_team_report(market: dict, report_date: str, data: dict) -> str:
     return "\n".join(lines)
 
 
-def render_team_morning_message(market: dict, date_iso: str) -> str | None:
+def render_team_morning_message(market: dict, date_iso: str, plan: dict | None) -> str | None:
     """Утреннее напоминание команде: план на сегодня (выручка/чеки/средний
     чек — последний бот считает сам) плюс старт/стоп-лист, события и
     пожелание, собранные вчера вечером на этот случай (см. _QUESTIONS —
     tomorrow_*). Возвращает None, если плана на сегодня нет вообще —
-    тогда сообщение не отправляется (см. send_team_morning_messages).
-    Формат — тот же «френдли» стиль, что и у вечернего отчёта команде."""
-    plan = get_daily_plan(market["id"], date_iso)
+    тогда сообщение не отправляется (см. send_team_morning_messages). План
+    заберён вызывающим кодом заранее через revenue.daily_plan.fetch_daily_plan
+    (сетевой запрос к Surf Coffee, поэтому не здесь — эта функция синхронное
+    чистое форматирование). Формат — тот же «френдли» стиль, что и у
+    вечернего отчёта команде."""
     if not plan:
         return None
     revenue = plan["revenue_plan"]
@@ -514,7 +519,7 @@ def render_team_morning_message(market: dict, date_iso: str) -> str | None:
         "",
         "<b>🎯 План на сегодня</b>",
         f"💰 Выручка: {_format_money(revenue)} ₽",
-        f"🧾 Чеков: {_format_count(checks)}",
+        f"🧾 Чеков: {_format_count(checks) if checks is not None else '—'}",
         f"🎯 Средний чек: {_format_money(avg_check)} ₽",
         "",
         "<b>🚀 Старт-лист</b>",
@@ -632,7 +637,8 @@ async def _dispatch_team_report_now(bot: Bot, market: dict, report_date: str, da
     team_chat = get_report_chat(market["id"], "team")
     if not team_chat:
         return False
-    text = render_team_report(market, report_date, data)
+    plan = await asyncio.to_thread(fetch_daily_plan, market["id"], report_date)
+    text = render_team_report(market, report_date, data, plan)
     if team_chat.get("mention"):
         text = f"{team_chat['mention']}\n\n{text}"
     try:
@@ -1295,7 +1301,8 @@ async def send_team_morning_messages(bot: Bot) -> None:
         team_chat = get_report_chat(market["id"], "team")
         if not team_chat:
             continue
-        text = render_team_morning_message(market, date_iso)
+        plan = await asyncio.to_thread(fetch_daily_plan, market["id"], date_iso)
+        text = render_team_morning_message(market, date_iso, plan)
         if text is None:
             continue
         if team_chat.get("mention"):
