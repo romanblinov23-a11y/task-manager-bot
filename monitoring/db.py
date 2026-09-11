@@ -124,14 +124,16 @@ CREATE TABLE IF NOT EXISTS monthly_plan (
     PRIMARY KEY (market_id, plan_date)
 );
 
--- Дневная норма списаний по каждой из трёх статей (себестоимость, ₽/день) —
--- одна на рынок, не по дням, задаётся владельцем через /set_writeoff_plan.
--- Используется для отклонения факт/план в отчёте команде (см. bot/shift_reports.py).
+-- Норма списаний по каждой из трёх статей — % от выручки (не фикс. сумма
+-- в рублях, т.к. списания естественно растут/падают вместе с потоком),
+-- одна на рынок, задаётся владельцем через /set_writeoff_plan. Плановая
+-- сумма в рублях считается на лету от выручки — плановой (утреннее
+-- сообщение команде) или фактической (вечерний отчёт), см. bot/shift_reports.py.
 CREATE TABLE IF NOT EXISTS writeoff_plan (
     market_id INTEGER PRIMARY KEY REFERENCES market(id),
-    expiry_plan REAL NOT NULL,
-    compliment_plan REAL NOT NULL,
-    staff_meals_plan REAL NOT NULL
+    expiry_pct REAL NOT NULL,
+    compliment_pct REAL NOT NULL,
+    staff_meals_pct REAL NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS meeting_schedule (
@@ -189,6 +191,14 @@ def init_schema() -> None:
     только через /add_project."""
     conn = get_connection()
     try:
+        # Норма списаний перешла с фиксированной суммы в рублях на % от
+        # выручки ещё до того, как владелец успел ввести реальные значения —
+        # на базе со старой (рублёвой) версией таблицы просто пересоздаём её
+        # под новую схему, так гораздо надёжнее, чем пытаться "перевести"
+        # рубли в проценты без знания выручки на тот момент.
+        old_cols = {row["name"] for row in conn.execute("PRAGMA table_info(writeoff_plan)")}
+        if "expiry_plan" in old_cols:
+            conn.execute("DROP TABLE writeoff_plan")
         conn.executescript(_SCHEMA)
         _ensure_column(conn, "manager", "status", "status TEXT NOT NULL DEFAULT 'pending'")
         _ensure_column(conn, "manager", "blocks", "blocks TEXT NOT NULL DEFAULT 'tasks,monitoring'")

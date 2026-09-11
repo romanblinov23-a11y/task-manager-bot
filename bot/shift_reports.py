@@ -33,7 +33,7 @@ from monitoring.shift_reports import (
     set_report_status,
 )
 from monitoring.shift_schedule import list_markets_with_shift
-from monitoring.writeoff_plan import get_writeoff_plan
+from monitoring.writeoff_plan import get_writeoff_plan, writeoff_plan_amounts
 from revenue.daily_plan import fetch_daily_plan
 
 _WEEKDAY_RU = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
@@ -507,10 +507,13 @@ def render_team_report(market: dict, report_date: str, data: dict, plan: dict | 
     справочные, без плана: часы больше/меньше — не хорошо и не плохо само
     по себе, а для SPMH пока сравниваем с тем же днём прошлой недели, а не
     с планом (плана по часам не заводим). Списания сравниваются с дневной
-    нормой по точке (см. monitoring.writeoff_plan, /set_writeoff_plan) — в
-    отличие от выручки/чеков/SPMH, для них ниже плана — хорошо (зелёная
-    стрелка), выше — плохо (см. _colored_arrow). Если норма ещё не задана
-    владельцем — показываем только факт, без сравнения.
+    нормой по точке — % от выручки (см. monitoring.writeoff_plan,
+    /set_writeoff_plan), план в рублях считаем от ФАКТИЧЕСКОЙ выручки за
+    сегодня (в утреннем сообщении команде — наоборот, от плановой, см.
+    render_team_morning_message). В отличие от выручки/чеков/SPMH, для
+    списаний ниже плана — хорошо (зелёная стрелка), выше — плохо (см.
+    _colored_arrow). Если норма ещё не задана владельцем — показываем
+    только факт, без сравнения.
     Формат — «френдли», под аудиторию (в основном молодые сотрудники): по
     метрике на строку с эмодзи вместо плотного текста, реальный жирный
     через HTML (см. _dispatch_team_report_now — parse_mode="HTML"), без
@@ -535,9 +538,13 @@ def render_team_report(market: dict, report_date: str, data: dict, plan: dict | 
             spmh_line = f"📈 SPMH: {_format_money(spmh)} ₽/ч (неделю назад {_format_money(prev_spmh)} ₽/ч, {delta})"
 
     writeoff_plan = get_writeoff_plan(market["id"])
-    expiry_plan = writeoff_plan["expiry_plan"] if writeoff_plan else None
-    compliment_plan = writeoff_plan["compliment_plan"] if writeoff_plan else None
-    staff_meals_plan = writeoff_plan["staff_meals_plan"] if writeoff_plan else None
+    if writeoff_plan and revenue is not None:
+        plan_amounts = writeoff_plan_amounts(writeoff_plan, revenue)
+        expiry_plan = plan_amounts["expiry"]
+        compliment_plan = plan_amounts["compliment"]
+        staff_meals_plan = plan_amounts["staff_meals"]
+    else:
+        expiry_plan = compliment_plan = staff_meals_plan = None
 
     lines = [
         f"Йоу! Мы закрыли ещё один день ({weekday}, {fmt_date(report_date)}), вот что получилось 👇",
@@ -575,8 +582,11 @@ def render_team_morning_message(market: dict, date_iso: str, plan: dict | None) 
     тогда сообщение не отправляется (см. send_team_morning_messages). План
     заберён вызывающим кодом заранее через revenue.daily_plan.fetch_daily_plan
     (сетевой запрос к Surf Coffee, поэтому не здесь — эта функция синхронное
-    чистое форматирование). Формат — тот же «френдли» стиль, что и у
-    вечернего отчёта команде."""
+    чистое форматирование). Норма списаний (% от выручки, см.
+    monitoring.writeoff_plan) здесь считается от ПЛАНОВОЙ выручки — факта
+    дня ещё нет, в отличие от вечернего отчёта (см. render_team_report),
+    где та же норма считается от фактической. Формат — тот же «френдли»
+    стиль, что и у вечернего отчёта команде."""
     if not plan:
         return None
     revenue = plan["revenue_plan"]
@@ -588,6 +598,18 @@ def render_team_morning_message(market: dict, date_iso: str, plan: dict | None) 
     prev_data = prev_report["data"] if prev_report else {}
     weekday = _WEEKDAY_RU[_date.fromisoformat(date_iso).weekday()]
 
+    writeoff_plan = get_writeoff_plan(market["id"])
+    writeoff_lines = []
+    if writeoff_plan:
+        amounts = writeoff_plan_amounts(writeoff_plan, revenue)
+        writeoff_lines = [
+            "",
+            "<b>♻️ Норма списаний на сегодня</b>",
+            f"🗑 Срок годности: {_format_money(amounts['expiry'])} ₽",
+            f"🎁 Комплимент: {_format_money(amounts['compliment'])} ₽",
+            f"🍽 Питание: {_format_money(amounts['staff_meals'])} ₽",
+        ]
+
     lines = [
         f"Доброе утро, Серферы! ☀️ {weekday.capitalize()}, {fmt_date(date_iso)} — новый день, новая волна 🌊",
         "",
@@ -595,6 +617,7 @@ def render_team_morning_message(market: dict, date_iso: str, plan: dict | None) 
         f"💰 Выручка: {_format_money(revenue)} ₽",
         f"🧾 Чеков: {_format_count(checks) if checks is not None else '—'}",
         f"🎯 Средний чек: {_format_money(avg_check)} ₽",
+        *writeoff_lines,
         "",
         "<b>🚀 Старт-лист</b>",
         _esc(prev_data.get("tomorrow_start_list")),
