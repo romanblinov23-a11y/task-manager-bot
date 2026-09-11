@@ -33,6 +33,7 @@ from monitoring.shift_reports import (
     set_report_status,
 )
 from monitoring.shift_schedule import list_markets_with_shift
+from monitoring.writeoff_plan import get_writeoff_plan
 from revenue.daily_plan import fetch_daily_plan
 
 _WEEKDAY_RU = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
@@ -45,6 +46,15 @@ _QUESTIONS = [
     {"key": "revenue_noncash", "kind": "money", "prompt": "💳 Безналичная выручка\nНапример: 324675,87"},
     {"key": "avg_check", "kind": "money", "prompt": "🧾 Средний чек за смену\nНапример: 789,87"},
     {"key": "guests", "kind": "guests", "prompt": "👥 Количество гостей\nНапример: 1 234"},
+    {
+        "key": "staff_hours",
+        "kind": "hours",
+        "prompt": (
+            "🕒 Отработанные часы смены\n"
+            "Сколько часов суммарно отработала сегодня команда точки (менеджеры, бариста, «уютные»), "
+            "БЕЗ учёта клинеров. Например: 42,5"
+        ),
+    },
     {
         "key": "writeoff_expiry",
         "kind": "money",
@@ -136,6 +146,7 @@ _FIELD_LABELS = {
     "revenue_noncash": "Безнал",
     "avg_check": "Средний чек",
     "guests": "Гости",
+    "staff_hours": "Часы смены (без клинеров)",
     "writeoff_expiry": "Срок годности",
     "writeoff_compliment": "Комплимент",
     "writeoff_staff_meals": "Питание",
@@ -216,6 +227,11 @@ def _count_field(data: dict, key: str) -> str:
     return _format_count(value) if value is not None else "—"
 
 
+def _hours_field(data: dict, key: str) -> str:
+    value = _parse_amount(data.get(key, "") or "")
+    return f"{value:.1f}".replace(".", ",") if value is not None else "—"
+
+
 def _validate_reconciliation(answers: dict) -> tuple[str, list[str]] | None:
     """Сверка сумм: наличные+безнал должны совпадать с выручкой до копейки,
     средний чек должен совпадать с выручкой/гости с точностью до рубля.
@@ -256,6 +272,11 @@ def _validate(kind: str, text: str) -> tuple[str | None, str | None]:
     if kind == "guests":
         if _parse_int(text) is None:
             return None, "🤔 Нужно целое число. Попробуй ещё раз, например: 737"
+        return text, None
+    if kind == "hours":
+        value = _parse_amount(text)
+        if value is None or value <= 0:
+            return None, "🤔 Не понял число часов. Попробуй ещё раз, например: 42,5"
         return text, None
     if kind == "time":
         if not re.match(r"^\d{1,2}:\d{2}$", text):
@@ -429,12 +450,36 @@ def _esc(text: str | None) -> str:
     return html.escape(text, quote=False) if text else "—"
 
 
-def _plan_money_sentence(label: str, data: dict, key: str, plan_value: float | None) -> str:
+def _colored_arrow(current: float, plan_value: float, higher_is_better: bool) -> str:
+    """🟢/🔴 передаёт «хорошо/плохо для бизнеса», а не просто «выросло/
+    упало»: для выручки/чеков/SPMH выше плана — хорошо (higher_is_better),
+    а для списаний, наоборот, ниже плана — хорошо (higher_is_better=False)
+    — стрелка при этом всегда показывает реальное направление факта
+    относительно плана, цвет вокруг неё — оценку этого направления."""
+    if current > plan_value:
+        return "🟢▲" if higher_is_better else "🔴▲"
+    if current < plan_value:
+        return "🔴▼" if higher_is_better else "🟢▼"
+    return "⚪️➡️"
+
+
+def _delta_text_colored(current: float, plan_value: float, decimals: int = 0, higher_is_better: bool = True) -> str:
+    """«+6,0% 🟢▲» — Δ% к плану с цветной стрелкой (см. _colored_arrow).
+    Пустая строка, если сравнивать не с чем (plan_value = 0/None)."""
+    if not plan_value:
+        return ""
+    pct = (current - plan_value) / plan_value * 100
+    sign = "+" if pct > 0 else ("−" if pct < 0 else "")
+    pct_str = f"{abs(pct):.{decimals}f}".replace(".", ",")
+    return f"{sign}{pct_str}% {_colored_arrow(current, plan_value, higher_is_better)}"
+
+
+def _plan_money_sentence(label: str, data: dict, key: str, plan_value: float | None, higher_is_better: bool = True) -> str:
     current = _parse_amount(data.get(key, "") or "")
     current_str = f"{_format_money(current)} ₽" if current is not None else "—"
     if current is None or plan_value is None:
         return f"{label}: {current_str}"
-    delta = _delta_text(current, plan_value, decimals=0)
+    delta = _delta_text_colored(current, plan_value, decimals=0, higher_is_better=higher_is_better)
     delta_part = f", {delta}" if delta else ""
     return f"{label}: {current_str} (план {_format_money(plan_value)} ₽{delta_part})"
 
@@ -444,7 +489,7 @@ def _plan_count_sentence(label: str, data: dict, key: str, plan_value: int | Non
     current_str = _format_count(current) if current is not None else "—"
     if current is None or plan_value is None:
         return f"{label}: {current_str}"
-    delta = _delta_text(current, plan_value, decimals=0)
+    delta = _delta_text_colored(current, plan_value, decimals=0)
     delta_part = f", {delta}" if delta else ""
     return f"{label}: {current_str} (план {_format_count(plan_value)}{delta_part})"
 
@@ -458,6 +503,14 @@ def render_team_report(market: dict, report_date: str, data: dict, plan: dict | 
     асинхронный/сетевой, а эта функция — чистое форматирование), а не с
     прошлой неделей, как в отчёте для финпартнёров. «Чеки» — то же поле
     «Гости», что и в остальном отчёте (отдельно чеки не считаем).
+    Часы смены (без клинеров) и SPMH (выручка ÷ часы, считает бот) —
+    справочные, без плана: часы больше/меньше — не хорошо и не плохо само
+    по себе, а для SPMH пока сравниваем с тем же днём прошлой недели, а не
+    с планом (плана по часам не заводим). Списания сравниваются с дневной
+    нормой по точке (см. monitoring.writeoff_plan, /set_writeoff_plan) — в
+    отличие от выручки/чеков/SPMH, для них ниже плана — хорошо (зелёная
+    стрелка), выше — плохо (см. _colored_arrow). Если норма ещё не задана
+    владельцем — показываем только факт, без сравнения.
     Формат — «френдли», под аудиторию (в основном молодые сотрудники): по
     метрике на строку с эмодзи вместо плотного текста, реальный жирный
     через HTML (см. _dispatch_team_report_now — parse_mode="HTML"), без
@@ -467,6 +520,25 @@ def render_team_report(market: dict, report_date: str, data: dict, plan: dict | 
     plan_avg_check = (plan_revenue / plan_checks) if plan and plan_checks else None
     weekday = _WEEKDAY_RU[_date.fromisoformat(report_date).weekday()]
 
+    revenue = _parse_amount(data.get("revenue_total", "") or "")
+    hours = _parse_amount(data.get("staff_hours", "") or "")
+    spmh = revenue / hours if revenue is not None and hours else None
+    spmh_line = f"📈 SPMH: {_format_money(spmh)} ₽/ч" if spmh is not None else "📈 SPMH: —"
+    if spmh is not None:
+        prev_report = get_previous_week_report(market["id"], report_date)
+        prev_data = prev_report["data"] if prev_report else {}
+        prev_revenue = _parse_amount(prev_data.get("revenue_total", "") or "")
+        prev_hours = _parse_amount(prev_data.get("staff_hours", "") or "")
+        prev_spmh = prev_revenue / prev_hours if prev_revenue is not None and prev_hours else None
+        if prev_spmh:
+            delta = _delta_text_colored(spmh, prev_spmh, decimals=1)
+            spmh_line = f"📈 SPMH: {_format_money(spmh)} ₽/ч (неделю назад {_format_money(prev_spmh)} ₽/ч, {delta})"
+
+    writeoff_plan = get_writeoff_plan(market["id"])
+    expiry_plan = writeoff_plan["expiry_plan"] if writeoff_plan else None
+    compliment_plan = writeoff_plan["compliment_plan"] if writeoff_plan else None
+    staff_meals_plan = writeoff_plan["staff_meals_plan"] if writeoff_plan else None
+
     lines = [
         f"Йоу! Мы закрыли ещё один день ({weekday}, {fmt_date(report_date)}), вот что получилось 👇",
         "",
@@ -475,11 +547,13 @@ def render_team_report(market: dict, report_date: str, data: dict, plan: dict | 
         _plan_count_sentence("🧾 Чеков", data, "guests", plan_checks),
         _plan_money_sentence("🎯 Средний чек", data, "avg_check", plan_avg_check),
         f"⏱ Среднее время отдачи: {data.get('avg_service_time', '—')}",
+        f"🕒 Часы смены (без клинеров): {_hours_field(data, 'staff_hours')} ч",
+        spmh_line,
         "",
         "<b>♻️ Списания</b>",
-        f"🗑 Срок годности: {_money_field(data, 'writeoff_expiry')} ₽",
-        f"🎁 Комплимент: {_money_field(data, 'writeoff_compliment')} ₽",
-        f"🍽 Питание: {_money_field(data, 'writeoff_staff_meals')} ₽",
+        _plan_money_sentence("🗑 Срок годности", data, "writeoff_expiry", expiry_plan, higher_is_better=False),
+        _plan_money_sentence("🎁 Комплимент", data, "writeoff_compliment", compliment_plan, higher_is_better=False),
+        _plan_money_sentence("🍽 Питание", data, "writeoff_staff_meals", staff_meals_plan, higher_is_better=False),
         "",
         "<b>💬 Как прошла смена</b>",
         f"📝 Общая работа: {_esc(data.get('comment_general'))}",

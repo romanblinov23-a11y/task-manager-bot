@@ -124,6 +124,16 @@ CREATE TABLE IF NOT EXISTS monthly_plan (
     PRIMARY KEY (market_id, plan_date)
 );
 
+-- Дневная норма списаний по каждой из трёх статей (себестоимость, ₽/день) —
+-- одна на рынок, не по дням, задаётся владельцем через /set_writeoff_plan.
+-- Используется для отклонения факт/план в отчёте команде (см. bot/shift_reports.py).
+CREATE TABLE IF NOT EXISTS writeoff_plan (
+    market_id INTEGER PRIMARY KEY REFERENCES market(id),
+    expiry_plan REAL NOT NULL,
+    compliment_plan REAL NOT NULL,
+    staff_meals_plan REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS meeting_schedule (
     market_id INTEGER NOT NULL REFERENCES market(id),
     meeting_type TEXT NOT NULL CHECK (meeting_type IN ('team', 'managers')),

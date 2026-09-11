@@ -23,6 +23,7 @@ from bot.shift_reports import (
 from bot.shift_schedule_flow import on_set_shift_schedule_reply
 from bot.status_cycle import on_employee_reply
 from bot.task_manage import on_task_manage_reply
+from bot.writeoff_plan_flow import on_set_writeoff_plan_reply
 from config.settings import ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
 from config.timeutil import now as tz_now
 from monitoring.markets import list_market_names
@@ -93,6 +94,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if await on_set_monthly_plan_reply(update, context):
+        return
+
+    if await on_set_writeoff_plan_reply(update, context):
         return
 
     if await on_shift_report_reply(update, context):

@@ -249,6 +249,12 @@ from bot.status_cycle import on_status_button, run_status_check
 from bot.task_manage import on_employee_command, on_status_command, on_task_manage_callback
 from bot.task_work import on_task_work_choice, on_task_work_command
 from bot.weekly_report import on_weekly_command, send_weekly_report
+from bot.writeoff_plan_flow import (
+    on_set_writeoff_plan_cancel,
+    on_set_writeoff_plan_command,
+    on_set_writeoff_plan_confirm,
+    on_set_writeoff_plan_market_choice,
+)
 from config.settings import (
     DAILY_REPORT_TIME,
     MEETING_CONFIRM_TIME,
@@ -366,6 +372,7 @@ _ROMAN_COMMANDS = [
     BotCommand("chats", "Чаты — по проекту: рабочий и рассылки отчётов"),
     BotCommand("monitor_chats", "Чаты под мониторингом триггерных слов"),
     BotCommand("add_project", "Добавить проект/точку Surf"),
+    BotCommand("set_writeoff_plan", "Установить нормы списаний по точке"),
     BotCommand("market_settings", "Настройка рынка: ПДн, финпартнёры, чаты отчётов"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
     BotCommand("revenue", "Выручка: отчёты, план/факт, P&L"),
@@ -430,6 +437,7 @@ def main() -> None:
     app.add_handler(CommandHandler("set_shift_schedule", on_set_shift_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_evening_report", on_set_evening_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_monthly_plan", on_set_monthly_plan_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("set_writeoff_plan", on_set_writeoff_plan_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("register_report_chat", on_register_report_chat, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("report_chats", on_report_chats_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("shift_report", on_shift_report_command, filters=filters.ChatType.PRIVATE))
@@ -550,6 +558,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_set_monthly_plan_market_choice, pattern=r"^monthplan_market:"))
     app.add_handler(CallbackQueryHandler(on_set_monthly_plan_confirm, pattern=r"^monthplan_confirm$"))
     app.add_handler(CallbackQueryHandler(on_set_monthly_plan_cancel, pattern=r"^monthplan_cancel$"))
+    app.add_handler(CallbackQueryHandler(on_set_writeoff_plan_market_choice, pattern=r"^writeoffplan_market:"))
+    app.add_handler(CallbackQueryHandler(on_set_writeoff_plan_confirm, pattern=r"^writeoffplan_confirm$"))
+    app.add_handler(CallbackQueryHandler(on_set_writeoff_plan_cancel, pattern=r"^writeoffplan_cancel$"))
     app.add_handler(CallbackQueryHandler(on_register_report_chat_market, pattern=r"^shrc_market:"))
     app.add_handler(CallbackQueryHandler(on_register_report_chat_role, pattern=r"^shrc_role:"))
     app.add_handler(CallbackQueryHandler(on_report_chats_list, pattern=r"^shrc_list$"))
