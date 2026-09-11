@@ -225,6 +225,10 @@ from bot.shift_reports import (
     on_shift_report_owner_approve,
     on_shift_report_reply,
     on_shift_report_supervisor_approve,
+    on_view_reports_command,
+    on_view_reports_day_choice,
+    on_view_reports_market_choice,
+    on_view_reports_month_choice,
     send_pending_reports,
     send_shift_report_escalations,
     send_shift_report_kickoffs,
@@ -374,6 +378,7 @@ _ROMAN_COMMANDS = [
     BotCommand("add_project", "Добавить проект/точку Surf"),
     BotCommand("market_settings", "Настройка рынка: ПДн, финпартнёры, чаты отчётов, нормы списаний"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
+    BotCommand("view_reports", "Посмотреть отчёт по смене за любой день"),
     BotCommand("revenue", "Выручка: отчёты, план/факт, P&L"),
     BotCommand("messaging", "Написать сотруднику, в чат или разослать группе"),
     BotCommand("regulations", "Регламенты работы с ботом"),
@@ -441,6 +446,7 @@ def main() -> None:
     app.add_handler(CommandHandler("report_chats", on_report_chats_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("shift_report", on_shift_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("reset_shift_report", on_reset_shift_report_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("view_reports", on_view_reports_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("messaging", on_messaging_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("revenue", on_revenue_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("accounting", on_accounting_command, filters=filters.ChatType.PRIVATE))
@@ -569,6 +575,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_reset_shift_report_market_choice, pattern=r"^shrep_resetmarket:"))
     app.add_handler(CallbackQueryHandler(on_reset_shift_report_confirm, pattern=r"^shrep_resetconfirm:"))
     app.add_handler(CallbackQueryHandler(on_reset_shift_report_cancel, pattern=r"^shrep_resetcancel$"))
+    app.add_handler(CallbackQueryHandler(on_view_reports_market_choice, pattern=r"^shrep_viewmarket:"))
+    app.add_handler(CallbackQueryHandler(on_view_reports_month_choice, pattern=r"^shrep_viewmonth:"))
+    app.add_handler(CallbackQueryHandler(on_view_reports_day_choice, pattern=r"^shrep_viewday:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_fill, pattern=r"^shrep_fill:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_instruction_choice, pattern=r"^shrep_instr:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_fix_field, pattern=r"^shrep_fixfield:"))

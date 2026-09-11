@@ -28,6 +28,7 @@ from monitoring.shift_reports import (
     get_report,
     get_report_by_date,
     get_report_chat,
+    list_report_dates_for_month,
     list_reports_by_status_and_date,
     save_report_data,
     set_report_status,
@@ -35,6 +36,7 @@ from monitoring.shift_reports import (
 from monitoring.shift_schedule import list_markets_with_shift
 from monitoring.writeoff_plan import get_writeoff_plan, writeoff_plan_amounts
 from revenue.daily_plan import fetch_daily_plan
+from revenue.plan_report import MONTH_NAMES_RU
 
 _WEEKDAY_RU = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
 
@@ -995,6 +997,143 @@ async def on_reset_shift_report_cancel(update: Update, context: ContextTypes.DEF
         return
     await query.answer()
     await query.edit_message_text("Отменено.")
+
+
+_VIEW_STATUS_ICONS = {
+    "collecting": "🕓",
+    "awaiting_supervisor": "🔁",
+    "awaiting_owner": "⏳",
+    "approved": "✅",
+    "dispatched": "📨",
+}
+
+
+def _view_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"shrep_viewmarket:{m['id']}")] for m in markets])
+
+
+def _view_month_options() -> list[tuple[int, int]]:
+    """(год, месяц) — текущий и 2 предыдущих, от нового к старому."""
+    today = tz_today()
+    months = []
+    for delta in (0, -1, -2):
+        m = today.month + delta
+        y = today.year + (m - 1) // 12
+        m = (m - 1) % 12 + 1
+        months.append((y, m))
+    return months
+
+
+def _view_month_keyboard(market_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(f"{MONTH_NAMES_RU[m]} {y}", callback_data=f"shrep_viewmonth:{market_id}:{y:04d}-{m:02d}")]
+            for y, m in _view_month_options()
+        ]
+    )
+
+
+def _view_day_keyboard(market_id: int, reports: list[dict]) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for report in reports:
+        day = report["report_date"][8:10]
+        icon = _VIEW_STATUS_ICONS.get(report["status"], "")
+        row.append(InlineKeyboardButton(f"{day} {icon}", callback_data=f"shrep_viewday:{market_id}:{report['report_date']}"))
+        if len(row) == 4:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("↩️ Другой месяц", callback_data=f"shrep_viewmarket:{market_id}")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _view_report_keyboard(report_id: int) -> InlineKeyboardMarkup:
+    """Единственное действие в архиве — вернуть отчёт управляющему на
+    правку. Переиспользует ровно тот же путь, что и «💬 Запросить
+    дополнения» при обычном согласовании (см. on_shift_report_more_info):
+    статус откатывается на 'awaiting_supervisor', управляющему уходит
+    замечание владельца и пикер полей для точечной правки."""
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("📤 Отправить на доработку управляющему", callback_data=f"shrep_moreinfo:{report_id}")]]
+    )
+
+
+async def on_view_reports_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/view_reports — владелец открывает любой отчёт по смене за любой
+    день: сначала кофейня (если их несколько), потом месяц (текущий и 2
+    предыдущих), потом конкретная дата — в списке только даты, на которые
+    отчёт реально есть, с иконкой статуса."""
+    if not is_owner(update.effective_user.id):
+        return
+    markets = list_markets()
+    if not markets:
+        await update.effective_message.reply_text("Пока нет ни одной кофейни.")
+        return
+    if len(markets) == 1:
+        await update.effective_message.reply_text(
+            f"Кофейня: {markets[0]['name']}. Какой месяц?", reply_markup=_view_month_keyboard(markets[0]["id"])
+        )
+        return
+    await update.effective_message.reply_text("По какой кофейне смотрим отчёты?", reply_markup=_view_market_pick_keyboard(markets))
+
+
+async def on_view_reports_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Кофейня не найдена", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(f"Кофейня: {market['name']}. Какой месяц?", reply_markup=_view_month_keyboard(market_id))
+
+
+async def on_view_reports_month_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    _, market_id_raw, year_month = query.data.split(":", 2)
+    market_id = int(market_id_raw)
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Кофейня не найдена", show_alert=True)
+        return
+    year, month = (int(part) for part in year_month.split("-"))
+    reports = list_report_dates_for_month(market_id, year, month)
+    await query.answer()
+    if not reports:
+        await query.edit_message_text(
+            f"«{market['name']}», {MONTH_NAMES_RU[month]} {year} — отчётов за этот месяц нет.",
+            reply_markup=_view_month_keyboard(market_id),
+        )
+        return
+    await query.edit_message_text(
+        f"«{market['name']}», {MONTH_NAMES_RU[month]} {year} — какой день?",
+        reply_markup=_view_day_keyboard(market_id, reports),
+    )
+
+
+async def on_view_reports_day_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    _, market_id_raw, report_date = query.data.split(":", 2)
+    market_id = int(market_id_raw)
+    market = get_market(market_id)
+    report = get_report_by_date(market_id, report_date)
+    if not market or not report:
+        await query.answer("Отчёт не найден", show_alert=True)
+        return
+    await query.answer()
+    text = render_finance_report(market, report_date, report["data"])
+    await query.message.reply_text(text, reply_markup=_view_report_keyboard(report["id"]))
 
 
 async def on_shift_report_absent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

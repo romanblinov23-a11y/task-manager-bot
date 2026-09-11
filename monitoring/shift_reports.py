@@ -116,6 +116,23 @@ def get_previous_week_report(market_id: int, report_date: str) -> dict | None:
         conn.close()
 
 
+def list_report_dates_for_month(market_id: int, year: int, month: int) -> list[dict]:
+    """{"report_date", "status"} по каждому отчёту рынка за календарный
+    месяц, от новых к старым — для владельца, который листает архив через
+    /view_reports (см. bot/shift_reports.py). Не каждый день месяца
+    обязательно имеет отчёт (выходной, ещё не наступил и т.п.)."""
+    prefix = f"{year:04d}-{month:02d}-"
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT report_date, status FROM shift_report WHERE market_id = ? AND report_date LIKE ? ORDER BY report_date DESC",
+            (market_id, f"{prefix}%"),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
 def list_reports_by_status_and_date(report_date: str, status: str) -> list[dict]:
     conn = get_connection()
     try:
