@@ -401,12 +401,40 @@ def _count_compare_line(label: str, data: dict, key: str) -> str:
     return f"{label}: {current_str}"
 
 
+def _writeoff_compare_line(label: str, data: dict, key: str, plan_value: float | None) -> str:
+    """Как _money_compare_line — тот же плоский стиль без ₽ и эмодзи (см.
+    render_finance_report), но сравнение не с прошлой неделей, а с нормой
+    списаний (% от факт. выручки, см. monitoring.writeoff_plan) — и
+    цветная стрелка (см. _colored_arrow), т.к. для списаний ниже нормы
+    хорошо, а не выше."""
+    current = _parse_amount(data.get(key, "") or "")
+    current_str = _format_money(current) if current is not None else "—"
+    if current is None or plan_value is None:
+        return f"{label}: {current_str}"
+    delta = _delta_text_colored(current, plan_value, decimals=0, higher_is_better=False)
+    delta_part = f", {delta}" if delta else ""
+    return f"{label}: {current_str} (норма {_format_money(plan_value)}{delta_part})"
+
+
 def render_finance_report(market: dict, report_date: str, data: dict) -> str:
     """Форматирует отчёт строго по образцу Романа: заголовок, денежные
     поля (у выручки/среднего чека/гостей — сравнение с той же датой на
     прошлой неделе и % изменения), блок комментариев без разметки, состав
-    смены свободным текстом в конце."""
+    смены свободным текстом в конце. Списания — исключение: сравниваются
+    не с прошлой неделей, а с нормой (% от фактической выручки, см.
+    monitoring.writeoff_plan) с цветной стрелкой — так же, как в отчёте
+    для команды точки (см. render_team_report), просто без эмодзи и
+    HTML-разметки, раз этот отчёт идёт финпартнёрам/Роме на согласование."""
     weekday = _WEEKDAY_RU[_date.fromisoformat(report_date).weekday()].capitalize()
+
+    revenue = _parse_amount(data.get("revenue_total", "") or "")
+    writeoff_plan = get_writeoff_plan(market["id"])
+    if writeoff_plan and revenue is not None:
+        amounts = writeoff_plan_amounts(writeoff_plan, revenue)
+        expiry_plan, compliment_plan, staff_meals_plan = amounts["expiry"], amounts["compliment"], amounts["staff_meals"]
+    else:
+        expiry_plan = compliment_plan = staff_meals_plan = None
+
     lines = [
         f"Отчет {fmt_date(report_date)} {weekday}",
         "",
@@ -418,9 +446,9 @@ def render_finance_report(market: dict, report_date: str, data: dict) -> str:
         "",
         _count_compare_line("гости", data, "guests"),
         "",
-        f"срок годности: {_money_field(data, 'writeoff_expiry')}",
-        f"комплимент: {_money_field(data, 'writeoff_compliment')}",
-        f"питание: {_money_field(data, 'writeoff_staff_meals')}",
+        _writeoff_compare_line("срок годности", data, "writeoff_expiry", expiry_plan),
+        _writeoff_compare_line("комплимент", data, "writeoff_compliment", compliment_plan),
+        _writeoff_compare_line("питание", data, "writeoff_staff_meals", staff_meals_plan),
         "",
         f"Среднее время отдачи за день: {data.get('avg_service_time', '—')}",
         "",
