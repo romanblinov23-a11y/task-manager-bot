@@ -420,12 +420,103 @@ def render_finance_report(market: dict, report_date: str, data: dict) -> str:
     """Форматирует отчёт строго по образцу Романа: заголовок, денежные
     поля (у выручки/среднего чека/гостей — сравнение с той же датой на
     прошлой неделе и % изменения), блок комментариев без разметки, состав
-    смены свободным текстом в конце. Списания — исключение: сравниваются
-    не с прошлой неделей, а с нормой (% от фактической выручки, см.
-    monitoring.writeoff_plan) с цветной стрелкой — так же, как в отчёте
-    для команды точки (см. render_team_report), просто без эмодзи и
-    HTML-разметки, раз этот отчёт идёт финпартнёрам/Роме на согласование."""
+    смены свободным текстом в конце. Это ВНЕШНИЙ вариант — именно его
+    видит Управляющий на своё согласование и именно он реально уходит в
+    чат финпартнёров (см. send_pending_reports); план (по любым полям,
+    включая списания) сюда сознательно не подмешиваем — новый формат с
+    планом ещё не согласован с партнёрами. Для Ромы — отдельная, более
+    подробная версия, см. render_owner_finance_report."""
     weekday = _WEEKDAY_RU[_date.fromisoformat(report_date).weekday()].capitalize()
+    lines = [
+        f"Отчет {fmt_date(report_date)} {weekday}",
+        "",
+        _money_compare_line("выручка", data, "revenue_total"),
+        f"наличные: {_money_field(data, 'revenue_cash')}",
+        f"безнал: {_money_field(data, 'revenue_noncash')}",
+        "",
+        _money_compare_line("средний чек", data, "avg_check"),
+        "",
+        _count_compare_line("гости", data, "guests"),
+        "",
+        f"срок годности: {_money_field(data, 'writeoff_expiry')}",
+        f"комплимент: {_money_field(data, 'writeoff_compliment')}",
+        f"питание: {_money_field(data, 'writeoff_staff_meals')}",
+        "",
+        f"Среднее время отдачи за день: {data.get('avg_service_time', '—')}",
+        "",
+        "Комментарий:",
+        "",
+        f"Общая работа точки: {data.get('comment_general', '—')}",
+        "",
+        f"Обслуживание гостей: {data.get('comment_service', '—')}",
+        "",
+        f"Конфликтные ситуации: {data.get('comment_conflicts', '—')}",
+        "",
+        f"Оборудование: {data.get('comment_equipment', '—')}",
+        "",
+        f"Погода и поток гостей: {data.get('comment_weather_flow', '—')}",
+        "",
+        f"Значимые события: {data.get('comment_events', '—')}",
+        "Состав смены:",
+        data.get("shift_composition", "—"),
+    ]
+    return "\n".join(lines)
+
+
+def _plan_compare_line_money(label: str, data: dict, key: str, plan_value: float | None, higher_is_better: bool = True) -> str:
+    """Как _money_compare_line — тот же плоский стиль без ₽ и эмодзи, но
+    сравнение с планом (а не прошлой неделей) и цветная стрелка (см.
+    _colored_arrow). Используется только в render_owner_finance_report —
+    внутреннем варианте отчёта для Ромы, наружу (финпартнёрам) не идёт."""
+    current = _parse_amount(data.get(key, "") or "")
+    current_str = _format_money(current) if current is not None else "—"
+    if current is None or plan_value is None:
+        return f"{label}: {current_str}"
+    delta = _delta_text_colored(current, plan_value, decimals=0, higher_is_better=higher_is_better)
+    delta_part = f", {delta}" if delta else ""
+    return f"{label}: {current_str} (план {_format_money(plan_value)}{delta_part})"
+
+
+def _plan_compare_line_count(label: str, data: dict, key: str, plan_value: int | None) -> str:
+    current = _parse_int(data.get(key, "") or "")
+    current_str = _format_count(current) if current is not None else "—"
+    if current is None or plan_value is None:
+        return f"{label}: {current_str}"
+    delta = _delta_text_colored(current, plan_value, decimals=0)
+    delta_part = f", {delta}" if delta else ""
+    return f"{label}: {current_str} (план {_format_count(plan_value)}{delta_part})"
+
+
+def _writeoff_compare_line(label: str, data: dict, key: str, plan_value: float | None) -> str:
+    """Как _money_compare_line — тот же плоский стиль без ₽ и эмодзи, но
+    сравнение не с прошлой неделей, а с нормой списаний (% от факт.
+    выручки, см. monitoring.writeoff_plan) — и цветная стрелка (см.
+    _colored_arrow), т.к. для списаний ниже нормы хорошо, а не выше.
+    Используется только в render_owner_finance_report."""
+    current = _parse_amount(data.get(key, "") or "")
+    current_str = _format_money(current) if current is not None else "—"
+    if current is None or plan_value is None:
+        return f"{label}: {current_str}"
+    delta = _delta_text_colored(current, plan_value, decimals=0, higher_is_better=False)
+    delta_part = f", {delta}" if delta else ""
+    return f"{label}: {current_str} (норма {_format_money(plan_value)}{delta_part})"
+
+
+def render_owner_finance_report(market: dict, report_date: str, data: dict, plan: dict | None) -> str:
+    """Версия отчёта только для Ромы (согласование как владельца, и архив
+    /view_reports) — в отличие от render_finance_report (то, что видит
+    Управляющий и что реально уходит финпартнёрам), здесь выручка/средний
+    чек/гости сравниваются с ПЛАНОМ на день (а не прошлой неделей, план —
+    из Surf Coffee/ручной, см. revenue.daily_plan.fetch_daily_plan), и
+    списания — с нормой (% от факт. выручки, см. monitoring.writeoff_plan),
+    оба с цветной стрелкой, как в отчёте команде (см. render_team_report).
+    Новый формат ещё не согласован с партнёрами, поэтому наружу эта
+    версия не уходит — только Роме, во внутреннем чате."""
+    weekday = _WEEKDAY_RU[_date.fromisoformat(report_date).weekday()].capitalize()
+
+    plan_revenue = plan["revenue_plan"] if plan else None
+    plan_checks = plan["checks_plan"] if plan else None
+    plan_avg_check = (plan_revenue / plan_checks) if plan and plan_checks else None
 
     revenue = _parse_amount(data.get("revenue_total", "") or "")
     writeoff_plan = get_writeoff_plan(market["id"])
@@ -438,13 +529,13 @@ def render_finance_report(market: dict, report_date: str, data: dict) -> str:
     lines = [
         f"Отчет {fmt_date(report_date)} {weekday}",
         "",
-        _money_compare_line("выручка", data, "revenue_total"),
+        _plan_compare_line_money("выручка", data, "revenue_total", plan_revenue),
         f"наличные: {_money_field(data, 'revenue_cash')}",
         f"безнал: {_money_field(data, 'revenue_noncash')}",
         "",
-        _money_compare_line("средний чек", data, "avg_check"),
+        _plan_compare_line_money("средний чек", data, "avg_check", plan_avg_check),
         "",
-        _count_compare_line("гости", data, "guests"),
+        _plan_compare_line_count("гости", data, "guests", plan_checks),
         "",
         _writeoff_compare_line("срок годности", data, "writeoff_expiry", expiry_plan),
         _writeoff_compare_line("комплимент", data, "writeoff_compliment", compliment_plan),
@@ -697,10 +788,14 @@ async def _send_for_owner_approval(bot: Bot, report_id: int) -> None:
     приходит Роме, но только для ознакомления: без обязательного
     согласования (статус сразу 'approved', так что и утренняя эскалация
     его не тронет) и без реальной рассылки в чат (см. send_pending_reports),
-    только с возможностью задать управляющему уточняющий вопрос."""
+    только с возможностью задать управляющему уточняющий вопрос. Рома
+    видит отдельную, более подробную версию отчёта — с планом по всем
+    показателям (см. render_owner_finance_report) — не ту, что уходит
+    финпартнёрам."""
     report = get_report(report_id)
     market = get_market(report["market_id"])
-    text = render_finance_report(market, report["report_date"], report["data"])
+    plan = await asyncio.to_thread(fetch_daily_plan, report["market_id"], report["report_date"])
+    text = render_owner_finance_report(market, report["report_date"], report["data"], plan)
     if market.get("send_to_finance", 1):
         set_report_status(report_id, "awaiting_owner")
         await bot.send_message(
@@ -1160,7 +1255,8 @@ async def on_view_reports_day_choice(update: Update, context: ContextTypes.DEFAU
         await query.answer("Отчёт не найден", show_alert=True)
         return
     await query.answer()
-    text = render_finance_report(market, report_date, report["data"])
+    plan = await asyncio.to_thread(fetch_daily_plan, market_id, report_date)
+    text = render_owner_finance_report(market, report_date, report["data"], plan)
     await query.message.reply_text(text, reply_markup=_view_report_keyboard(report["id"]))
 
 

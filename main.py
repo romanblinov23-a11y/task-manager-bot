@@ -225,7 +225,6 @@ from bot.revenue_flow import (
     on_revenue_plan_month_choice,
     on_revenue_plan_spot_choice,
     on_revenue_pnl_choice,
-    send_daily_revenue_report,
     send_monthly_revenue_report,
     send_weekly_revenue_report,
 )
@@ -383,10 +382,6 @@ async def _monthly_plan_reminder_job(context) -> None:
 
 async def _meeting_confirmation_job(context) -> None:
     await send_meeting_confirmations(context.bot)
-
-
-async def _revenue_daily_job(context) -> None:
-    await send_daily_revenue_report(context.bot)
 
 
 async def _revenue_weekly_job(context) -> None:
@@ -702,14 +697,13 @@ def main() -> None:
     app.job_queue.run_repeating(_handover_kickoff_job, interval=60, first=0)
     app.job_queue.run_daily(_monthly_plan_reminder_job, time=_parse_time(MONTHLY_PLAN_REMINDER_TIME, TZ))
     app.job_queue.run_daily(_meeting_confirmation_job, time=_parse_time(MEETING_CONFIRM_TIME, TZ))
-    # Выручка (revenue/, перенесено из "Аналитика Ивана"): вт-вс — ежедневный
-    # отчёт (по понедельникам не нужен, его покрывает недельный), пн — недельный,
-    # 1-е число (самофильтрация внутри job'а) — месячный. Все три — в одно время.
-    app.job_queue.run_daily(
-        _revenue_daily_job,
-        time=_parse_time(REVENUE_REPORT_TIME, TZ),
-        days=(_WEEKDAYS["tue"], _WEEKDAYS["wed"], _WEEKDAYS["thu"], _WEEKDAYS["fri"], _WEEKDAYS["sat"], _WEEKDAYS["sun"]),
-    )
+    # Выручка (revenue/, перенесено из "Аналитика Ивана"): недельный и месячный
+    # автоотчёты остаются — они дают тренд/аналитику, которых нет в отчёте по
+    # смене. Ежедневный автоотчёт ОТКЛЮЧЁН: по всем точкам, подключённым к
+    # Surf Coffee, Рома и так каждый день получает план+факт по этой же точке
+    # в самом отчёте по смене (см. render_owner_finance_report) — дублировать
+    # его отдельным сообщением из НИМБа не нужно. Ручной вызов остаётся
+    # доступен через /revenue → «📊 Отчёт за сегодня», если понадобится.
     app.job_queue.run_daily(
         _revenue_weekly_job,
         time=_parse_time(REVENUE_REPORT_TIME, TZ),

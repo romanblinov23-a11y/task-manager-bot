@@ -284,12 +284,6 @@ async def _send_scheduled(bot: Bot, run_sync, label: str) -> None:
             pass
 
 
-async def send_daily_revenue_report(bot: Bot) -> None:
-    """Вт-Вс в REVENUE_REPORT_TIME (см. main.py) — по понедельникам не
-    запускается, недельный отчёт его покрывает."""
-    await _send_scheduled(bot, _run_daily_sync, "ежедневный отчёт по выручке")
-
-
 async def send_weekly_revenue_report(bot: Bot) -> None:
     """По понедельникам в REVENUE_REPORT_TIME — итоги прошедшей недели."""
     await _send_scheduled(bot, _run_weekly_sync, "недельный отчёт по выручке")
