@@ -51,6 +51,30 @@ from bot.data_export import (
 from bot.dashboard_tasks_cmd import on_dashboard_tasks_command
 from bot.fix_reading import on_fix_reading_command, on_fix_reading_market_choice, on_fix_reading_pick
 from bot.handlers import on_group_message
+from bot.handover_reports import (
+    on_handover_absent,
+    on_handover_fill,
+    on_handover_fix_field,
+    on_handover_report_command,
+    on_handover_report_manual_market_choice,
+    on_reset_handover_report_cancel,
+    on_reset_handover_report_command,
+    on_reset_handover_report_confirm,
+    on_reset_handover_report_market_choice,
+    send_handover_kickoffs,
+)
+from bot.handover_schedule_flow import (
+    on_set_handover_schedule_cancel,
+    on_set_handover_schedule_command,
+    on_set_handover_schedule_confirm,
+    on_set_handover_schedule_market_choice,
+    send_handover_schedule_requests,
+)
+from bot.handover_setup import (
+    on_set_handover_report_command,
+    on_set_handover_report_market_choice,
+    on_set_handover_report_next,
+)
 from bot.manager_admin import (
     on_add_project_command,
     on_manager_approve,
@@ -343,6 +367,15 @@ async def _team_morning_report_job(context) -> None:
     await send_team_morning_messages(context.bot)
 
 
+async def _handover_schedule_reminder_job(context) -> None:
+    if _is_shift_schedule_request_day():
+        await send_handover_schedule_requests(context.bot)
+
+
+async def _handover_kickoff_job(context) -> None:
+    await send_handover_kickoffs(context.bot)
+
+
 async def _monthly_plan_reminder_job(context) -> None:
     if tz_today().day == 25:
         await send_monthly_plan_requests(context.bot)
@@ -447,6 +480,10 @@ def main() -> None:
     app.add_handler(CommandHandler("shift_report", on_shift_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("reset_shift_report", on_reset_shift_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("view_reports", on_view_reports_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("set_handover_schedule", on_set_handover_schedule_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("set_handover_report", on_set_handover_report_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("handover_report", on_handover_report_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("reset_handover_report", on_reset_handover_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("messaging", on_messaging_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("revenue", on_revenue_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("accounting", on_accounting_command, filters=filters.ChatType.PRIVATE))
@@ -588,6 +625,18 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_shift_report_edit_cancel, pattern=r"^shrep_editcancel:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_edit, pattern=r"^shrep_edit:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_more_info, pattern=r"^shrep_moreinfo:"))
+    app.add_handler(CallbackQueryHandler(on_set_handover_schedule_market_choice, pattern=r"^hosched_market:"))
+    app.add_handler(CallbackQueryHandler(on_set_handover_schedule_confirm, pattern=r"^hosched_confirm$"))
+    app.add_handler(CallbackQueryHandler(on_set_handover_schedule_cancel, pattern=r"^hosched_cancel$"))
+    app.add_handler(CallbackQueryHandler(on_set_handover_report_market_choice, pattern=r"^hosetup_market:"))
+    app.add_handler(CallbackQueryHandler(on_set_handover_report_next, pattern=r"^hosetup_next:"))
+    app.add_handler(CallbackQueryHandler(on_handover_report_manual_market_choice, pattern=r"^horep_manualmarket:"))
+    app.add_handler(CallbackQueryHandler(on_reset_handover_report_market_choice, pattern=r"^horep_resetmarket:"))
+    app.add_handler(CallbackQueryHandler(on_reset_handover_report_confirm, pattern=r"^horep_resetconfirm:"))
+    app.add_handler(CallbackQueryHandler(on_reset_handover_report_cancel, pattern=r"^horep_resetcancel$"))
+    app.add_handler(CallbackQueryHandler(on_handover_fill, pattern=r"^horep_fill:"))
+    app.add_handler(CallbackQueryHandler(on_handover_absent, pattern=r"^horep_absent:"))
+    app.add_handler(CallbackQueryHandler(on_handover_fix_field, pattern=r"^horep_fixfield:"))
     app.add_handler(CallbackQueryHandler(on_messaging_choice, pattern=r"^msgmenu:"))
     app.add_handler(CallbackQueryHandler(on_revenue_choice, pattern=r"^revenue:"))
     app.add_handler(CallbackQueryHandler(on_revenue_pnl_choice, pattern=r"^rev_pnl:"))
@@ -647,6 +696,10 @@ def main() -> None:
     app.job_queue.run_daily(_shift_report_owner_escalate_job, time=_parse_time(SHIFT_REPORT_OWNER_ESCALATE_TIME, TZ))
     app.job_queue.run_daily(_shift_report_dispatch_job, time=_parse_time(SHIFT_REPORT_DISPATCH_TIME, TZ))
     app.job_queue.run_daily(_team_morning_report_job, time=_parse_time(TEAM_MORNING_REPORT_TIME, TZ))
+    app.job_queue.run_daily(_handover_schedule_reminder_job, time=_parse_time(SHIFT_SCHEDULE_REMINDER_TIME, TZ))
+    # Как и у вечернего отчёта, каждая точка задаёт своё время запроса
+    # пересменки — кикофф сверяется раз в минуту, а не одним run_daily.
+    app.job_queue.run_repeating(_handover_kickoff_job, interval=60, first=0)
     app.job_queue.run_daily(_monthly_plan_reminder_job, time=_parse_time(MONTHLY_PLAN_REMINDER_TIME, TZ))
     app.job_queue.run_daily(_meeting_confirmation_job, time=_parse_time(MEETING_CONFIRM_TIME, TZ))
     # Выручка (revenue/, перенесено из "Аналитика Ивана"): вт-вс — ежедневный

@@ -4,6 +4,9 @@ from telegram.ext import ContextTypes
 from bot.competitors import on_add_competitor_reply
 from bot.confirmation import on_deadline_reply, on_edit_reply, send_confirmation_cards
 from bot.fix_reading import on_fix_reading_reply
+from bot.handover_reports import on_handover_reply
+from bot.handover_schedule_flow import on_set_handover_schedule_reply
+from bot.handover_setup import on_set_handover_report_reply
 from bot.manager_admin import on_manager_admin_reply
 from bot.market_operator import on_set_consent_text_reply, on_set_operator_reply
 from bot.meetings import on_meeting_agenda_reply, on_meeting_postpone_reply, on_meeting_schedule_reply
@@ -106,6 +109,15 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if await on_shift_report_more_info_reply(update, context):
+        return
+
+    if await on_set_handover_schedule_reply(update, context):
+        return
+
+    if await on_set_handover_report_reply(update, context):
+        return
+
+    if await on_handover_reply(update, context):
         return
 
     if await on_register_report_chat_mention_reply(update, context):

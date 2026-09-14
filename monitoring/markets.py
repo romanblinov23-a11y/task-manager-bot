@@ -1,4 +1,4 @@
-from config.settings import SHIFT_REPORT_START_TIME
+from config.settings import HANDOVER_START_TIME, SHIFT_REPORT_START_TIME
 from monitoring.db import get_connection
 
 
@@ -89,6 +89,22 @@ def set_market_shift_report_time(market_id: int, time_str: str) -> None:
 
 def get_effective_shift_report_time(market: dict) -> str:
     return market.get("shift_report_time") or SHIFT_REPORT_START_TIME
+
+
+def set_market_handover_time(market_id: int, time_str: str) -> None:
+    """Своё время запроса пересменки на точке (управляющий задаёт через
+    /set_handover_report). Пустая строка возвращает к глобальному дефолту
+    HANDOVER_START_TIME (см. get_effective_handover_time)."""
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE market SET handover_time = ? WHERE id = ?", (time_str, market_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_effective_handover_time(market: dict) -> str:
+    return market.get("handover_time") or HANDOVER_START_TIME
 
 
 def set_market_send_to_finance(market_id: int, enabled: bool) -> None:

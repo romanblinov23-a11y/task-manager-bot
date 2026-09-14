@@ -37,13 +37,18 @@ BLOCK_MEETINGS = "meetings"
 # (см. bot.accounting_flow, /accounting) — финансовые данные, владелец
 # включает конкретному Управляющему вручную.
 BLOCK_ACCOUNTING = "accounting"
-AVAILABLE_BLOCKS = [BLOCK_TASKS, BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_MEETINGS, BLOCK_ACCOUNTING]
+# Пересменка — отдельный от "Отчётов по смене" блок (см. bot/handover_reports.py):
+# свой график, своё время, но без цепочки согласований. Как и "Собрания"/
+# "Работа с системой учёта" — не выдаётся по умолчанию.
+BLOCK_HANDOVER = "handover"
+AVAILABLE_BLOCKS = [BLOCK_TASKS, BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_MEETINGS, BLOCK_ACCOUNTING, BLOCK_HANDOVER]
 BLOCK_LABELS = {
     BLOCK_TASKS: "Задачи (трекер)",
     BLOCK_MONITORING: "Мониторинг конкурентов",
     BLOCK_REPORTS: "Отчёты по смене",
     BLOCK_MEETINGS: "Собрания",
     BLOCK_ACCOUNTING: "Работа с системой учёта",
+    BLOCK_HANDOVER: "Пересменка",
 }
 DEFAULT_BLOCKS = f"{BLOCK_TASKS},{BLOCK_MONITORING},{BLOCK_REPORTS}"
 

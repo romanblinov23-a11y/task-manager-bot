@@ -113,6 +113,32 @@ CREATE TABLE IF NOT EXISTS report_chat (
     PRIMARY KEY (market_id, role)
 );
 
+-- График пересменок — параллель shift_schedule, отдельный график: кто
+-- сдаёт пересменку в какую дату (не обязательно тот же человек, что
+-- сдаёт вечерний отчёт по смене).
+CREATE TABLE IF NOT EXISTS handover_schedule (
+    market_id INTEGER NOT NULL REFERENCES market(id),
+    handover_date TEXT NOT NULL,
+    manager_telegram_user_id INTEGER NOT NULL,
+    PRIMARY KEY (market_id, handover_date)
+);
+
+-- Отчёты по пересменке — параллель shift_report, но без цепочки
+-- согласований: анкета уходит прямо в чат команды точки, как только
+-- заполнена (см. bot/handover_reports.py), поэтому статус — только
+-- 'collecting'/'dispatched'.
+CREATE TABLE IF NOT EXISTS handover_report (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_id INTEGER NOT NULL REFERENCES market(id),
+    report_date TEXT NOT NULL,
+    reporter_telegram_user_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'collecting',
+    data TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT,
+    UNIQUE (market_id, report_date)
+);
+
 -- Ручной план по выручке/чекам — только для рынков БЕЗ привязки к Surf
 -- Coffee (market.surf_spot_key пуст, см. /add_project). Для подключённых
 -- рынков план забирается напрямую из Surf Coffee (см. revenue/daily_plan.py).
@@ -222,6 +248,9 @@ def init_schema() -> None:
         # bot.market_settings). Не у всех точек финпартнёры есть.
         _ensure_column(conn, "market", "shift_report_time", "shift_report_time TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "market", "send_to_finance", "send_to_finance INTEGER NOT NULL DEFAULT 1")
+        # Своё время запроса пересменки на точке (пусто — берём глобальный
+        # дефолт HANDOVER_START_TIME), см. /set_handover_report.
+        _ensure_column(conn, "market", "handover_time", "handover_time TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "report_chat", "mention", "mention TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "report_chat", "message_thread_id", "message_thread_id INTEGER")
         # Разовое переименование: "Аврора" и "Yandex" — одна и та же точка,

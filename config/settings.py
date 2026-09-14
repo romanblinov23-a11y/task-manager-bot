@@ -74,6 +74,14 @@ SHIFT_REPORT_ESCALATE_OFFSET_MINUTES = int(os.getenv("SHIFT_REPORT_ESCALATE_OFFS
 SHIFT_REPORT_OWNER_ESCALATE_TIME = os.getenv("SHIFT_REPORT_OWNER_ESCALATE_TIME", "09:00")
 SHIFT_REPORT_DISPATCH_TIME = os.getenv("SHIFT_REPORT_DISPATCH_TIME", "10:00")
 
+# Пересменка (раздел "handover report") — отдельный блок от вечернего отчёта
+# по смене: свой график (кто сдаёт пересменку), своё время запроса, но без
+# цепочки согласований — анкета уходит прямо в чат команды точки, как
+# только заполнена (см. bot/handover_reports.py). Своё время задаётся через
+# /set_handover_report (см. monitoring.markets.get_effective_handover_time);
+# это значение — только дефолт для точек, которые ещё не настроили своё.
+HANDOVER_START_TIME = os.getenv("HANDOVER_START_TIME", "15:00")
+
 # Когда просить у управляющего план по выручке/чекам на следующий месяц (25-е
 # число) — только для рынков БЕЗ привязки к Surf Coffee (см. /add_project);
 # для подключённых план бот забирает сам. Ручной ввод через /set_monthly_plan

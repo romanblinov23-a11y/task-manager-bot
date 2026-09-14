@@ -15,7 +15,17 @@ from bot.regulations import send_next_regulation
 from bot.trainee_onboarding import start_trainee_track
 from config.chats import get_all_bindings, get_all_thread_bindings, get_project_for_chat, register_chat, unregister_chat
 from config.settings import OWNER_TELEGRAM_IDS
-from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_ACCOUNTING, BLOCK_LABELS, BLOCK_MEETINGS, BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_TASKS, MANAGER_POSITIONS
+from monitoring.constants import (
+    AVAILABLE_BLOCKS,
+    BLOCK_ACCOUNTING,
+    BLOCK_HANDOVER,
+    BLOCK_LABELS,
+    BLOCK_MEETINGS,
+    BLOCK_MONITORING,
+    BLOCK_REPORTS,
+    BLOCK_TASKS,
+    MANAGER_POSITIONS,
+)
 from monitoring.db import reset_market_players
 from monitoring.managers import (
     acknowledge_block,
@@ -108,6 +118,12 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
         commands.append(BotCommand("announce_meeting", "Собрать повестку и разослать ближайшее собрание"))
     if BLOCK_ACCOUNTING in blocks and manager["position"] == "Управляющий":
         commands.append(BotCommand("accounting", "Работа с системой учёта: план, факт"))
+    if BLOCK_HANDOVER in blocks:
+        if manager["position"] == "Управляющий":
+            commands.append(BotCommand("set_handover_schedule", "Загрузить график пересменок на 2 недели"))
+            commands.append(BotCommand("set_handover_report", "Настроить пересменку: время запроса и чек-лист"))
+            commands.append(BotCommand("reset_handover_report", "⚠️ Сбросить сегодняшнюю пересменку"))
+        commands.append(BotCommand("handover_report", "Внести пересменку принудительно"))
     if commands:
         commands.append(BotCommand("regulations", "Регламенты работы с ботом"))
     return commands

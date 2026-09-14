@@ -1,5 +1,5 @@
 from config.settings import OWNER_TELEGRAM_IDS
-from monitoring.constants import BLOCK_ACCOUNTING, BLOCK_MEETINGS, BLOCK_MONITORING, BLOCK_REPORTS, DEFAULT_BLOCKS
+from monitoring.constants import BLOCK_ACCOUNTING, BLOCK_HANDOVER, BLOCK_MEETINGS, BLOCK_MONITORING, BLOCK_REPORTS, DEFAULT_BLOCKS
 from monitoring.db import get_connection
 
 
@@ -156,6 +156,39 @@ def market_reports_enabled(market_id: int) -> bool:
     if not supervisor:
         return True
     return _has_reports_block(supervisor)
+
+
+def _has_handover_block(manager: dict | None) -> bool:
+    if not manager or manager["status"] != "active":
+        return False
+    return BLOCK_HANDOVER in (manager.get("blocks") or "").split(",")
+
+
+def has_handover_access(telegram_user_id: int) -> bool:
+    """True для владельца и для активных сотрудников с выданным блоком
+    «Пересменка» — сдавать пересменку (/handover_report) может любой из
+    них, не только назначенный по графику."""
+    if is_owner(telegram_user_id):
+        return True
+    return _has_handover_block(get_manager(telegram_user_id))
+
+
+def is_handover_editor(telegram_user_id: int) -> bool:
+    """True для владельца и для активных Управляющих с выданным блоком
+    «Пересменка» — только им можно менять график пересменок рынка."""
+    if is_owner(telegram_user_id):
+        return True
+    manager = get_manager(telegram_user_id)
+    return _has_handover_block(manager) and manager["position"] == "Управляющий"
+
+
+def market_handover_enabled(market_id: int) -> bool:
+    """Аналог market_reports_enabled для пересменки — можно ли пока вести
+    пересменки на этом рынке (см. там же за подробностями)."""
+    supervisor = get_market_supervisor(market_id)
+    if not supervisor:
+        return True
+    return _has_handover_block(supervisor)
 
 
 def _has_meetings_block(manager: dict | None) -> bool:
