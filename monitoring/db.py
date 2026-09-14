@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS shift_report (
 
 CREATE TABLE IF NOT EXISTS report_chat (
     market_id INTEGER NOT NULL REFERENCES market(id),
-    role TEXT NOT NULL CHECK (role IN ('finance', 'team')),
+    role TEXT NOT NULL CHECK (role IN ('finance', 'team', 'meetings')),
     chat_id INTEGER NOT NULL,
     mention TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (market_id, role)
@@ -225,6 +225,37 @@ def init_schema() -> None:
         old_cols = {row["name"] for row in conn.execute("PRAGMA table_info(writeoff_plan)")}
         if "expiry_plan" in old_cols:
             conn.execute("DROP TABLE writeoff_plan")
+        # report_chat.role раньше допускал только 'finance'/'team' — теперь
+        # ещё и 'meetings' (отдельная ветка/чат под приглашения на собрания,
+        # см. bot/meetings.py), но SQLite не даёт поменять CHECK на месте —
+        # пересоздаём таблицу, сохраняя уже привязанные чаты.
+        report_chat_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'report_chat'"
+        ).fetchone()
+        if report_chat_sql and "'meetings'" not in report_chat_sql["sql"]:
+            old_report_chat_cols = {row["name"] for row in conn.execute("PRAGMA table_info(report_chat)")}
+            conn.execute("ALTER TABLE report_chat RENAME TO report_chat_old")
+            conn.execute(
+                """
+                CREATE TABLE report_chat (
+                    market_id INTEGER NOT NULL REFERENCES market(id),
+                    role TEXT NOT NULL CHECK (role IN ('finance', 'team', 'meetings')),
+                    chat_id INTEGER NOT NULL,
+                    mention TEXT NOT NULL DEFAULT '',
+                    message_thread_id INTEGER,
+                    PRIMARY KEY (market_id, role)
+                )
+                """
+            )
+            mention_expr = "mention" if "mention" in old_report_chat_cols else "''"
+            thread_expr = "message_thread_id" if "message_thread_id" in old_report_chat_cols else "NULL"
+            conn.execute(
+                f"""
+                INSERT INTO report_chat (market_id, role, chat_id, mention, message_thread_id)
+                SELECT market_id, role, chat_id, {mention_expr}, {thread_expr} FROM report_chat_old
+                """
+            )
+            conn.execute("DROP TABLE report_chat_old")
         conn.executescript(_SCHEMA)
         _ensure_column(conn, "manager", "status", "status TEXT NOT NULL DEFAULT 'pending'")
         _ensure_column(conn, "manager", "blocks", "blocks TEXT NOT NULL DEFAULT 'tasks,monitoring'")

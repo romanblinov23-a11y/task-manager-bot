@@ -518,16 +518,22 @@ def _render_meeting_message(instance: dict, recipient_name: str | None = None) -
 
 
 async def _dispatch_meeting(bot: Bot, instance: dict) -> None:
-    """Рассылает собрание нужной аудитории: команде — в чат, куда уходят
-    отчёты для команды; менеджерам — лично в личку каждому активному
-    менеджеру рынка (кроме самого Управляющего), с обращением по имени.
-    Отдельно, если запрошено — приглашает Романа с той же повесткой."""
+    """Рассылает собрание нужной аудитории: команде — в отдельную ветку/чат
+    под собрания, если она привязана (см. /register_report_chat, роль
+    "🗓 Собрания команды"), иначе в тот же чат, куда уходят отчёты команде;
+    менеджерам — лично в личку каждому активному менеджеру рынка (кроме
+    самого Управляющего), с обращением по имени. Отдельно, если запрошено —
+    приглашает Романа с той же повесткой."""
     market = get_market(instance["market_id"])
     if not market:
         return
 
     if instance["meeting_type"] == "team":
-        team_chat = get_report_chat(instance["market_id"], "team")
+        # Отдельная ветка/чат под собрания (см. /register_report_chat, роль
+        # "🗓 Собрания команды") — если не привязана, падаем обратно на тот
+        # же чат/ветку, куда уходят отчёты, чтобы ничего не сломать для тех,
+        # кто это не настраивал.
+        team_chat = get_report_chat(instance["market_id"], "meetings") or get_report_chat(instance["market_id"], "team")
         if team_chat:
             try:
                 await bot.send_message(

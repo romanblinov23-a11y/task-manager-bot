@@ -5,7 +5,7 @@ from monitoring.managers import get_markets_for_manager, is_owner, is_reports_ed
 from monitoring.markets import get_market, list_markets
 from monitoring.shift_reports import delete_report_chat, get_report_chat, list_report_chats, set_report_chat
 
-_ROLE_LABELS = {"finance": "💰 Финпартнёры", "team": "👥 Команда точки"}
+_ROLE_LABELS = {"finance": "💰 Финпартнёры", "team": "👥 Команда точки", "meetings": "🗓 Собрания команды"}
 
 _TEAM_CHAT_GREETING = (
     "Привет, Серферы! Рад быть с вами в чате, я хоть и искусственный, но очень добрый 🙈\n\n"
@@ -14,9 +14,10 @@ _TEAM_CHAT_GREETING = (
     "информационная среда поможет нам достичь еще более крутых результатов и покорить самые большие волны 🌊"
 )
 
-# Управляющий (не владелец) может привязывать только чат команды точки —
-# чат финпартнёров (с тегом и финансовыми данными) остаётся только владельцу.
-_SUPERVISOR_ALLOWED_ROLES = ("team",)
+# Управляющий (не владелец) может привязывать чат команды точки и, отдельно,
+# ветку/чат под приглашения на собрания — чат финпартнёров (с тегом и
+# финансовыми данными) остаётся только владельцу.
+_SUPERVISOR_ALLOWED_ROLES = ("team", "meetings")
 
 # telegram_user_id (str) владельца -> {"market_id", "role", "chat_id", "market_name"} —
 # ждём текст, кого тегнуть первой строкой в отчёте для этого чата
