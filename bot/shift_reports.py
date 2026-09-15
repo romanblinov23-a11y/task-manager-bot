@@ -685,6 +685,7 @@ def render_team_report(market: dict, report_date: str, data: dict, plan: dict | 
         "",
         "<b>💬 Как прошла смена</b>",
         f"📝 Общая работа: {_esc(data.get('comment_general'))}",
+        f"🙋 Обслуживание гостей: {_esc(data.get('comment_service'))}",
         f"⚠️ Конфликты: {_esc(data.get('comment_conflicts'))}",
         f"🔧 Оборудование: {_esc(data.get('comment_equipment'))}",
         f"🌤 Погода и поток гостей: {_esc(data.get('comment_weather_flow'))}",
