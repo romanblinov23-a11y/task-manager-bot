@@ -77,7 +77,7 @@ def test_dashboard_renders_with_correct_token():
             ]
             async with TestClient(TestServer(_build_app())) as client:
                 resp = await client.get(
-                    "/dashboard", params={"token": token, "market_id": str(market["id"]), "days": "7"}
+                    "/dashboard", params={"token": token, "market_id": str(market["id"]), "period": "week"}
                 )
                 assert resp.status == 200
                 text = await resp.text()

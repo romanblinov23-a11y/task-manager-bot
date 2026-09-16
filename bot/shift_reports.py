@@ -1186,15 +1186,75 @@ def _view_report_keyboard(report_id: int) -> InlineKeyboardMarkup:
     (пере)отправить именно этот отчёт в чат финпартнёров (см.
     on_view_reports_force_send_finance) — например, если авторассылка в
     10:00 не сработала (чат подключили позже) или нужно переслать
-    исправленную версию ещё раз, — либо поправить дату отчёта (см.
-    on_view_reports_edit_date), если его завели не под тем днём."""
+    исправленную версию ещё раз, — поправить дату отчёта (см.
+    on_view_reports_edit_date), если его завели не под тем днём, — либо
+    удалить отчёт целиком (см. on_view_reports_delete) — например,
+    тестовый/ошибочный, заведённый не по делу."""
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("📨 Отправить в чат ФП", callback_data=f"shrep_forcesend:{report_id}")],
             [InlineKeyboardButton("📤 Отправить на доработку управляющему", callback_data=f"shrep_moreinfo:{report_id}")],
             [InlineKeyboardButton("✏️ Изменить дату", callback_data=f"shrep_editdate:{report_id}")],
+            [InlineKeyboardButton("🗑 Удалить отчёт", callback_data=f"shrep_delrep:{report_id}")],
         ]
     )
+
+
+def _delete_report_confirm_keyboard(report_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🗑 Да, удалить", callback_data=f"shrep_delrepconfirm:{report_id}"),
+                InlineKeyboardButton("Отмена", callback_data="shrep_delrepcancel"),
+            ]
+        ]
+    )
+
+
+async def on_view_reports_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """«🗑 Удалить отчёт» в архиве (/view_reports) — например, тестовый или
+    заведённый по ошибке отчёт. Необратимо, поэтому с подтверждением (см.
+    on_view_reports_delete_confirm)."""
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    report_id = int(query.data.split(":", 1)[1])
+    report = get_report(report_id)
+    market = get_market(report["market_id"]) if report else None
+    if not report or not market:
+        await query.answer("Отчёт не найден", show_alert=True)
+        return
+    await query.answer()
+    await query.message.reply_text(
+        f"⚠️ Удалить отчёт «{market['name']}» за {fmt_date(report['report_date'])} целиком? Действие необратимо.",
+        reply_markup=_delete_report_confirm_keyboard(report_id),
+    )
+
+
+async def on_view_reports_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    report_id = int(query.data.split(":", 1)[1])
+    report = get_report(report_id)
+    if not report:
+        await query.answer("Уже удалён", show_alert=True)
+        await query.edit_message_reply_markup(reply_markup=None)
+        return
+    market = get_market(report["market_id"])
+    market_name = market["name"] if market else f"#{report['market_id']}"
+    report_date = report["report_date"]
+    delete_report(report["market_id"], report_date)
+    await query.answer("Удалено")
+    await query.edit_message_text(f"🗑 Отчёт «{market_name}» за {fmt_date(report_date)} удалён.")
+
+
+async def on_view_reports_delete_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Отмена — отчёт не тронут.")
 
 
 async def on_view_reports_force_send_finance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

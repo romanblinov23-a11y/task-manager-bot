@@ -251,6 +251,9 @@ from bot.shift_reports import (
     on_shift_report_supervisor_approve,
     on_view_reports_command,
     on_view_reports_day_choice,
+    on_view_reports_delete,
+    on_view_reports_delete_cancel,
+    on_view_reports_delete_confirm,
     on_view_reports_edit_date,
     on_view_reports_force_send_finance,
     on_view_reports_market_choice,
@@ -619,6 +622,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_view_reports_day_choice, pattern=r"^shrep_viewday:"))
     app.add_handler(CallbackQueryHandler(on_view_reports_force_send_finance, pattern=r"^shrep_forcesend:"))
     app.add_handler(CallbackQueryHandler(on_view_reports_edit_date, pattern=r"^shrep_editdate:"))
+    app.add_handler(CallbackQueryHandler(on_view_reports_delete, pattern=r"^shrep_delrep:"))
+    app.add_handler(CallbackQueryHandler(on_view_reports_delete_confirm, pattern=r"^shrep_delrepconfirm:"))
+    app.add_handler(CallbackQueryHandler(on_view_reports_delete_cancel, pattern=r"^shrep_delrepcancel$"))
     app.add_handler(CallbackQueryHandler(on_shift_report_fill, pattern=r"^shrep_fill:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_instruction_choice, pattern=r"^shrep_instr:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_fix_field, pattern=r"^shrep_fixfield:"))

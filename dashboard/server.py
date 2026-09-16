@@ -12,7 +12,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from dashboard.data import fetch_dashboard_series
+from dashboard.data import PERIODS, fetch_dashboard_series, resolve_period
 from dashboard.html import render_dashboard_page, render_forbidden_page
 from monitoring.db import get_connection
 from monitoring.markets import list_markets
@@ -20,7 +20,6 @@ from monitoring.markets import list_markets
 logger = logging.getLogger(__name__)
 
 _STATIC_DIR = Path(__file__).parent / "static"
-_ALLOWED_DAYS = (7, 30, 90)
 
 
 def get_or_create_dashboard_token() -> str:
@@ -43,19 +42,21 @@ async def _handle_dashboard(request: web.Request) -> web.Response:
     if not got_token or not secrets.compare_digest(got_token, expected_token):
         return web.Response(text=render_forbidden_page(), content_type="text/html", status=403)
 
+    period = request.query.get("period", "week")
+    if period not in PERIODS:
+        period = "week"
     try:
-        days = int(request.query.get("days", "30"))
+        offset = int(request.query.get("offset", "0"))
     except ValueError:
-        days = 30
-    if days not in _ALLOWED_DAYS:
-        days = 30
+        offset = 0
 
     market_id_raw = request.query.get("market_id")
     market_id = int(market_id_raw) if market_id_raw and market_id_raw.isdigit() else None
 
+    start_iso, end_iso, label = resolve_period(period, offset)
     markets = await asyncio.to_thread(list_markets)
-    rows = await asyncio.to_thread(fetch_dashboard_series, market_id, days)
-    html = render_dashboard_page(markets, market_id, days, rows, expected_token)
+    rows = await asyncio.to_thread(fetch_dashboard_series, market_id, start_iso, end_iso)
+    html = render_dashboard_page(markets, market_id, period, offset, label, rows, expected_token)
     return web.Response(text=html, content_type="text/html")
 
 

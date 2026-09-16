@@ -17,7 +17,7 @@ _SERIES_COLORS_DARK = ["#3987e5", "#d95926", "#199e70"]
 _GOOD = "#0ca30c"
 _CRITICAL = "#d03b3b"
 
-_DAY_OPTIONS = (7, 30, 90)
+_PERIOD_TABS = (("week", "Неделя"), ("month", "Месяц"), ("quarter", "90 дней"))
 
 
 def _fmt_money(value: float | None) -> str:
@@ -42,9 +42,9 @@ def _total(values: list[float]) -> float | None:
     return sum(vals) if vals else None
 
 
-def _url(token: str, market_id: int | None, days: int) -> str:
+def _url(token: str, market_id: int | None, period: str, offset: int) -> str:
     market_part = f"&market_id={market_id}" if market_id is not None else ""
-    return f"?token={token}&days={days}{market_part}"
+    return f"?token={token}&period={period}&offset={offset}{market_part}"
 
 
 def _stat_tile(label: str, value: str, sub: str = "") -> str:
@@ -55,7 +55,9 @@ def _stat_tile(label: str, value: str, sub: str = "") -> str:
 def render_dashboard_page(
     markets: list[dict],
     selected_market_id: int | None,
-    days: int,
+    period: str,
+    offset: int,
+    period_label: str,
     rows: list[dict],
     token: str,
 ) -> str:
@@ -141,13 +143,28 @@ def render_dashboard_page(
         """
 
     market_tabs = "".join(
-        f'<a class="tab{" active" if selected_market_id == m["id"] else ""}" href="{_url(token, m["id"], days)}">{m["name"]}</a>'
+        f'<a class="tab{" active" if selected_market_id == m["id"] else ""}" href="{_url(token, m["id"], period, 0)}">{m["name"]}</a>'
         for m in markets
     )
-    all_tab = f'<a class="tab{" active" if selected_market_id is None else ""}" href="{_url(token, None, days)}">Все точки</a>'
-    day_tabs = "".join(
-        f'<a class="tab{" active" if days == d else ""}" href="{_url(token, selected_market_id, d)}">{d} дней</a>' for d in _DAY_OPTIONS
+    all_tab = f'<a class="tab{" active" if selected_market_id is None else ""}" href="{_url(token, None, period, 0)}">Все точки</a>'
+    period_tabs = "".join(
+        f'<a class="tab{" active" if period == p else ""}" href="{_url(token, selected_market_id, p, 0)}">{label}</a>'
+        for p, label in _PERIOD_TABS
     )
+    nav_html = ""
+    if period in ("week", "month"):
+        can_go_next = offset < 0
+        next_arrow = (
+            f'<a class="tab" href="{_url(token, selected_market_id, period, offset + 1)}">▶</a>'
+            if can_go_next
+            else '<span class="tab disabled">▶</span>'
+        )
+        nav_html = (
+            f'<a class="tab" href="{_url(token, selected_market_id, period, offset - 1)}">◀</a>'
+            f'<span class="period-label">{period_label}</span>{next_arrow}'
+        )
+    else:
+        nav_html = f'<span class="period-label">{period_label}</span>'
 
     events_html = "".join(
         f'<li><b>{e["date"]}</b> ({e["market_name"]}, {e["weather"]}) — {e["text"]}</li>' for e in events
@@ -170,7 +187,8 @@ def render_dashboard_page(
 <header>
     <h1>📊 Дашборд смен</h1>
     <div class="tabs">{all_tab}{market_tabs}</div>
-    <div class="tabs">{day_tabs}</div>
+    <div class="tabs">{period_tabs}</div>
+    <div class="tabs">{nav_html}</div>
 </header>
 {empty_notice}
 {kpi_html}
@@ -295,6 +313,8 @@ h2 { font-size: 15px; color: var(--text-secondary); margin: 0 0 8px; }
   border: 1px solid var(--border); font-size: 13px;
 }
 .tab.active { background: var(--surface-1); color: var(--text-primary); border-color: var(--text-primary); }
+.tab.disabled { opacity: 0.35; pointer-events: none; }
+.period-label { padding: 6px 4px; font-size: 13px; color: var(--text-secondary); font-weight: 600; }
 .notice { color: var(--text-secondary); }
 .tiles { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
 .tile {

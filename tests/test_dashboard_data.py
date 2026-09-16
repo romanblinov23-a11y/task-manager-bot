@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from dashboard.data import build_correlation_matrix, describe_correlation, fetch_dashboard_series, pearson
+from dashboard.data import build_correlation_matrix, describe_correlation, fetch_dashboard_series, pearson, resolve_period
 from monitoring.db import get_connection
 from monitoring.markets import create_market
 from monitoring.writeoff_plan import set_writeoff_plan
@@ -79,8 +79,9 @@ def test_fetch_dashboard_series_computes_spmh_and_writeoffs():
         },
     )
 
+    start_iso = (today - timedelta(days=6)).isoformat()
     with patch("dashboard.data.get_weather_range", return_value={}):
-        rows = fetch_dashboard_series(market["id"], days=7)
+        rows = fetch_dashboard_series(market["id"], start_iso, today.isoformat())
 
     assert len(rows) == 1
     row = rows[0]
@@ -97,8 +98,9 @@ def test_fetch_dashboard_series_ignores_drafts_and_old_dates():
     _seed_report(market["id"], today.isoformat(), {"revenue_total": "1000"}, status="collecting")
     _seed_report(market["id"], old_date, {"revenue_total": "2000"})
 
+    start_iso = (today - timedelta(days=29)).isoformat()
     with patch("dashboard.data.get_weather_range", return_value={}):
-        rows = fetch_dashboard_series(market["id"], days=30)
+        rows = fetch_dashboard_series(market["id"], start_iso, today.isoformat())
 
     assert rows == []
 
@@ -111,6 +113,47 @@ def test_fetch_dashboard_series_all_markets_when_market_id_none():
     _seed_report(m2["id"], today, {"revenue_total": "2000"})
 
     with patch("dashboard.data.get_weather_range", return_value={}):
-        rows = fetch_dashboard_series(None, days=7)
+        rows = fetch_dashboard_series(None, today, today)
 
     assert {r["market_name"] for r in rows} == {"Точка А", "Точка Б"}
+
+
+def test_resolve_period_week_is_monday_to_sunday():
+    start_iso, end_iso, label = resolve_period("week", 0)
+    start = date.fromisoformat(start_iso)
+    end = date.fromisoformat(end_iso)
+    assert start.weekday() == 0  # понедельник
+    assert (end - start).days <= 6
+    assert end <= date.today()
+    assert "–" in label
+
+
+def test_resolve_period_month_is_calendar_month():
+    start_iso, end_iso, label = resolve_period("month", 0)
+    start = date.fromisoformat(start_iso)
+    end = date.fromisoformat(end_iso)
+    today = date.today()
+    assert start.day == 1
+    assert start.month == today.month
+    assert end.month == today.month
+    assert end <= today
+
+
+def test_resolve_period_offset_goes_to_previous_month():
+    _, _, this_month_label = resolve_period("month", 0)
+    _, _, prev_month_label = resolve_period("month", -1)
+    assert this_month_label != prev_month_label
+
+
+def test_resolve_period_cannot_go_into_the_future():
+    start_iso, end_iso, _ = resolve_period("week", offset=5)
+    assert date.fromisoformat(end_iso) <= date.today()
+
+
+def test_resolve_period_quarter_is_90_days_ignoring_offset():
+    start_iso, end_iso, label = resolve_period("quarter", -3)
+    start = date.fromisoformat(start_iso)
+    end = date.fromisoformat(end_iso)
+    assert (end - start).days == 89
+    assert end == date.today()
+    assert "90" in label

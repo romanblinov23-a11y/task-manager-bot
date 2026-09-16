@@ -2,6 +2,7 @@
 отчёты по сменам за период в ряд чисел по дням + погоду, и считает
 корреляции между ними. Чистая логика, без HTTP и без Telegram."""
 
+import calendar
 import re
 from datetime import date, timedelta
 
@@ -9,6 +10,44 @@ from dashboard.weather import get_weather_range
 from monitoring.markets import list_markets
 from monitoring.shift_reports import list_reports_in_range
 from monitoring.writeoff_plan import get_writeoff_plan, writeoff_plan_amounts
+
+_MONTH_NAMES_RU = [
+    "", "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+]
+
+PERIODS = ("week", "month", "quarter")
+
+
+def resolve_period(period: str, offset: int) -> tuple[str, str, str]:
+    """(start_date, end_date, label) для периода на дашборде.
+    'week' — календарная неделя пн-вс, 'month' — календарный месяц, оба
+    навигируются offset'ом (0 — текущий, -1 — предыдущий и т.д., в будущее
+    уйти нельзя). 'quarter' — скользящие 90 дней от сегодня, без
+    навигации (offset игнорируется) — просто длинный тренд."""
+    today = date.today()
+    offset = min(offset, 0)
+
+    if period == "month":
+        month0 = today.month - 1 + offset
+        year = today.year + month0 // 12
+        month = month0 % 12 + 1
+        start = date(year, month, 1)
+        end = date(year, month, calendar.monthrange(year, month)[1])
+        label = f"{_MONTH_NAMES_RU[month]} {year}"
+    elif period == "week":
+        monday = today - timedelta(days=today.weekday())
+        start = monday + timedelta(weeks=offset)
+        end = start + timedelta(days=6)
+        label = f"{start.strftime('%d.%m')}–{end.strftime('%d.%m')}"
+    else:
+        start = today - timedelta(days=89)
+        end = today
+        label = "последние 90 дней"
+
+    end = min(end, today)
+    return start.isoformat(), end.isoformat(), label
+
 
 METRIC_LABELS = {
     "revenue": "Выручка",
@@ -45,17 +84,14 @@ def _parse_service_minutes(text: str) -> float | None:
     return minutes + seconds / 60
 
 
-def fetch_dashboard_series(market_id: int | None, days: int) -> list[dict]:
+def fetch_dashboard_series(market_id: int | None, start_iso: str, end_iso: str) -> list[dict]:
     """Один ряд на день (или несколько рядов, если market_id is None — все
     точки, каждая строка помечена своим market_id/market_name). Каждая
     строка: report_date, market_id, market_name, revenue, avg_check,
     guests, staff_hours, spmh, writeoff_expiry/compliment/staff_meals/total
     (+ *_plan, если норма задана), avg_service_minutes, temp_avg_c,
-    precipitation_mm, weather_code, events (текст, если не пустой/«не было»)."""
-    end = date.today()
-    start = end - timedelta(days=days - 1)
-    start_iso, end_iso = start.isoformat(), end.isoformat()
-
+    precipitation_mm, weather_code, events (текст, если не пустой/«не было»).
+    Границы периода (start_iso/end_iso) считает resolve_period."""
     markets = list_markets()
     if market_id is not None:
         markets = [m for m in markets if m["id"] == market_id]
