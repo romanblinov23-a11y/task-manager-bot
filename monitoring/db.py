@@ -191,6 +191,32 @@ CREATE TABLE IF NOT EXISTS monitor_chat (
     triggers TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Кэш геокодирования города -> координаты (Open-Meteo geocoding), чтобы не
+-- дёргать внешний API на каждый показ дашборда (см. dashboard/weather.py).
+CREATE TABLE IF NOT EXISTS city_geocode (
+    city TEXT PRIMARY KEY,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL
+);
+
+-- Кэш дневной погоды по городу (общий на все точки в одном городе) — из
+-- Open-Meteo Archive API, см. dashboard/weather.py.
+CREATE TABLE IF NOT EXISTS weather_cache (
+    city TEXT NOT NULL,
+    report_date TEXT NOT NULL,
+    temp_avg_c REAL,
+    precipitation_mm REAL,
+    weather_code INTEGER,
+    PRIMARY KEY (city, report_date)
+);
+
+-- Единственный токен доступа к /dashboard (см. dashboard/server.py) —
+-- одна строка, чтобы ссылка не менялась при перезапуске процесса.
+CREATE TABLE IF NOT EXISTS dashboard_secret (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    token TEXT NOT NULL
+);
 """
 
 

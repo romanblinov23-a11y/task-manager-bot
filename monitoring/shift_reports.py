@@ -133,6 +133,31 @@ def list_report_dates_for_month(market_id: int, year: int, month: int) -> list[d
         conn.close()
 
 
+def list_reports_in_range(market_id: int, start_date: str, end_date: str) -> list[dict]:
+    """Полные отчёты (data распаршен) рынка за диапазон дат включительно,
+    от старых к новым — для дашборда (см. dashboard/data.py). Только
+    дошедшие до конца отчёты, как и в get_previous_week_report — черновики
+    и то, что ещё крутится в согласовании, в статистику не попадает."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM shift_report
+            WHERE market_id = ? AND report_date BETWEEN ? AND ? AND status IN ('approved', 'dispatched')
+            ORDER BY report_date ASC
+            """,
+            (market_id, start_date, end_date),
+        ).fetchall()
+        reports = []
+        for row in rows:
+            report = dict(row)
+            report["data"] = json.loads(report["data"])
+            reports.append(report)
+        return reports
+    finally:
+        conn.close()
+
+
 def list_reports_by_status_and_date(report_date: str, status: str) -> list[dict]:
     conn = get_connection()
     try:

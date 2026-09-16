@@ -228,6 +228,7 @@ from bot.revenue_flow import (
     send_monthly_revenue_report,
     send_weekly_revenue_report,
 )
+from bot.shift_dashboard_command import on_shift_dashboard_command
 from bot.shift_reports import (
     on_reset_shift_report_cancel,
     on_reset_shift_report_command,
@@ -284,6 +285,7 @@ from bot.writeoff_plan_flow import (
 )
 from config.settings import (
     DAILY_REPORT_TIME,
+    DASHBOARD_PORT,
     MEETING_CONFIRM_TIME,
     MONITORING_REMINDER_TIME,
     MONTHLY_PLAN_REMINDER_TIME,
@@ -300,6 +302,7 @@ from config.settings import (
     WEEKLY_REPORT_TIME,
 )
 from config.timeutil import today as tz_today
+from dashboard.server import start_dashboard_server
 from monitoring.db import init_schema as init_monitoring_schema
 from monitoring.managers import list_managers
 from personal_data.db import init_schema as init_personal_data_schema
@@ -407,6 +410,7 @@ _ROMAN_COMMANDS = [
     BotCommand("market_settings", "Настройка рынка: ПДн, финпартнёры, чаты отчётов, нормы списаний"),
     BotCommand("dashboard_market", "Дашборд по рынку"),
     BotCommand("view_reports", "Посмотреть отчёт по смене за любой день"),
+    BotCommand("shift_dashboard", "Живой дашборд по отчётам смен: цифры, погода, корреляции"),
     BotCommand("revenue", "Выручка: отчёты, план/факт, P&L"),
     BotCommand("messaging", "Написать сотруднику, в чат или разослать группе"),
     BotCommand("regulations", "Регламенты работы с ботом"),
@@ -475,6 +479,7 @@ def main() -> None:
     app.add_handler(CommandHandler("shift_report", on_shift_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("reset_shift_report", on_reset_shift_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("view_reports", on_view_reports_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("shift_dashboard", on_shift_dashboard_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_handover_schedule", on_set_handover_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_handover_report", on_set_handover_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("handover_report", on_handover_report_command, filters=filters.ChatType.PRIVATE))
@@ -710,6 +715,13 @@ def main() -> None:
         days=(_WEEKDAYS["mon"],),
     )
     app.job_queue.run_daily(_revenue_monthly_job, time=_parse_time(REVENUE_REPORT_TIME, TZ))
+
+    # Живой дашборд (dashboard/) — отдельный HTTP-сервер в своём потоке,
+    # не трогает жизненный цикл PTB ниже (см. dashboard/server.py). До того,
+    # как Рома включит публичный домен в Railway (Settings → Networking),
+    # порт просто никуда не смотрит наружу — команда /shift_dashboard сама
+    # предупредит, если PUBLIC_BASE_URL ещё не задан.
+    start_dashboard_server(DASHBOARD_PORT)
 
     app.run_polling()
 

@@ -133,6 +133,17 @@ def set_market_surf_spot_key(market_id: int, spot_key: str) -> None:
         conn.close()
 
 
+def set_market_city(market_id: int, city: str) -> None:
+    """Город точки — используется для подтяжки реальной погоды в дашборде
+    (см. dashboard/weather.py). Пусто — берём config.settings.DEFAULT_WEATHER_CITY."""
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE market SET city = ? WHERE id = ?", (city, market_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def create_market(name: str, city: str = "", our_point_name: str | None = None) -> dict:
     """Добавляет новый рынок/проект — используется владельцем через /add_project.
     Рынок и проект в системе — одна сущность: как только он появляется здесь,

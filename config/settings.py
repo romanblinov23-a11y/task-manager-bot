@@ -104,3 +104,16 @@ GOOGLE_SHEETS_CREDENTIALS = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
 # Ежедневный/недельный/месячный отчёт по выручке — все три в одно и то же
 # время, как было у "Аналитика Ивана".
 REVENUE_REPORT_TIME = os.getenv("REVENUE_REPORT_TIME", "10:00")
+
+# Живой дашборд (dashboard/) — веб-страница, которую отдаёт сам бот (отдельный
+# HTTP-сервер внутри процесса, см. dashboard/server.py). Порт — тот, что
+# прокидывает Railway при включённом публичном доступе (Networking); до этого
+# момента слушаем локально на дефолтном порту, ничего наружу не течёт.
+DASHBOARD_PORT = int(os.getenv("PORT", "8080"))
+# Публичный домен бота на Railway — Рома добавляет сам, как только включит
+# Networking и Railway выдаст домен (см. /dashboard: без этой переменной
+# ссылка не собирается, бот прямо об этом скажет).
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
+# Город для погоды в дашборде — используется, когда у точки (market.city)
+# город не задан (сейчас так у всех 3 реальных точек, все они в Москве).
+DEFAULT_WEATHER_CITY = os.getenv("DEFAULT_WEATHER_CITY", "Москва")
