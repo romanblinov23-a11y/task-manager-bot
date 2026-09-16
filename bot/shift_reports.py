@@ -1174,14 +1174,62 @@ def _view_day_keyboard(market_id: int, reports: list[dict]) -> InlineKeyboardMar
 
 
 def _view_report_keyboard(report_id: int) -> InlineKeyboardMarkup:
-    """Единственное действие в архиве — вернуть отчёт управляющему на
-    правку. Переиспользует ровно тот же путь, что и «💬 Запросить
-    дополнения» при обычном согласовании (см. on_shift_report_more_info):
-    статус откатывается на 'awaiting_supervisor', управляющему уходит
-    замечание владельца и пикер полей для точечной правки."""
+    """Два действия в архиве: вернуть отчёт управляющему на правку
+    (переиспользует ровно тот же путь, что и «💬 Запросить дополнения» при
+    обычном согласовании, см. on_shift_report_more_info — статус
+    откатывается на 'awaiting_supervisor', управляющему уходит замечание
+    владельца и пикер полей для точечной правки), либо принудительно
+    (пере)отправить именно этот отчёт в чат финпартнёров (см.
+    on_view_reports_force_send_finance) — например, если авторассылка в
+    10:00 не сработала (чат подключили позже) или нужно переслать
+    исправленную версию ещё раз."""
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("📤 Отправить на доработку управляющему", callback_data=f"shrep_moreinfo:{report_id}")]]
+        [
+            [InlineKeyboardButton("📨 Отправить в чат ФП", callback_data=f"shrep_forcesend:{report_id}")],
+            [InlineKeyboardButton("📤 Отправить на доработку управляющему", callback_data=f"shrep_moreinfo:{report_id}")],
+        ]
     )
+
+
+async def on_view_reports_force_send_finance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """«📨 Отправить в чат ФП» в архиве (/view_reports) — принудительно
+    (пере)отправляет отчёт за выбранный день в реальный чат финпартнёров,
+    независимо от текущего статуса (даже если он уже 'dispatched' — можно
+    послать повторно) и независимо от автоматической рассылки в 10:00 (см.
+    send_pending_reports, которая берёт только вчерашние 'approved').
+    Версия текста — ВНЕШНЯЯ (render_finance_report), та же, что уходит
+    туда обычно, без владельческого плана."""
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    report_id = int(query.data.split(":", 1)[1])
+    report = get_report(report_id)
+    market = get_market(report["market_id"]) if report else None
+    if not report or not market:
+        await query.answer("Отчёт не найден", show_alert=True)
+        return
+
+    finance_chat = get_report_chat(report["market_id"], "finance")
+    if not finance_chat:
+        await query.answer(
+            "Для этой кофейни не привязан чат финпартнёров — см. /register_report_chat", show_alert=True
+        )
+        return
+
+    text = render_finance_report(market, report["report_date"], report["data"])
+    if finance_chat.get("mention"):
+        text = f"{finance_chat['mention']}\n\n{text}"
+    try:
+        await context.bot.send_message(
+            chat_id=finance_chat["chat_id"], text=text, message_thread_id=finance_chat.get("message_thread_id")
+        )
+    except Exception:
+        await query.answer("Не получилось отправить — проверьте, что бот всё ещё в чате финпартнёров", show_alert=True)
+        return
+
+    set_report_status(report["id"], "dispatched")
+    await query.answer("Отправлено в чат ФП ✅", show_alert=True)
 
 
 async def on_view_reports_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
