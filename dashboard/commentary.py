@@ -32,6 +32,21 @@ def _fmt(value: float | None, unit: str = "") -> str:
     return f"{value:.0f}{unit}" if value is not None else "нет данных"
 
 
+def _trim_to_full_sentence(text: str) -> str:
+    """Подстраховка от обрыва на середине фразы (если модель всё же
+    упёрлась в max_tokens) — если текст не заканчивается на ./!/?, режем
+    до последней завершённой фразы. Если завершённых фраз вообще нет
+    (совсем короткий ответ без знака препинания в конце) — оставляем как
+    есть, обрезать нечего."""
+    text = text.strip()
+    if not text or text[-1] in ".!?»":
+        return text
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] in ".!?":
+            return text[: i + 1]
+    return text
+
+
 def generate_commentary(
     scope_label: str,
     period_label: str,
@@ -92,7 +107,11 @@ def generate_commentary(
     lines.append("\nДай короткий аналитический комментарий по этим данным.")
 
     try:
-        commentary = ask_claude("\n".join(lines), max_tokens=220, system=SYSTEM_PROMPT).strip()
+        # 220 токенов резалось на середине фразы на русском тексте (кириллица
+        # заметно "дороже" в токенах, чем латиница) — берём с запасом,
+        # _trim_to_full_sentence всё равно подчищает хвост, если что.
+        raw = ask_claude("\n".join(lines), max_tokens=500, system=SYSTEM_PROMPT).strip()
+        commentary = _trim_to_full_sentence(raw)
     except Exception:
         commentary = None
 

@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from dashboard.commentary import _cache, generate_commentary
+from dashboard.commentary import _cache, _trim_to_full_sentence, generate_commentary
 from dashboard.data import aggregate_series, build_correlation_matrix
 
 
@@ -64,6 +64,28 @@ def test_generate_commentary_cache_busts_on_new_revenue():
         generate_commentary("Тест", "неделя", rows_b, [], {})
 
     assert mock_ask.call_count == 2  # разные данные -- разный кэш-ключ
+
+
+def test_trim_to_full_sentence_leaves_complete_text_untouched():
+    assert _trim_to_full_sentence("Всё хорошо.") == "Всё хорошо."
+    assert _trim_to_full_sentence("Вопрос?") == "Вопрос?"
+
+
+def test_trim_to_full_sentence_cuts_mid_word_tail():
+    text = "Списания превысили норму на 11%, это стоит проверить. Погода давила на трафик, но ст"
+    assert _trim_to_full_sentence(text) == "Списания превысили норму на 11%, это стоит проверить."
+
+
+def test_trim_to_full_sentence_keeps_text_with_no_sentence_boundary():
+    assert _trim_to_full_sentence("ответ без точки") == "ответ без точки"
+
+
+def test_generate_commentary_trims_truncated_response():
+    rows = [_row("2026-09-01", 1000), _row("2026-09-02", 2000)]
+    truncated = "Выручка выросла заметно. А связь с погодой требует отдельной провер"
+    with patch("dashboard.commentary.ask_claude", return_value=truncated):
+        result = generate_commentary("Тест", "неделя", rows, [], {})
+    assert result == "Выручка выросла заметно."
 
 
 def test_aggregate_series_basic():

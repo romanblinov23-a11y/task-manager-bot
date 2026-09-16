@@ -217,10 +217,10 @@ def render_dashboard_page(
 {commentary_html}
 {kpi_html}
 <div class="chart-grid">
-{_card("Выручка и температура", '<canvas id="chartRevenue" height="130"></canvas><canvas id="chartTemp" height="90"></canvas>')}
-{_card("Гости и осадки", '<canvas id="chartGuests" height="130"></canvas><canvas id="chartPrecip" height="90"></canvas>')}
+{_card("Выручка и температура", '<div class="chart-box tall"><canvas id="chartRevenue"></canvas></div><div class="chart-box short"><canvas id="chartTemp"></canvas></div>')}
+{_card("Гости и осадки", '<div class="chart-box tall"><canvas id="chartGuests"></canvas></div><div class="chart-box short"><canvas id="chartPrecip"></canvas></div>')}
 </div>
-{_card("Списания: факт и норма", '<canvas id="chartWriteoff" height="110"></canvas>')}
+{_card("Списания: факт и норма", '<div class="chart-box tall"><canvas id="chartWriteoff"></canvas></div>')}
 <div class="info-grid">
 {_card("Зависимости показателей", f'<table class="corr-table"><tbody>{correlation_rows}</tbody></table>')}
 {_card("Значимые события за период", f'<ul class="events">{events_html}</ul>')}
@@ -353,7 +353,10 @@ h2 { font-size: 14px; color: var(--text-secondary); margin: 0 0 12px; font-weigh
   padding: 16px 18px 18px; margin: 0;
 }
 .chart-grid, .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 16px; margin-bottom: 16px; }
-.card canvas { max-width: 100%; }
+.chart-box { position: relative; width: 100%; margin-bottom: 10px; }
+.chart-box.tall { height: 220px; }
+.chart-box.short { height: 140px; }
+.chart-box:last-child { margin-bottom: 0; }
 
 .kpi-table, .corr-table {
   width: 100%; border-collapse: collapse; font-size: 13px;
