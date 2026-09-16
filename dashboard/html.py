@@ -3,11 +3,13 @@
 Палитра и правила графиков — по skill dataviz (references/palette.md):
 категориальный порядок фиксирован, у каждого графика одна ось (никаких
 двух Y на одном графике — вместо этого связанные метрики рисуются как
-пара графиков друг под другом с общей осью дат)."""
+пара графиков друг под другом с общей осью дат). Раскладка — CSS Grid с
+auto-fit, чтобы страница использовала всю ширину окна (а не фиксированный
+узкий столбец), но всё равно складывалась в один столбец на телефоне."""
 
 import json
 
-from dashboard.data import CORRELATION_METRICS, METRIC_LABELS, describe_correlation
+from dashboard.data import METRIC_LABELS, describe_correlation
 from dashboard.weather import describe_weather_code
 
 # Категориальные слоты 1-3 (валидны все-пары в обоих режимах, см. palette.md) —
@@ -18,6 +20,10 @@ _GOOD = "#0ca30c"
 _CRITICAL = "#d03b3b"
 
 _PERIOD_TABS = (("week", "Неделя"), ("month", "Месяц"), ("quarter", "90 дней"))
+
+
+def _esc(text: str) -> str:
+    return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _fmt_money(value: float | None) -> str:
@@ -32,12 +38,12 @@ def _fmt_num(value: float | None, decimals: int = 0) -> str:
     return f"{value:,.{decimals}f}".replace(",", " ")
 
 
-def _avg(values: list[float]) -> float | None:
+def _avg(values: list) -> float | None:
     vals = [v for v in values if v is not None]
     return sum(vals) / len(vals) if vals else None
 
 
-def _total(values: list[float]) -> float | None:
+def _total(values: list) -> float | None:
     vals = [v for v in values if v is not None]
     return sum(vals) if vals else None
 
@@ -52,6 +58,10 @@ def _stat_tile(label: str, value: str, sub: str = "") -> str:
     return f'<div class="tile"><div class="tile-label">{label}</div><div class="tile-value">{value}</div>{sub_html}</div>'
 
 
+def _card(title: str, body: str, card_class: str = "") -> str:
+    return f'<section class="card {card_class}"><h2>{title}</h2>{body}</section>'
+
+
 def render_dashboard_page(
     markets: list[dict],
     selected_market_id: int | None,
@@ -59,6 +69,8 @@ def render_dashboard_page(
     offset: int,
     period_label: str,
     rows: list[dict],
+    correlation_matrix: dict[tuple[str, str], float | None],
+    commentary: str | None,
     token: str,
 ) -> str:
     dates = sorted({r["report_date"] for r in rows})
@@ -103,7 +115,6 @@ def render_dashboard_page(
         if r["events"]
     ]
 
-    correlation_matrix = _build_matrix(rows)
     correlation_rows = "".join(
         f'<tr><td>{METRIC_LABELS[a]} × {METRIC_LABELS[b]}</td><td>{describe_correlation(r)}</td></tr>'
         for (a, b), r in correlation_matrix.items()
@@ -151,26 +162,37 @@ def render_dashboard_page(
         f'<a class="tab{" active" if period == p else ""}" href="{_url(token, selected_market_id, p, 0)}">{label}</a>'
         for p, label in _PERIOD_TABS
     )
-    nav_html = ""
     if period in ("week", "month"):
         can_go_next = offset < 0
         next_arrow = (
-            f'<a class="tab" href="{_url(token, selected_market_id, period, offset + 1)}">▶</a>'
+            f'<a class="tab nav-arrow" href="{_url(token, selected_market_id, period, offset + 1)}">▶</a>'
             if can_go_next
-            else '<span class="tab disabled">▶</span>'
+            else '<span class="tab nav-arrow disabled">▶</span>'
         )
         nav_html = (
-            f'<a class="tab" href="{_url(token, selected_market_id, period, offset - 1)}">◀</a>'
+            f'<a class="tab nav-arrow" href="{_url(token, selected_market_id, period, offset - 1)}">◀</a>'
             f'<span class="period-label">{period_label}</span>{next_arrow}'
         )
     else:
         nav_html = f'<span class="period-label">{period_label}</span>'
 
     events_html = "".join(
-        f'<li><b>{e["date"]}</b> ({e["market_name"]}, {e["weather"]}) — {e["text"]}</li>' for e in events
+        f'<li><b>{e["date"]}</b> ({_esc(e["market_name"])}, {e["weather"]}) — {_esc(e["text"])}</li>' for e in events
     ) or "<li>За период значимых событий не отмечали.</li>"
 
     empty_notice = "" if rows else '<p class="notice">Пока нет ни одного согласованного отчёта за выбранный период.</p>'
+
+    commentary_html = ""
+    if commentary:
+        commentary_html = f"""
+        <section class="commentary">
+            <div class="commentary-icon">🤖</div>
+            <div>
+                <div class="commentary-label">Аналитика Клода</div>
+                <div class="commentary-text">{_esc(commentary)}</div>
+            </div>
+        </section>
+        """
 
     return f"""<!doctype html>
 <html lang="ru">
@@ -184,6 +206,7 @@ def render_dashboard_page(
 </style>
 </head>
 <body>
+<div class="page">
 <header>
     <h1>📊 Дашборд смен</h1>
     <div class="tabs">{all_tab}{market_tabs}</div>
@@ -191,29 +214,18 @@ def render_dashboard_page(
     <div class="tabs">{nav_html}</div>
 </header>
 {empty_notice}
+{commentary_html}
 {kpi_html}
-<section class="chart-pair">
-    <h2>Выручка и температура</h2>
-    <canvas id="chartRevenue" height="90"></canvas>
-    <canvas id="chartTemp" height="60"></canvas>
-</section>
-<section class="chart-pair">
-    <h2>Гости и осадки</h2>
-    <canvas id="chartGuests" height="90"></canvas>
-    <canvas id="chartPrecip" height="60"></canvas>
-</section>
-<section class="chart-single">
-    <h2>Списания: факт и норма</h2>
-    <canvas id="chartWriteoff" height="90"></canvas>
-</section>
-<section>
-    <h2>Зависимости показателей</h2>
-    <table class="corr-table"><tbody>{correlation_rows}</tbody></table>
-</section>
-<section>
-    <h2>Значимые события за период</h2>
-    <ul class="events">{events_html}</ul>
-</section>
+<div class="chart-grid">
+{_card("Выручка и температура", '<canvas id="chartRevenue" height="130"></canvas><canvas id="chartTemp" height="90"></canvas>')}
+{_card("Гости и осадки", '<canvas id="chartGuests" height="130"></canvas><canvas id="chartPrecip" height="90"></canvas>')}
+</div>
+{_card("Списания: факт и норма", '<canvas id="chartWriteoff" height="110"></canvas>')}
+<div class="info-grid">
+{_card("Зависимости показателей", f'<table class="corr-table"><tbody>{correlation_rows}</tbody></table>')}
+{_card("Значимые события за период", f'<ul class="events">{events_html}</ul>')}
+</div>
+</div>
 <script>
 const series = {json.dumps(series_js, ensure_ascii=False)};
 const weather = {json.dumps(weather_js, ensure_ascii=False)};
@@ -222,6 +234,7 @@ function seriesColor(s) {{ return dark ? s.color_dark : s.color; }}
 function baseOpts(yLabel) {{
     return {{
         responsive: true,
+        maintainAspectRatio: false,
         interaction: {{ mode: "index", intersect: false }},
         scales: {{ y: {{ title: {{ display: true, text: yLabel }}, grid: {{ color: dark ? "#2c2c2a" : "#e1e0d9" }} }},
                    x: {{ grid: {{ display: false }} }} }},
@@ -230,7 +243,7 @@ function baseOpts(yLabel) {{
 }}
 new Chart(document.getElementById("chartRevenue"), {{
     type: "bar",
-    data: {{ labels: weather.dates, datasets: series.map(s => ({{ label: s.name, data: s.revenue, backgroundColor: seriesColor(s), maxBarThickness: 24, borderRadius: 4 }})) }},
+    data: {{ labels: weather.dates, datasets: series.map(s => ({{ label: s.name, data: s.revenue, backgroundColor: seriesColor(s), maxBarThickness: 28, borderRadius: 4 }})) }},
     options: baseOpts("Выручка, ₽")
 }});
 new Chart(document.getElementById("chartTemp"), {{
@@ -240,18 +253,18 @@ new Chart(document.getElementById("chartTemp"), {{
 }});
 new Chart(document.getElementById("chartGuests"), {{
     type: "bar",
-    data: {{ labels: weather.dates, datasets: series.map(s => ({{ label: s.name, data: s.guests, backgroundColor: seriesColor(s), maxBarThickness: 24, borderRadius: 4 }})) }},
+    data: {{ labels: weather.dates, datasets: series.map(s => ({{ label: s.name, data: s.guests, backgroundColor: seriesColor(s), maxBarThickness: 28, borderRadius: 4 }})) }},
     options: baseOpts("Гости")
 }});
 new Chart(document.getElementById("chartPrecip"), {{
     type: "bar",
-    data: {{ labels: weather.dates, datasets: [{{ label: "Осадки, мм", data: weather.precip, backgroundColor: "#1baf7a", maxBarThickness: 24, borderRadius: 4 }}] }},
+    data: {{ labels: weather.dates, datasets: [{{ label: "Осадки, мм", data: weather.precip, backgroundColor: "#1baf7a", maxBarThickness: 28, borderRadius: 4 }}] }},
     options: baseOpts("мм")
 }});
 new Chart(document.getElementById("chartWriteoff"), {{
     type: "bar",
     data: {{ labels: weather.dates, datasets: [
-        {{ label: "Списания факт", data: series[0] ? series[0].writeoff_total : [], backgroundColor: "#2a78d6", maxBarThickness: 24, borderRadius: 4 }},
+        {{ label: "Списания факт", data: series[0] ? series[0].writeoff_total : [], backgroundColor: "#2a78d6", maxBarThickness: 28, borderRadius: 4 }},
         {{ label: "Норма", type: "line", data: series[0] ? series[0].writeoff_total_plan : [], borderColor: "#898781", borderDash: [4,4], borderWidth: 2, pointRadius: 0 }}
     ] }},
     options: baseOpts("₽")
@@ -261,18 +274,12 @@ new Chart(document.getElementById("chartWriteoff"), {{
 </html>"""
 
 
-def _build_matrix(rows: list[dict]) -> dict[tuple[str, str], float | None]:
-    from dashboard.data import build_correlation_matrix
-
-    return build_correlation_matrix(rows, CORRELATION_METRICS)
-
-
 def render_forbidden_page() -> str:
     return """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><title>Доступ запрещён</title></head>
 <body style="font-family: system-ui, sans-serif; padding: 40px;">
 <h1>🔒 Доступ запрещён</h1>
-<p>Ссылка неверна или устарела — запросите новую в боте командой /dashboard.</p>
+<p>Ссылка неверна или устарела — запросите новую в боте командой /shift_dashboard.</p>
 </body></html>"""
 
 
@@ -280,12 +287,14 @@ _CSS = """
 :root {
   color-scheme: light;
   --surface-1: #fcfcfb;
-  --page: #f9f9f7;
+  --page: #f2f1ee;
   --text-primary: #0b0b0b;
   --text-secondary: #52514e;
   --muted: #898781;
   --grid: #e1e0d9;
   --border: rgba(11,11,11,0.10);
+  --accent: #2a78d6;
+  --accent-tint: #eaf1fb;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -297,41 +306,63 @@ _CSS = """
     --muted: #898781;
     --grid: #2c2c2a;
     --border: rgba(255,255,255,0.10);
+    --accent: #3987e5;
+    --accent-tint: #16233a;
   }
 }
 * { box-sizing: border-box; }
 body {
-  margin: 0; padding: 16px; background: var(--page); color: var(--text-primary);
+  margin: 0; background: var(--page); color: var(--text-primary);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
+.page { max-width: 1680px; margin: 0 auto; padding: 20px 28px 40px; }
 header { margin-bottom: 16px; }
-h1 { font-size: 20px; margin: 0 0 12px; }
-h2 { font-size: 15px; color: var(--text-secondary); margin: 0 0 8px; }
-.tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+h1 { font-size: 21px; margin: 0 0 14px; letter-spacing: -0.01em; }
+h2 { font-size: 14px; color: var(--text-secondary); margin: 0 0 12px; font-weight: 600; }
+.tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
 .tab {
-  padding: 6px 12px; border-radius: 8px; text-decoration: none; color: var(--text-secondary);
-  border: 1px solid var(--border); font-size: 13px;
+  padding: 7px 14px; border-radius: 999px; text-decoration: none; color: var(--text-secondary);
+  border: 1px solid var(--border); font-size: 13px; background: var(--surface-1);
 }
-.tab.active { background: var(--surface-1); color: var(--text-primary); border-color: var(--text-primary); }
-.tab.disabled { opacity: 0.35; pointer-events: none; }
-.period-label { padding: 6px 4px; font-size: 13px; color: var(--text-secondary); font-weight: 600; }
+.tab.active { background: var(--accent); color: #ffffff; border-color: var(--accent); font-weight: 600; }
+.tab.disabled { opacity: 0.3; pointer-events: none; }
+.nav-arrow { padding: 7px 12px; }
+.period-label { padding: 6px 4px; font-size: 13px; color: var(--text-secondary); font-weight: 600; min-width: 140px; text-align: center; }
 .notice { color: var(--text-secondary); }
-.tiles { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+
+.commentary {
+  display: flex; gap: 14px; align-items: flex-start;
+  background: var(--accent-tint); border: 1px solid var(--border); border-radius: 14px;
+  padding: 16px 20px; margin-bottom: 20px;
+}
+.commentary-icon { font-size: 22px; line-height: 1; }
+.commentary-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
+.commentary-text { font-size: 14.5px; line-height: 1.5; color: var(--text-primary); }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
 .tile {
-  background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
-  padding: 12px 16px; min-width: 140px; flex: 1;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
+  padding: 14px 16px;
 }
 .tile-label { font-size: 12px; color: var(--muted); }
-.tile-value { font-size: 20px; font-weight: 600; margin-top: 4px; }
+.tile-value { font-size: 22px; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
 .tile-sub { font-size: 12px; margin-top: 4px; }
-.kpi-table, .corr-table {
-  width: 100%; border-collapse: collapse; background: var(--surface-1); border-radius: 12px; overflow: hidden;
-  margin-bottom: 20px; font-size: 13px;
+
+.card {
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
+  padding: 16px 18px 18px; margin: 0;
 }
-.kpi-table th, .kpi-table td, .corr-table td { padding: 8px 12px; border-bottom: 1px solid var(--grid); text-align: left; }
+.chart-grid, .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 16px; margin-bottom: 16px; }
+.card canvas { max-width: 100%; }
+
+.kpi-table, .corr-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+}
+.kpi-table th, .kpi-table td, .corr-table td { padding: 8px 10px; border-bottom: 1px solid var(--grid); text-align: left; }
 .kpi-table th { color: var(--muted); font-weight: 500; }
-section { margin-bottom: 24px; max-width: 900px; }
-.chart-pair canvas, .chart-single canvas { max-width: 100%; }
-.events { padding-left: 18px; font-size: 13px; color: var(--text-secondary); }
-.events li { margin-bottom: 4px; }
+.kpi-table { background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; margin-bottom: 20px; }
+.corr-table tr:last-child td { border-bottom: none; }
+
+.events { padding-left: 18px; font-size: 13px; color: var(--text-secondary); margin: 0; }
+.events li { margin-bottom: 6px; }
 """

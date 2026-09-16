@@ -12,7 +12,8 @@ from pathlib import Path
 
 from aiohttp import web
 
-from dashboard.data import PERIODS, fetch_dashboard_series, resolve_period
+from dashboard.commentary import generate_commentary
+from dashboard.data import PERIODS, build_correlation_matrix, fetch_dashboard_series, resolve_period
 from dashboard.html import render_dashboard_page, render_forbidden_page
 from monitoring.db import get_connection
 from monitoring.markets import list_markets
@@ -56,7 +57,17 @@ async def _handle_dashboard(request: web.Request) -> web.Response:
     start_iso, end_iso, label = resolve_period(period, offset)
     markets = await asyncio.to_thread(list_markets)
     rows = await asyncio.to_thread(fetch_dashboard_series, market_id, start_iso, end_iso)
-    html = render_dashboard_page(markets, market_id, period, offset, label, rows, expected_token)
+    correlation_matrix = await asyncio.to_thread(build_correlation_matrix, rows)
+
+    prev_rows = []
+    if period in ("week", "month"):
+        prev_start, prev_end, _ = resolve_period(period, offset - 1)
+        prev_rows = await asyncio.to_thread(fetch_dashboard_series, market_id, prev_start, prev_end)
+
+    scope_label = next((m["name"] for m in markets if m["id"] == market_id), "Все точки") if market_id else "Все точки"
+    commentary = await asyncio.to_thread(generate_commentary, scope_label, label, rows, prev_rows, correlation_matrix)
+
+    html = render_dashboard_page(markets, market_id, period, offset, label, rows, correlation_matrix, commentary, expected_token)
     return web.Response(text=html, content_type="text/html")
 
 

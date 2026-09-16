@@ -154,6 +154,44 @@ def fetch_dashboard_series(market_id: int | None, start_iso: str, end_iso: str) 
     return rows
 
 
+def _sum_or_none(values: list) -> float | None:
+    vals = [v for v in values if v is not None]
+    return sum(vals) if vals else None
+
+
+def _avg_or_none(values: list) -> float | None:
+    vals = [v for v in values if v is not None]
+    return sum(vals) / len(vals) if vals else None
+
+
+def aggregate_series(rows: list[dict]) -> dict:
+    """Итоги по периоду — общие и для KPI-плиток (dashboard/html.py), и
+    для промпта Клоду (dashboard/commentary.py), чтобы считать их
+    одинаково в обоих местах."""
+    return {
+        "days_count": len({r["report_date"] for r in rows}),
+        "revenue_total": _sum_or_none([r["revenue"] for r in rows]),
+        "avg_check_avg": _avg_or_none([r["avg_check"] for r in rows]),
+        "guests_total": _sum_or_none([r["guests"] for r in rows]),
+        "spmh_avg": _avg_or_none([r["spmh"] for r in rows]),
+        "writeoff_total": _sum_or_none([r["writeoff_total"] for r in rows]),
+        "writeoff_total_plan": _sum_or_none([r["writeoff_total_plan"] for r in rows]),
+        "temp_avg": _avg_or_none([r["temp_avg_c"] for r in rows]),
+        "rain_days": sum(1 for r in rows if (r.get("precipitation_mm") or 0) > 0),
+    }
+
+
+def daily_revenue_totals(rows: list[dict]) -> dict[str, float]:
+    """Выручка по дате, просуммированная по всем точкам в rows — для
+    поиска лучшего/худшего дня периода."""
+    totals: dict[str, float] = {}
+    for r in rows:
+        if r["revenue"] is None:
+            continue
+        totals[r["report_date"]] = totals.get(r["report_date"], 0) + r["revenue"]
+    return totals
+
+
 def _default_city() -> str:
     from config.settings import DEFAULT_WEATHER_CITY
 
