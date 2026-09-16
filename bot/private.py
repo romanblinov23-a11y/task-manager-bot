@@ -22,6 +22,7 @@ from bot.shift_reports import (
     on_shift_report_edit_reply,
     on_shift_report_more_info_reply,
     on_shift_report_reply,
+    on_view_reports_edit_date_reply,
 )
 from bot.shift_schedule_flow import on_set_shift_schedule_reply
 from bot.status_cycle import on_employee_reply
@@ -109,6 +110,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if await on_shift_report_more_info_reply(update, context):
+        return
+
+    if await on_view_reports_edit_date_reply(update, context):
         return
 
     if await on_set_handover_schedule_reply(update, context):

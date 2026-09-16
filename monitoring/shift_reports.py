@@ -55,6 +55,33 @@ def set_report_status(report_id: int, status: str) -> None:
         conn.close()
 
 
+def update_report_date(report_id: int, new_date: str) -> bool:
+    """Переносит уже заполненный отчёт на другую дату — например, если его
+    по факту сдали не за тот день (см. /view_reports, «✏️ Изменить дату»).
+    False и ничего не меняет, если у этого же рынка уже есть ДРУГОЙ отчёт
+    на новую дату — UNIQUE(market_id, report_date) не даст двух отчётов на
+    один день, разбираться с этим конфликтом руками надёжнее, чем
+    молча перезаписывать/сливать."""
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT market_id FROM shift_report WHERE id = ?", (report_id,)).fetchone()
+        if not row:
+            return False
+        conflict = conn.execute(
+            "SELECT id FROM shift_report WHERE market_id = ? AND report_date = ? AND id != ?",
+            (row["market_id"], new_date, report_id),
+        ).fetchone()
+        if conflict:
+            return False
+        conn.execute(
+            "UPDATE shift_report SET report_date = ?, updated_at = ? WHERE id = ?", (new_date, _now(), report_id)
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
 def get_report(report_id: int) -> dict | None:
     conn = get_connection()
     try:

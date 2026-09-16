@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 
 from bot.onboarding import get_display_name
 from config.settings import ROMAN_TELEGRAM_ID, SHIFT_REPORT_ESCALATE_OFFSET_MINUTES
-from config.timeutil import add_minutes_to_hhmm, fmt_date
+from config.timeutil import add_minutes_to_hhmm, fmt_date, parse_date
 from config.timeutil import now as tz_now
 from config.timeutil import today as tz_today
 from monitoring.managers import (
@@ -32,6 +32,7 @@ from monitoring.shift_reports import (
     list_reports_by_status_and_date,
     save_report_data,
     set_report_status,
+    update_report_date,
 )
 from monitoring.shift_schedule import list_markets_with_shift
 from monitoring.writeoff_plan import get_writeoff_plan, writeoff_plan_amounts
@@ -189,6 +190,9 @@ _editing: dict[str, dict] = {}
 
 # telegram_user_id (str) владельца -> {"report_id": int} — ждём текст замечания для управляющего
 _pending_more_info: dict[str, dict] = {}
+
+# telegram_user_id (str) владельца -> {"report_id": int} — ждём новую дату для отчёта (/view_reports)
+_awaiting_date_edit: dict[str, dict] = {}
 
 
 def _parse_amount(text: str) -> float | None:
@@ -1174,19 +1178,21 @@ def _view_day_keyboard(market_id: int, reports: list[dict]) -> InlineKeyboardMar
 
 
 def _view_report_keyboard(report_id: int) -> InlineKeyboardMarkup:
-    """Два действия в архиве: вернуть отчёт управляющему на правку
+    """Действия в архиве: вернуть отчёт управляющему на правку
     (переиспользует ровно тот же путь, что и «💬 Запросить дополнения» при
     обычном согласовании, см. on_shift_report_more_info — статус
     откатывается на 'awaiting_supervisor', управляющему уходит замечание
-    владельца и пикер полей для точечной правки), либо принудительно
+    владельца и пикер полей для точечной правки), принудительно
     (пере)отправить именно этот отчёт в чат финпартнёров (см.
     on_view_reports_force_send_finance) — например, если авторассылка в
     10:00 не сработала (чат подключили позже) или нужно переслать
-    исправленную версию ещё раз."""
+    исправленную версию ещё раз, — либо поправить дату отчёта (см.
+    on_view_reports_edit_date), если его завели не под тем днём."""
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("📨 Отправить в чат ФП", callback_data=f"shrep_forcesend:{report_id}")],
             [InlineKeyboardButton("📤 Отправить на доработку управляющему", callback_data=f"shrep_moreinfo:{report_id}")],
+            [InlineKeyboardButton("✏️ Изменить дату", callback_data=f"shrep_editdate:{report_id}")],
         ]
     )
 
@@ -1291,6 +1297,12 @@ async def on_view_reports_month_choice(update: Update, context: ContextTypes.DEF
     )
 
 
+async def _send_report_view(message, market: dict, report: dict) -> None:
+    plan = await asyncio.to_thread(fetch_daily_plan, market["id"], report["report_date"])
+    text = render_owner_finance_report(market, report["report_date"], report["data"], plan)
+    await message.reply_text(text, reply_markup=_view_report_keyboard(report["id"]))
+
+
 async def on_view_reports_day_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not is_owner(query.from_user.id):
@@ -1304,9 +1316,61 @@ async def on_view_reports_day_choice(update: Update, context: ContextTypes.DEFAU
         await query.answer("Отчёт не найден", show_alert=True)
         return
     await query.answer()
-    plan = await asyncio.to_thread(fetch_daily_plan, market_id, report_date)
-    text = render_owner_finance_report(market, report_date, report["data"], plan)
-    await query.message.reply_text(text, reply_markup=_view_report_keyboard(report["id"]))
+    await _send_report_view(query.message, market, report)
+
+
+async def on_view_reports_edit_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """«✏️ Изменить дату» в архиве (/view_reports) — репорт нередко
+    заводится под датой, когда его реально заполнили, а не датой смены,
+    за которую он на самом деле (например, сдали на следующее утро). Ждём
+    от владельца новую дату свободным текстом (см. on_view_reports_edit_date_reply)."""
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    report_id = int(query.data.split(":", 1)[1])
+    report = get_report(report_id)
+    if not report:
+        await query.answer("Отчёт не найден", show_alert=True)
+        return
+    await query.answer()
+    _awaiting_date_edit[str(query.from_user.id)] = {"report_id": report_id}
+    await query.message.reply_text(
+        f"Сейчас у отчёта дата {fmt_date(report['report_date'])}. На какую дату исправить? "
+        "Можно в любом привычном формате (например, 14.09.2026 или «вчера»)."
+    )
+
+
+async def on_view_reports_edit_date_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    user_id = str(update.effective_user.id)
+    state = _awaiting_date_edit.get(user_id)
+    if not state:
+        return False
+    del _awaiting_date_edit[user_id]
+
+    report = get_report(state["report_id"])
+    if not report:
+        await update.effective_message.reply_text("Отчёт больше недоступен.")
+        return True
+
+    new_date = parse_date(update.effective_message.text or "")
+    if not new_date:
+        await update.effective_message.reply_text("Не понял дату — попробуйте, например, 14.09.2026.")
+        _awaiting_date_edit[user_id] = state
+        return True
+
+    market = get_market(report["market_id"])
+    if not update_report_date(report["id"], new_date):
+        await update.effective_message.reply_text(
+            f"У «{market['name']}» уже есть другой отчёт за {fmt_date(new_date)} — сначала разберитесь с ним "
+            "(например, объедините вручную или удалите ненужный через /reset_shift_report)."
+        )
+        return True
+
+    report = get_report(report["id"])
+    await update.effective_message.reply_text(f"✅ Дата отчёта изменена на {fmt_date(new_date)}.")
+    await _send_report_view(update.effective_message, market, report)
+    return True
 
 
 async def on_shift_report_absent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
