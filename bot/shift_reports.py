@@ -34,7 +34,7 @@ from monitoring.shift_reports import (
     set_report_status,
     update_report_date,
 )
-from monitoring.shift_schedule import list_markets_with_shift
+from monitoring.shift_schedule import get_scheduled_manager, list_markets_with_shift
 from monitoring.writeoff_plan import get_writeoff_plan, writeoff_plan_amounts
 from revenue.daily_plan import fetch_daily_plan
 from revenue.plan_report import MONTH_NAMES_RU
@@ -1662,39 +1662,61 @@ async def send_shift_report_kickoffs(bot: Bot) -> None:
         await _offer_report_or_absence(bot, market["scheduled_manager_id"], market, date_iso)
 
 
+def _escalation_shift_date(market: dict) -> str:
+    """Смена, которую нужно проверять ПРЯМО СЕЙЧАС для эскалации. Обычно
+    это сегодня, но если у точки время сбора отчёта позднее настолько,
+    что +SHIFT_REPORT_ESCALATE_OFFSET_MINUTES уходит за полночь, момент
+    самой эскалации физически наступает уже на следующий календарный
+    день — тогда смена, которую проверяем, это ВЧЕРА. Раньше здесь всегда
+    брали tz_today(), и для поздних точек (offset уводит за полночь) это
+    приводило к тому, что эскалация не находила уже существующий отчёт
+    за вчера (искала за "сегодня"), заново предлагала кнопки — и, если по
+    ним заполняли, отчёт заводился под неверной, более поздней датой,
+    хотя реально был за вчерашнюю смену."""
+    hour, minute = (int(part) for part in get_effective_shift_report_time(market).split(":"))
+    wraps_past_midnight = hour * 60 + minute + SHIFT_REPORT_ESCALATE_OFFSET_MINUTES >= 24 * 60
+    base = tz_today() - timedelta(days=1) if wraps_past_midnight else tz_today()
+    return base.isoformat()
+
+
 async def send_shift_report_escalations(bot: Bot) -> None:
     """Эскалация — не в абсолютное время, а через SHIFT_REPORT_ESCALATE_
     OFFSET_MINUTES минут после СВОЕГО времени сбора отчёта каждой точки
     (см. market.shift_report_time). Вызывается раз в минуту (см. main.py).
-    Если по рынку с сегодняшней записью в графике отчёт так и не начали
-    сдавать управляющему, сообщает управляющему (или владельцу, если
-    управляющего нет) и предлагает те же две кнопки (см. main.py). Рынки с
-    отключённым у Управляющего блоком «Отчёты по смене» пропускаются —
-    см. market_reports_enabled."""
-    date_iso = tz_today().isoformat()
+    Если по рынку с записью в графике на нужную смену (см.
+    _escalation_shift_date — почти всегда сегодня, но для точек с поздним
+    временем сбора может быть вчера) отчёт так и не начали сдавать
+    управляющему, сообщает управляющему (или владельцу, если управляющего
+    нет) и предлагает те же две кнопки (см. main.py). Рынки с отключённым
+    у Управляющего блоком «Отчёты по смене» пропускаются — см.
+    market_reports_enabled."""
     now_hhmm = tz_now().strftime("%H:%M")
-    for market in list_markets_with_shift(date_iso):
+    for market in list_markets():
         if not market_reports_enabled(market["id"]):
             continue
         escalate_time = add_minutes_to_hhmm(get_effective_shift_report_time(market), SHIFT_REPORT_ESCALATE_OFFSET_MINUTES)
         if escalate_time != now_hhmm:
             continue
-        report = get_report_by_date(market["id"], date_iso)
+        shift_date = _escalation_shift_date(market)
+        scheduled_manager_id = get_scheduled_manager(market["id"], shift_date)
+        if not scheduled_manager_id:
+            continue
+        report = get_report_by_date(market["id"], shift_date)
         if report and report["status"] != "collecting":
             continue
 
-        manager_name = get_display_name(market["scheduled_manager_id"])
+        manager_name = get_display_name(scheduled_manager_id)
         supervisor = get_market_supervisor(market["id"])
         if supervisor:
             await bot.send_message(
                 chat_id=supervisor["telegram_user_id"],
-                text=f"⚠️ {manager_name} не сдал(а) отчёт по «{market['name']}» за сегодня.",
+                text=f"⚠️ {manager_name} не сдал(а) отчёт по «{market['name']}» за {fmt_date(shift_date)}.",
             )
-            await _offer_report_or_absence(bot, supervisor["telegram_user_id"], market, date_iso)
+            await _offer_report_or_absence(bot, supervisor["telegram_user_id"], market, shift_date)
         else:
             await bot.send_message(
                 chat_id=ROMAN_TELEGRAM_ID,
-                text=f"⚠️ {manager_name} не сдал(а) отчёт по «{market['name']}» за сегодня, управляющего нет.",
+                text=f"⚠️ {manager_name} не сдал(а) отчёт по «{market['name']}» за {fmt_date(shift_date)}, управляющего нет.",
             )
 
 
