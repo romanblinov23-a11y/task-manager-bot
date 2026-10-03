@@ -67,12 +67,11 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     или протокол встречи, Claude сам решает по содержанию. Сообщения от
     кого-либо ещё — это сотрудники.
 
-    Открытый вопрос о статусе (раздел 4) проверяется первым для ВСЕХ,
-    включая Романа — он тоже может быть исполнителем задачи, и его ответ
-    на статус-вопрос не должен попасть в обработку как новая задача."""
-    if await on_employee_reply(update, context):
-        return
-
+    Сначала обрабатываются явные диалоги, которые ждут текст (отчёты, анкеты,
+    согласования, настройки) — иначе открытый вопрос о статусе задачи
+    перехватывает ответы в анкете. Открытый вопрос о статусе (раздел 4)
+    проверяется до разбора новых задач — включая Романа, он тоже может быть
+    исполнителем, и его ответ на статус-вопрос не должен стать новой задачей."""
     if await on_deadline_reply(update, context):
         return
 
@@ -152,6 +151,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if await on_meeting_postpone_reply(update, context):
+        return
+
+    if await on_employee_reply(update, context):
         return
 
     if not _is_roman(update):
