@@ -3,7 +3,7 @@
     python3 -m fp_report.run 2026-09 \
         --pnl <pnl.json> --manager <manager_report.json> \
         --vozn <vozn.json> --komanda <komanda.json> --shtat <shtat.json> \
-        --grafik <grafik.json> --guests <guests.json> --guests-prev <guests_prev.json> \
+        --grafik <grafik.json> \
         --inventory <inventory.xlsx> --template <shablonotcheta.docx> --out <папка>
 
 Все JSON — ответы НИМБ как есть (с обёрткой success/data или без неё).
@@ -31,8 +31,6 @@ def main() -> None:
     p.add_argument("--komanda", required=True)
     p.add_argument("--shtat", required=True)
     p.add_argument("--grafik", required=True)
-    p.add_argument("--guests", required=True)
-    p.add_argument("--guests-prev", required=True)
     p.add_argument("--inventory", required=True)
     p.add_argument("--template", required=True)
     p.add_argument("--out", required=True)
@@ -47,8 +45,6 @@ def main() -> None:
         komanda=_data(a.komanda),
         shtat=_data(a.shtat),
         grafik=_data(a.grafik),
-        guests=_data(a.guests),
-        guests_prev=_data(a.guests_prev),
         inventory_positions=load_save_positions(a.inventory),
         out_dir=a.out,
     )

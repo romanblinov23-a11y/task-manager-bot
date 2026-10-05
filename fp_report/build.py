@@ -97,13 +97,6 @@ def _sum(values):
     return sum(vals) if vals else None
 
 
-def _card(guests: dict, key: str):
-    for card in (guests or {}).get("guests", {}).get("cards", []):
-        if card.get("key") == key:
-            return card.get("value")
-    return None
-
-
 def _shifts_by_user(grafik: dict) -> tuple[dict, int]:
     """Смены по сотрудникам (id) и общее число смен: день с непустым списком shift."""
     by_user: dict = {}
@@ -127,8 +120,6 @@ def build_report(
     komanda: dict,
     shtat: dict,
     grafik: dict,
-    guests: dict,
-    guests_prev: dict,
     inventory_positions: list,
     out_dir: str,
     manager_name: str = ASK,
@@ -163,7 +154,9 @@ def build_report(
         plan, fact = _pnl(flat, code, month)
         _, prev_fact = _pnl(flat, code, prev)
         _fill_row(T[T_SEC1], label, [plan, fact, prev_fact], fmt)
-    _fill_row(T[T_SEC1], "Количество гостей", [None, _card(guests, "guest_count"), _card(guests_prev, "guest_count")], _count)
+    checks_plan, checks_fact = _pnl(flat, "araar_count_receipts", month)
+    checks_prev = _pnl(flat, "araar_count_receipts", prev)[1]
+    _fill_row(T[T_SEC1], "Количество гостей", [checks_plan, checks_fact, checks_prev], _count)
 
     # Раздел 2
     def pct_of_income(code):
