@@ -273,6 +273,18 @@ def _shift_report_regulation_for_role(role: str | None, uid: int) -> str:
     return SHIFT_REPORT_REGULATION_SUPERVISOR
 
 
+FP_REPORT_REGULATION = """📘 Регламент: ежемесячный отчёт для ФП (Управляющий)
+
+Раз в месяц, до 5 числа, отчёт за прошлый месяц собираем через бота.
+1. Владелец включает отчёт по рынку в /market_settings.
+2. Команда /fp_report — выбираешь проект.
+3. Присылаешь два файла: шаблон .docx и итоги инвентаризации .xlsx. Бот возьмёт из инвентаризации только строки со статусом SAVE.
+4. Бот сам тянет данные из НИМБ и по одному задаёт вопросы, в порядке шаблона. Перед каждым вопросом — цифры из НИМБ. Если видишь ошибку, так и напиши в ответе.
+5. Готовый файл придёт тебе и Роме. «[запросить у управляющего]» в файле значит пустое место, его нужно дозаполнить.
+
+«Отмена» — сбросить сбор и начать заново. Если НИМБ не ответил — напиши «повтор»."""
+
+
 def _handover_regulation_for_role(role: str | None, uid: int) -> str:
     return HANDOVER_REGULATION_SUPERVISOR if role == "Управляющий" else HANDOVER_REGULATION_STAFF
 
@@ -283,6 +295,7 @@ _REGULATION_BUILDERS = {
     "reports": _shift_report_regulation_for_role,
     "meetings": lambda role, uid: MEETINGS_REGULATION_SUPERVISOR,
     "handover": _handover_regulation_for_role,
+    "fp_report": lambda role, uid: FP_REPORT_REGULATION,
 }
 
 

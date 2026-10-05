@@ -2,7 +2,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from monitoring.managers import is_owner
-from monitoring.markets import get_market, list_markets, set_market_send_to_finance
+from monitoring.markets import get_market, list_markets, set_market_fp_report, set_market_send_to_finance
 
 
 def _market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
@@ -20,6 +20,8 @@ def _actions_keyboard(market: dict) -> InlineKeyboardMarkup:
     market_id = market["id"]
     finance_on = market.get("send_to_finance", 1)
     finance_label = "💰 Финпартнёры: включено (нажми, чтобы выключить)" if finance_on else "💰 Финпартнёры: выключено (нажми, чтобы включить)"
+    fp_on = market.get("fp_report_enabled", 0)
+    fp_label = "📑 Месячный отчёт для ФП: включён (нажми, чтобы выключить)" if fp_on else "📑 Месячный отчёт для ФП: выключен (нажми, чтобы включить)"
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("🏷 Реквизиты оператора (ПДн)", callback_data=f"setop_market:{market_id}")],
@@ -27,6 +29,7 @@ def _actions_keyboard(market: dict) -> InlineKeyboardMarkup:
             [InlineKeyboardButton("📤 Экспорт данных сотрудников", callback_data=f"expdata_market:{market_id}")],
             [InlineKeyboardButton("🔁 Запросить согласия у всех", callback_data=f"reqconsent_market:{market_id}")],
             [InlineKeyboardButton(finance_label, callback_data=f"msett_togglefinance:{market_id}")],
+            [InlineKeyboardButton(fp_label, callback_data=f"msett_togglefp:{market_id}")],
             [InlineKeyboardButton("💰 Чат финпартнёров", callback_data=f"shrc_view:{market_id}:finance")],
             [InlineKeyboardButton("👥 Чат команды точки", callback_data=f"shrc_view:{market_id}:team")],
             [InlineKeyboardButton("🗑 Нормы списаний", callback_data=f"writeoffplan_market:{market_id}")],
@@ -82,6 +85,22 @@ async def on_market_settings_toggle_finance(update: Update, context: ContextType
     set_market_send_to_finance(market_id, not market.get("send_to_finance", 1))
     market = get_market(market_id)
     await query.answer("Включено" if market.get("send_to_finance", 1) else "Выключено")
+    await query.edit_message_text(f"Рынок: {market['name']}. Что настраиваем?", reply_markup=_actions_keyboard(market))
+
+
+async def on_market_settings_toggle_fp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not is_owner(query.from_user.id):
+        await query.answer()
+        return
+    market_id = int(query.data.split(":", 1)[1])
+    market = get_market(market_id)
+    if not market:
+        await query.answer("Рынок не найден", show_alert=True)
+        return
+    set_market_fp_report(market_id, not market.get("fp_report_enabled", 0))
+    market = get_market(market_id)
+    await query.answer("Включено" if market.get("fp_report_enabled", 0) else "Выключено")
     await query.edit_message_text(f"Рынок: {market['name']}. Что настраиваем?", reply_markup=_actions_keyboard(market))
 
 

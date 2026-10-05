@@ -133,6 +133,18 @@ def set_market_surf_spot_key(market_id: int, spot_key: str) -> None:
         conn.close()
 
 
+def set_market_fp_report(market_id: int, enabled: bool) -> None:
+    """Ежемесячный отчёт для финпартнёров по этому рынку (см. bot.fp_report_flow).
+    Включает владелец в /market_settings. Без привязки к точке Surf Coffee
+    (surf_spot_key) отчёт собрать нельзя, даже если флаг включён."""
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE market SET fp_report_enabled = ? WHERE id = ?", (1 if enabled else 0, market_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def set_market_city(market_id: int, city: str) -> None:
     """Город точки — используется для подтяжки реальной погоды в дашборде
     (см. dashboard/weather.py). Пусто — берём config.settings.DEFAULT_WEATHER_CITY."""

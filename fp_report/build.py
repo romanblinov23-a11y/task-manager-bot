@@ -33,6 +33,45 @@ def _flatten(fields, out=None):
     return out
 
 
+# Строки таблицы показателей, которых нет в данных НИМБ: вводит управляющий.
+# Ключ — подпись строки в шаблоне, значение — название показателя в fin_result отчёта управляющего.
+OPS_FROM_MANAGER = {
+    "Количество лицензий": "Количество выданных лицензий",
+    "Доля постоянных гостей, %": "Доля постоянных гостей",
+    "Достоверность учёта, %": "Достоверность учета",
+    "Нефискальная выручка, %": "Нефискальная выручка %",
+}
+MANUAL_OPS = ("Среднее время отдачи, мин", "Отзывов собрано", "Средняя оценка")
+
+
+def _set_ops_cells(table, label: str, fact, prev) -> None:
+    """fact/prev = None — колонку не трогаем."""
+    for row in table.rows[1:]:
+        if row.cells[0].text.strip() == label:
+            if fact is not None:
+                _set(row.cells[2], fact)
+            if prev is not None:
+                _set(row.cells[3], prev)
+
+
+_FIN_MONTH_KEYS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+
+
+def fin_period_keys(month: str) -> tuple[str, str]:
+    """Ключи периодов во вкладке «Финансовый результат» отчёта управляющего: для сентябрьского отчёта
+    это sep (текущий) и aug (прошлый), для августовского — aug и jul. Зашивать одну пару нельзя."""
+    m = int(month.split("-")[1])
+    return _FIN_MONTH_KEYS[m - 1], _FIN_MONTH_KEYS[(m - 2) % 12]
+
+
+def _split_pair(text: str) -> tuple[str, str]:
+    """«12 / 10» -> («12», «10»); «12» -> («12», «»)."""
+    if not text:
+        return "", ""
+    left, _, right = text.partition("/")
+    return left.strip(), right.strip()
+
+
 def _prev_ym(ym: str) -> str:
     y, m = map(int, ym.split("-"))
     return f"{y - 1}-12" if m == 1 else f"{y}-{m - 1:02d}"
@@ -62,6 +101,36 @@ def _pct(v) -> str:
 
 def _hours(v) -> str:
     return ASK if v is None else f"{v:g}".replace(".", ",")
+
+
+# Комментарии к разделам: ключ ответа и начало абзаца-инструкции (или заголовка) раздела в шаблоне
+COMMENT_SLOTS = [
+    ("comment_fin", "Что повлияло на отклонение"),
+    ("comment_cogs", "Что выросло и почему."),
+    ("comment_inv", "Типовые причины:"),
+    ("comment_staff", "Если оформлены не все"),
+    ("comment_fot", "Отдельно выделите премии"),
+    ("comment_ops", "Комментарий по операционке"),
+    ("summary", "Пять–семь предложений"),
+]
+
+
+def _fill_after(doc, anchor: str, text: str) -> None:
+    """Пишет текст в первый пустой абзац сразу после абзаца с anchor; если пустого нет — новым абзацем под ним."""
+    from docx.oxml import OxmlElement
+    from docx.text.paragraph import Paragraph
+
+    for p in doc.paragraphs:
+        if not p.text.strip().startswith(anchor):
+            continue
+        following = p._p.getnext()
+        if following is not None and following.tag.endswith("}p") and not "".join(following.itertext()).strip():
+            Paragraph(following, p._parent).add_run(text)
+        else:
+            new_p = OxmlElement("w:p")
+            p._p.addnext(new_p)
+            Paragraph(new_p, p._parent).add_run(text)
+        return
 
 
 def _set(cell, text: str) -> None:
@@ -123,8 +192,15 @@ def build_report(
     inventory_positions: list,
     out_dir: str,
     manager_name: str = ASK,
+    answers: dict | None = None,
+    spot_code: str = "",
 ) -> str:
-    """Возвращает путь к сохранённому docx."""
+    """Возвращает путь к сохранённому docx.
+
+    answers — ответы управляющего по ключам из fp_report.questions (inv_reason:КОД,
+    inv_action:КОД, hired_official, fired, invest, payouts, ops:НАЗВАНИЕ, tasks_prev,
+    tasks_next). Всё, чего нет в answers, остаётся «[запросить у управляющего]»."""
+    ans = answers or {}
     flat = _flatten(pnl["fields"])
     prev = _prev_ym(month)
     doc = docx.Document(template_path)
@@ -137,7 +213,7 @@ def build_report(
     _set(T[T_HEADER].rows[0].cells[1], SPOT_TITLE)
     y, m = map(int, month.split("-"))
     _set(T[T_HEADER].rows[1].cells[1], f"{_MONTH_RU[m]} {y}")
-    _set(T[T_HEADER].rows[2].cells[1], manager_name)
+    _set(T[T_HEADER].rows[2].cells[1], ans.get("manager_name", manager_name))
     _set(T[T_HEADER].rows[3].cells[1], date.today().strftime("%d.%m.%Y"))
 
     # Раздел 1
@@ -202,11 +278,16 @@ def build_report(
     explained = summary["explained"]
     _ensure_rows(T[T_INV_EXPL], len(explained))
     for row, p in zip(T[T_INV_EXPL].rows[1:-1], explained):
-        reason = f"⚠️ перепроверить: {flags[p.code]}" if p.code in flags else ASK
+        flag = flags.get(p.code)
+        given = ans.get(f"inv_reason:{p.code}")
+        if given:
+            reason = f"{given} (⚠️ перепроверить: {flag})" if flag else given
+        else:
+            reason = f"⚠️ перепроверить: {flag}" if flag else ASK
         _set(row.cells[0], f"{p.name} ({p.code})")
         _set(row.cells[1], _money(p.diff_sum))
         _set(row.cells[2], reason)
-        _set(row.cells[3], ASK)
+        _set(row.cells[3], ans.get(f"inv_action:{p.code}", ASK))
 
     # Раздел 4: ФОТ
     fot_plan, fot_fact = _pnl(flat, "expenses_indirect_salary", month)
@@ -223,6 +304,12 @@ def build_report(
     _fill_row(T[T_FOT], "Стоимость часа, ₽", [None, fot_fact / hours if fot_fact and hours else None, None], _money)
     _fill_row(T[T_FOT], "Выручка на час работы, ₽", [None, fact_revenue / hours if fact_revenue and hours else None, None], _money)
     _fill_row(T[T_FOT], "Часы управляющего в смене", [None, manager_hours, None], _hours)
+    # Плана и прошлого месяца по сменам и часам в данных нет — «—», а не запрос управляющему
+    for label in ("Количество смен за месяц", "Количество отработанных часов", "Стоимость часа, ₽", "Выручка на час работы, ₽", "Часы управляющего в смене"):
+        for row in T[T_FOT].rows[1:]:
+            if row.cells[0].text.strip() == label:
+                _set(row.cells[1], "—")
+                _set(row.cells[3], "—")
 
     # Расшифровка по сотрудникам
     _ensure_rows(T[T_EMP], len(emp_rows))
@@ -246,24 +333,25 @@ def build_report(
     norm, actual = shtat["staff_norm_value"], shtat["staff_actual_value"]
     _set(T[T_PERS].rows[1].cells[1], str(len(team)))
     _set(T[T_PERS].rows[1].cells[2], "по разделу «Команда» НИМБ")
-    _set(T[T_PERS].rows[2].cells[1], ASK)
+    _set(T[T_PERS].rows[2].cells[1], ans.get("hired_official", ASK))
     _set(T[T_PERS].rows[3].cells[1], str(hired))
     _set(T[T_PERS].rows[3].cells[2], "первый рабочий день в месяце по НИМБ")
-    _set(T[T_PERS].rows[4].cells[1], ASK)
+    _set(T[T_PERS].rows[4].cells[1], ans.get("fired", ASK))
     _set(T[T_PERS].rows[5].cells[1], str(interns))
     _set(T[T_PERS].rows[6].cells[1], str(max(norm - actual, 0)))
     _set(T[T_PERS].rows[6].cells[2], f"штатная норма {norm}, факт {actual}")
 
     # Раздел 5 (инвестиции) — только от управляющего
-    _set(T[T_INVEST].rows[1].cells[0], ASK)
-    _set(T[T_PAYOUT].rows[1].cells[0], ASK)
+    _set(T[T_INVEST].rows[1].cells[0], ans.get("invest", ASK))
+    _set(T[T_PAYOUT].rows[1].cells[0], ans.get("payouts_plan", ASK))
 
     # Раздел 6
     fin = {r["name"]: r for r in manager.get("fin_result", [])}
+    cur_key, prev_key = fin_period_keys(month)
 
     def fr(name):
         r = fin.get(name, {})
-        return (r.get("sep") or {}).get("value"), (r.get("aug") or {}).get("value")
+        return (r.get(cur_key) or {}).get("value"), (r.get(prev_key) or {}).get("value")
 
     ops = {
         "Количество лицензий": ("Количество выданных лицензий", _count),
@@ -277,20 +365,54 @@ def build_report(
     indirect = _pnl(flat, "expenses_indirect", month)[1]
     indirect_prev = _pnl(flat, "expenses_indirect", prev)[1]
     _fill_row(T[T_OPS], "Косвенные затраты, % выручки", [None, indirect / fact_revenue * 100 if indirect and fact_revenue else None, indirect_prev / income_prev * 100 if indirect_prev and income_prev else None], _pct)
-    for label in ("Среднее время отдачи, мин", "Отзывов собрано", "Средняя оценка"):
-        for row in T[T_OPS].rows[1:]:
-            if row.cells[0].text.strip() == label:
-                for cell in row.cells[1:]:
-                    _set(cell, ASK)
+    # План по этим показателям не ведём — колонка «План» всегда «—».
+    for row in T[T_OPS].rows[1:]:
+        _set(row.cells[1], "—")
+    # Ответ управляющего в формате «факт / прошлый месяц»: вручную заполняемые строки
+    # и строки, которых не оказалось в отчёте управляющего из НИМБ. Пустое значение не трогаем.
+    for label in MANUAL_OPS:
+        fact, prev = _split_pair(ans.get(f"ops:{label}", ""))
+        _set_ops_cells(T[T_OPS], label, fact or ASK, prev or ASK)
+    for label in OPS_FROM_MANAGER:
+        fact, prev = _split_pair(ans.get(f"ops:{label}", ""))
+        if fact or prev:
+            _set_ops_cells(T[T_OPS], label, fact or None, prev or None)
 
     # Разделы 7 и 8 — только от управляющего
-    _set(T[T_TASKS_PREV].rows[1].cells[0], ASK)
-    _set(T[T_TASKS_NEXT].rows[1].cells[0], ASK)
+    _set(T[T_TASKS_PREV].rows[1].cells[0], ans.get("tasks_prev", ASK))
+    _set(T[T_TASKS_NEXT].rows[1].cells[0], ans.get("tasks_next", ASK))
 
-    out = Path(out_dir) / f"report_park_{month.replace('-', '')}.docx"
+    # Приложение: имена файлов пакета по шаблону (код точки и период в имени)
+    ym = month.replace("-", "")
+    code = spot_code.lower()
+    attach_names = {
+        "Выручка по дням": f"sales{code}{ym}.xlsx",
+        "Типы оплат": f"pay{code}{ym}.xlsx",
+        "Инвентаризации": f"inv{code}{ym}.xlsx",
+        "Отчёт управляющего": f"report_{code}_{ym}.docx",
+        "Банковская выписка": f"bank{code}{ym}.xlsx",
+    }
+    for row in T[T_ATTACH].rows[1:]:
+        label = row.cells[0].text.strip()
+        if label in attach_names:
+            _set(row.cells[1], attach_names[label] if code else ASK)
+
+    # Комментарии к разделам — в пустые абзацы под инструкцией раздела (или сразу под ней)
+    for key, anchor in COMMENT_SLOTS:
+        _fill_after(doc, anchor, ans.get(key, ASK))
+
+    out = Path(out_dir) / f"report_{spot_code or 'park'}_{month.replace('-', '')}.docx"
     out.parent.mkdir(parents=True, exist_ok=True)
     doc.save(out)
     return str(out)
+
+
+def count_open_fields(path: str) -> int:
+    """Сколько мест остались с пометкой «[запросить у управляющего]» — ячейки таблиц и абзацы комментариев."""
+    doc = docx.Document(path)
+    in_tables = sum(cell.text.count(ASK) for table in doc.tables for row in table.rows for cell in row.cells)
+    in_text = sum(p.text.count(ASK) for p in doc.paragraphs)
+    return in_tables + in_text
 
 
 def load_json(path: str) -> dict:

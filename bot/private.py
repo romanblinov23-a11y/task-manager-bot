@@ -4,6 +4,7 @@ from telegram.ext import ContextTypes
 from bot.competitors import on_add_competitor_reply
 from bot.confirmation import on_deadline_reply, on_edit_reply, send_confirmation_cards
 from bot.fix_reading import on_fix_reading_reply
+from bot.fp_report_flow import on_fp_report_document, on_fp_report_reply
 from bot.handover_reports import on_handover_reply
 from bot.handover_schedule_flow import on_set_handover_schedule_reply
 from bot.handover_setup import on_set_handover_report_reply
@@ -153,6 +154,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if await on_meeting_postpone_reply(update, context):
         return
 
+    if await on_fp_report_reply(update, context):
+        return
+
     if await on_employee_reply(update, context):
         return
 
@@ -179,7 +183,10 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def on_private_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Раздел 2.3: текстовый файл протокола встречи — тот же путь обработки,
     может дать задачи на несколько разных проектов одновременно. Загрузка
-    протоколов — функция Романа, не сотрудников."""
+    протоколов — функция Романа, не сотрудников. Файлы для отчёта ФП принимает
+    сбор отчёта (bot.fp_report_flow), если он сейчас идёт у этого пользователя."""
+    if await on_fp_report_document(update, context):
+        return
     if not _is_roman(update):
         return
 

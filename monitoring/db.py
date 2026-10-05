@@ -321,6 +321,7 @@ def init_schema() -> None:
         # заведённых до появления этого вопроса, проставляем один раз явно —
         # идемпотентно, дальше эти рынки уже не будут пустыми.
         _ensure_column(conn, "market", "surf_spot_key", "surf_spot_key TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "market", "fp_report_enabled", "fp_report_enabled INTEGER NOT NULL DEFAULT 0")
         for _name, _spot_key in (("Yandex", "yandex"), ("Окко", "okko"), ("Парк Горького", "park_gorkogo")):
             conn.execute(
                 "UPDATE market SET surf_spot_key = ? WHERE name = ? AND surf_spot_key = ''",

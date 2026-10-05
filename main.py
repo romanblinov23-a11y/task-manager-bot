@@ -166,6 +166,7 @@ from bot.market_settings import (
     on_market_settings_command,
     on_market_settings_market_choice,
     on_market_settings_toggle_finance,
+    on_market_settings_toggle_fp,
 )
 from bot.monitor_chats import (
     on_monitor_chats_command,
@@ -228,6 +229,7 @@ from bot.revenue_flow import (
     send_monthly_revenue_report,
     send_weekly_revenue_report,
 )
+from bot.fp_report_flow import on_fp_report_command, on_fp_report_market_choice
 from bot.shift_dashboard_command import on_shift_dashboard_command
 from bot.shift_reports import (
     on_reset_shift_report_cancel,
@@ -416,6 +418,7 @@ _ROMAN_COMMANDS = [
     BotCommand("dashboard_market", "Дашборд по рынку"),
     BotCommand("view_reports", "Посмотреть отчёт по смене за любой день"),
     BotCommand("shift_dashboard", "Живой дашборд по отчётам смен: цифры, погода, корреляции"),
+    BotCommand("fp_report", "Ежемесячный отчёт для ФП за прошлый месяц"),
     BotCommand("revenue", "Выручка: отчёты, план/факт, P&L"),
     BotCommand("messaging", "Написать сотруднику, в чат или разослать группе"),
     BotCommand("regulations", "Регламенты работы с ботом"),
@@ -485,6 +488,7 @@ def main() -> None:
     app.add_handler(CommandHandler("reset_shift_report", on_reset_shift_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("view_reports", on_view_reports_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("shift_dashboard", on_shift_dashboard_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("fp_report", on_fp_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_handover_schedule", on_set_handover_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_handover_report", on_set_handover_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("handover_report", on_handover_report_command, filters=filters.ChatType.PRIVATE))
@@ -668,6 +672,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_broadcast_cancel, pattern=r"^bcast_cancel$"))
     app.add_handler(CallbackQueryHandler(on_market_settings_market_choice, pattern=r"^msett_market:"))
     app.add_handler(CallbackQueryHandler(on_market_settings_toggle_finance, pattern=r"^msett_togglefinance:"))
+    app.add_handler(CallbackQueryHandler(on_market_settings_toggle_fp, pattern=r"^msett_togglefp:"))
+    app.add_handler(CallbackQueryHandler(on_fp_report_market_choice, pattern=r"^fpr_market:"))
     app.add_handler(CallbackQueryHandler(on_market_settings_back, pattern=r"^msett_back$"))
     app.add_handler(CallbackQueryHandler(on_set_operator_market_choice, pattern=r"^setop_market:"))
     app.add_handler(CallbackQueryHandler(on_set_operator_confirm, pattern=r"^setop_confirm$"))
