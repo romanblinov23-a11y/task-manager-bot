@@ -33,6 +33,10 @@ DASHBOARD_V2_URL = f"{BASE_URL}/api/v3/dashboard/v2/get"
 PNL_URL = f"{BASE_URL}/api/v3/reports/pnl/get"
 MANAGER_REPORT_URL = f"{BASE_URL}/api/v3/reports/manager/reports"
 MANAGER_GUESTS_URL = f"{BASE_URL}/api/v3/reports/manager/guests"
+AWARDS_SHIFTS_URL = f"{BASE_URL}/api/v3/awards/new/shifts/get"
+TEAM_URL = f"{BASE_URL}/api/v3/spot/team/get"
+STAFF_NORM_URL = f"{BASE_URL}/api/v3/spot/staff_norm"
+TIMETABLE_URL = f"{BASE_URL}/api/web/v1/timetable/list"
 
 # Известные точки сети (ключ -> spot_id Surf Coffee). Ключи внутренние, к
 # именам рынков в monitoring.markets не привязаны — "yandex" здесь и
@@ -277,6 +281,59 @@ class SurfCoffeeClient:
                     raise RuntimeError(f"reports/manager/guests failed: {data}")
                 return data["data"]
         raise RuntimeError(f"reports/manager/guests не вернул период {month} (нет даты {marker})")
+
+    def get_awards_shifts(self, spot_key: str, month: str) -> dict:
+        """Вознаграждения за смены по сотрудникам за месяц (YYYY-MM). Период сверяется по period.date."""
+        self.switch_spot(SPOTS[spot_key]["id"])
+        resp = self._with_retry(lambda: self._client.get(AWARDS_SHIFTS_URL, params={"date": month}))
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError(f"awards/new/shifts/get failed: {data}")
+        period = (data["data"].get("period") or {}).get("date")
+        if period != f"{month}-01":
+            raise RuntimeError(f"awards/new/shifts/get вернул период {period}, ожидали {month}-01")
+        return data["data"]
+
+    def get_team(self, spot_key: str) -> dict:
+        """Действующие сотрудники точки (все страницы)."""
+        self.switch_spot(SPOTS[spot_key]["id"])
+        employees: list = []
+        page = 1
+        while True:
+            body = {"page": page, "per_page": 50, "job_title_id": [], "dismissed": "actual"}
+            resp = self._with_retry(lambda: self._client.post(TEAM_URL, json=body))
+            resp.raise_for_status()
+            data = resp.json()["data"]
+            employees.extend(data["employees"])
+            if page >= data["meta"]["last_page"]:
+                break
+            page += 1
+        return {"employees": employees}
+
+    def get_staff_norm(self, spot_key: str) -> dict:
+        """Штатная норма и фактическая численность точки."""
+        self.switch_spot(SPOTS[spot_key]["id"])
+        resp = self._with_retry(lambda: self._client.get(STAFF_NORM_URL))
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError(f"spot/staff_norm failed: {data}")
+        return data["data"]
+
+    def get_timetable(self, spot_key: str, month: str) -> dict:
+        """График смен за месяц (YYYY-MM). Период проверяется по наличию первого дня месяца в results.dates."""
+        self.switch_spot(SPOTS[spot_key]["id"])
+        resp = self._with_retry(lambda: self._client.post(TIMETABLE_URL, json={"date": month}))
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError(f"timetable/list failed: {data}")
+        first_day = date.fromisoformat(f"{month}-01").strftime("%d.%m.%Y")
+        dates = data["data"].get("results", {}).get("dates", [])
+        if not any(first_day in d for d in dates):
+            raise RuntimeError(f"timetable/list не вернул период {month} (нет {first_day})")
+        return data["data"]
 
     def close(self):
         self._client.close()
