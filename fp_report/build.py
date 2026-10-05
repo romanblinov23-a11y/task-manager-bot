@@ -431,6 +431,8 @@ def build_report(
     # и строки, которых не оказалось в отчёте управляющего из НИМБ. Пустое значение не трогаем.
     for label in MANUAL_OPS:
         fact, prev = _split_pair(ans.get(f"ops:{label}", ""))
+        # «прошлый месяц» — из отчёта за прошлый месяц (его факт), если управляющий не указал иного
+        prev = prev or ans.get(f"prev_ops:{label}", "")
         _set_ops_cells(T[T_OPS], label, fact or ASK, prev or ASK)
     for label in OPS_FROM_MANAGER:
         fact, prev = _split_pair(ans.get(f"ops:{label}", ""))

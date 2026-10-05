@@ -86,9 +86,11 @@ _GAP_LABELS.update({"expenses_indirect_salary": "ФОТ, ₽", "araar_count_rece
 _GAP_COLS = {"plan": "план", "fact": "факт", "prev": "прошлый месяц"}
 
 
-def build_questions(inputs: dict, positions: list[Position], month: str) -> list[dict]:
+def build_questions(inputs: dict, positions: list[Position], month: str, previous: dict | None = None) -> list[dict]:
     """inputs — словарь из fp_report.collect.fetch_nimba_inputs, month — 'YYYY-MM'.
+    previous — разбор отчёта за прошлый месяц (fp_report.previous.read_previous) или None.
     Возвращает список dict (для хранения в сессии)."""
+    previous = previous or {}
     questions: list[Question] = []
 
     def add(key: str, text: str, fields: list[str]) -> None:
@@ -109,10 +111,12 @@ def build_questions(inputs: dict, positions: list[Position], month: str) -> list
             [f"gap:{code}:{col}" for code, col in gaps],
         )
 
+    prev_manager = previous.get("manager_name", "")
     add(
         "manager_name",
-        "Шапка отчёта. Напиши ФИО управляющего, как он должен быть указан в отчёте. "
-        "Данные в боте могут быть неверными, поэтому спрашиваю.",
+        "Шапка отчёта. Напиши ФИО управляющего, как он должен быть указан в отчёте."
+        + (f"\nВ прошлом отчёте: {prev_manager}. Напиши «тот же», если не поменялся." if prev_manager else "")
+        + "\nДанные в боте могут быть неверными, поэтому спрашиваю.",
         ["manager_name"],
     )
 
@@ -174,10 +178,12 @@ def build_questions(inputs: dict, positions: list[Position], month: str) -> list
         ["comment_fot"],
     )
 
+    prev_plan = previous.get("payouts_plan", [])
     add(
         "invest",
         "Раздел 5. Выплаты инвесторам за месяц по факту. Одна строка — одна выплата: дата, инвестор, тело, проценты, всего.\n"
-        "Или «нет», если выплат не было.",
+        + (("В прошлом отчёте план выплат на этот месяц:\n" + "\n".join(prev_plan) + "\n") if prev_plan else "")
+        + "Или «нет», если выплат не было.",
         ["invest"],
     )
     add(
@@ -191,12 +197,19 @@ def build_questions(inputs: dict, positions: list[Position], month: str) -> list
     missing_ops = [label for label, (fact, prev) in values.items() if fact is None or prev is None]
     ops_labels = list(MANUAL_OPS) + missing_ops
     present = [f"{label}: факт {_plain(fact)} · прошлый {_plain(prev)}" for label, (fact, prev) in values.items() if label not in missing_ops]
+    prev_ops = previous.get("ops_fact", {})
+
+    def ops_line(i: int, label: str) -> str:
+        if label in prev_ops:
+            return f"{i}) {label} — только факт (прошлый месяц из прошлого отчёта: {prev_ops[label]})"
+        return f"{i}) {label} — «факт / прошлый месяц»"
+
     add(
         "ops",
         "Раздел 6. Операционные показатели. Из НИМБ:\n"
         + ("\n".join(present) + "\n" if present else "")
-        + "Пришли строки в формате «факт / прошлый месяц», по одной на показатель:\n"
-        + "\n".join(f"{i}) {label}" for i, label in enumerate(ops_labels, 1)),
+        + "Пришли строки по одной на показатель:\n"
+        + "\n".join(ops_line(i, label) for i, label in enumerate(ops_labels, 1)),
         [f"ops:{label}" for label in ops_labels],
     )
     add(
@@ -205,10 +218,12 @@ def build_questions(inputs: dict, positions: list[Position], month: str) -> list
         ["comment_ops"],
     )
 
+    prev_tasks = previous.get("tasks_next", [])
     add(
         "tasks_prev",
-        "Раздел 7. Задачи прошлого месяца. По каждой: выполнена, не выполнена или перенесена — и почему. "
-        "Каждую задачу с новой строки.",
+        "Раздел 7. Задачи прошлого месяца. По каждой: выполнена, не выполнена или перенесена — и почему."
+        + (("\nИз прошлого отчёта:\n" + "\n".join(f"- {t}" for t in prev_tasks)) if prev_tasks else "")
+        + "\nКаждую задачу с новой строки.",
         ["tasks_prev"],
     )
     add(
