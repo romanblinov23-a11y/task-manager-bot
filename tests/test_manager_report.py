@@ -56,3 +56,20 @@ def test_raises_when_period_never_matches():
     client = _client([_FakeResponse(_report("01.08.2026")), _FakeResponse(_report("01.08.2026"))])
     with pytest.raises(RuntimeError, match="01.09.2026"):
         client.get_manager_report("park_gorkogo", "2026-09")
+
+
+def test_guests_report_returns_when_requested_month_present():
+    body = '{"success": true, "data": {"guests": [{"date": "2026-09-01"}], "receipts": []}}'
+    resp = _FakeResponse({"success": True, "data": {"guests": [{"date": "2026-09-01"}], "receipts": []}})
+    resp.text = body
+    client = _client([resp])
+    data = client.get_guests_report("park_gorkogo", "2026-09")
+    assert data["guests"][0]["date"] == "2026-09-01"
+
+
+def test_guests_report_retries_then_fails_when_month_missing():
+    old = _FakeResponse({"success": True, "data": {}})
+    old.text = '{"success": true, "data": {"guests": [{"date": "2026-08-01"}]}}'
+    client = _client([old, old])
+    with pytest.raises(RuntimeError, match="2026-09-01"):
+        client.get_guests_report("park_gorkogo", "2026-09")

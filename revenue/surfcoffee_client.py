@@ -32,6 +32,7 @@ CHANGE_SPOT_URL = f"{BASE_URL}/api/v3/user/changeSpot"
 DASHBOARD_V2_URL = f"{BASE_URL}/api/v3/dashboard/v2/get"
 PNL_URL = f"{BASE_URL}/api/v3/reports/pnl/get"
 MANAGER_REPORT_URL = f"{BASE_URL}/api/v3/reports/manager/reports"
+MANAGER_GUESTS_URL = f"{BASE_URL}/api/v3/reports/manager/guests"
 
 # Известные точки сети (ключ -> spot_id Surf Coffee). Ключи внутренние, к
 # именам рынков в monitoring.markets не привязаны — "yandex" здесь и
@@ -254,6 +255,28 @@ class SurfCoffeeClient:
             if actual == expected:
                 return data["data"]
         raise RuntimeError(f"reports/manager/reports вернул период {actual}, ожидали {expected}")
+
+    def get_guests_report(self, spot_key: str, month: str) -> dict:
+        """
+        Вкладка «Гостевой поток» отчёта управляющего по точке за месяц (YYYY-MM).
+        Месяц передаётся параметром date. В ответе нет actual_date, поэтому период
+        проверяется по наличию первого дня запрошенного месяца (YYYY-MM-01);
+        при отсутствии запрос повторяется один раз.
+        """
+        spot_id = SPOTS[spot_key]["id"]
+        self.switch_spot(spot_id)
+        marker = f"{month}-01"
+        for _ in range(2):
+            resp = self._with_retry(
+                lambda: self._client.get(MANAGER_GUESTS_URL, params={"date": month})
+            )
+            resp.raise_for_status()
+            if marker in resp.text:
+                data = resp.json()
+                if not data.get("success"):
+                    raise RuntimeError(f"reports/manager/guests failed: {data}")
+                return data["data"]
+        raise RuntimeError(f"reports/manager/guests не вернул период {month} (нет даты {marker})")
 
     def close(self):
         self._client.close()
