@@ -8,15 +8,17 @@
 
 import copy
 import json
+import re
 from datetime import date
 from pathlib import Path
 
 import docx
+import docx.text.paragraph
 
 from fp_report.anomalies import find_suspicious
 from fp_report.inventory import summarize
 
-ASK = "[запросить у управляющего]"
+ASK = "[не заполнено]"
 SPOT_TITLE = "Surf Coffee x Park Gorkogo"
 _MONTH_RU = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
 
@@ -115,6 +117,51 @@ COMMENT_SLOTS = [
 ]
 
 
+def _fill_free_table(table, text: str, keep_last: bool = False) -> None:
+    """Таблица со свободными строками (выплаты, задачи): каждая строка ответа — отдельная строка таблицы
+    на всю ширину, а не текст в одной узкой ячейке. Пусто — пометка «запросить». keep_last — не трогать
+    последнюю строку (например, «Итого»). Шапку не трогаем."""
+    from docx.oxml.ns import qn
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        lines = [ASK]
+    data_rows = table.rows[1:]
+    if not data_rows:
+        return
+    template = copy.deepcopy(data_rows[0]._tr)
+    total_row = data_rows[-1]._tr if keep_last and len(data_rows) > 1 else None
+    for row in data_rows:
+        if row._tr is not total_row:
+            row._tr.getparent().remove(row._tr)
+    n_cols = len(table.columns)
+    for line in lines:
+        tr = copy.deepcopy(template)
+        tcs = tr.findall(qn("w:tc"))
+        for tc in tcs[1:]:
+            tr.remove(tc)
+        first = tcs[0]
+        tcPr = first.get_or_add_tcPr()
+        span = tcPr.find(qn("w:gridSpan"))
+        if span is None:
+            span = tcPr.makeelement(qn("w:gridSpan"), {})
+            tcPr.append(span)
+        span.set(qn("w:val"), str(n_cols))
+        for extra in tcPr.findall(qn("w:tcW")):
+            extra.getparent().remove(extra)
+        paragraphs = first.findall(qn("w:p"))
+        for p in paragraphs[1:]:
+            first.remove(p)
+        cell_p = docx.text.paragraph.Paragraph(paragraphs[0], table)
+        for run in list(cell_p.runs):
+            run._r.getparent().remove(run._r)
+        cell_p.add_run(line)
+        if total_row is not None:
+            total_row.addprevious(tr)
+        else:
+            table._tbl.append(tr)
+
+
 def _fill_after(doc, anchor: str, text: str) -> None:
     """Пишет текст в первый пустой абзац сразу после абзаца с anchor; если пустого нет — новым абзацем под ним."""
     from docx.oxml import OxmlElement
@@ -141,6 +188,19 @@ def _set(cell, text: str) -> None:
             r.text = ""
     else:
         p.add_run(text)
+
+
+def pnl_value(flat: dict, code: str, col: str, month: str):
+    """Значение P&L: col — plan/fact текущего месяца или prev — факт прошлого месяца. None — в НИМБ нет."""
+    if col == "prev":
+        return _pnl(flat, code, _prev_ym(month))[1]
+    return _pnl(flat, code, month)[0 if col == "plan" else 1]
+
+
+def num_answer(text: str):
+    """Число из ответа управляющего: «1 234,5», «ок — 1234». Берётся последнее число в строке."""
+    found = re.findall(r"-?\d+(?:[.,]\d+)?", (text or "").replace(" ", "").replace("\xa0", ""))
+    return float(found[-1].replace(",", ".")) if found else None
 
 
 def _fill_row(table, label: str, values: list, fmt) -> None:
@@ -206,8 +266,13 @@ def build_report(
     doc = docx.Document(template_path)
     T = doc.tables
 
-    income = _pnl(flat, "income", month)
-    income_prev = _pnl(flat, "income", prev)[1]
+    def gp(code: str, col: str):
+        """Значение P&L; если в НИМБ его нет — число из ответа на вопрос о пропуске (gap:КОД:колонка)."""
+        value = pnl_value(flat, code, col, month)
+        return value if value is not None else num_answer(ans.get(f"gap:{code}:{col}", ""))
+
+    income = (gp("income", "plan"), gp("income", "fact"))
+    income_prev = gp("income", "prev")
 
     # Шапка
     _set(T[T_HEADER].rows[0].cells[1], SPOT_TITLE)
@@ -227,21 +292,17 @@ def build_report(
         "Средний чек, ₽": ("araar_avg_receipts", _money),
     }
     for label, (code, fmt) in sec1.items():
-        plan, fact = _pnl(flat, code, month)
-        _, prev_fact = _pnl(flat, code, prev)
-        _fill_row(T[T_SEC1], label, [plan, fact, prev_fact], fmt)
-    checks_plan, checks_fact = _pnl(flat, "araar_count_receipts", month)
-    checks_prev = _pnl(flat, "araar_count_receipts", prev)[1]
-    _fill_row(T[T_SEC1], "Количество гостей", [checks_plan, checks_fact, checks_prev], _count)
+        _fill_row(T[T_SEC1], label, [gp(code, "plan"), gp(code, "fact"), gp(code, "prev")], fmt)
+    _fill_row(T[T_SEC1], "Количество гостей", [gp("araar_count_receipts", "plan"), gp("araar_count_receipts", "fact"), gp("araar_count_receipts", "prev")], _count)
 
     # Раздел 2
     def pct_of_income(code):
         out = []
-        for ym, inc in ((month, income[1]), (prev, income_prev)):
-            _, fact = _pnl(flat, code, ym)
+        for col, inc in (("fact", income[1]), ("prev", income_prev)):
+            fact = gp(code, col)
             out.append(fact / inc * 100 if fact is not None and inc else None)
         plan_inc = income[0]
-        plan_v = _pnl(flat, code, month)[0]
+        plan_v = gp(code, "plan")
         plan_pct = plan_v / plan_inc * 100 if plan_v is not None and plan_inc else None
         return [plan_pct, out[0], out[1]]
 
@@ -256,9 +317,7 @@ def build_report(
         "Комплименты гостям, ₽": ("expenses_indirect_marketing_thanks", _money),
     }
     for label, (code, fmt) in sec2.items():
-        plan, fact = _pnl(flat, code, month)
-        _, prev_fact = _pnl(flat, code, prev)
-        _fill_row(T[T_SEC2], label, [plan, fact, prev_fact], fmt)
+        _fill_row(T[T_SEC2], label, [gp(code, "plan"), gp(code, "fact"), gp(code, "prev")], fmt)
     _fill_row(T[T_SEC2], "Списания по сроку годности, % выручки", pct_of_income("expenses_direct_writeoffs_expiration"), _pct)
 
     # Раздел 3: инвентаризация (только SAVE)
@@ -290,8 +349,8 @@ def build_report(
         _set(row.cells[3], ans.get(f"inv_action:{p.code}", ASK))
 
     # Раздел 4: ФОТ
-    fot_plan, fot_fact = _pnl(flat, "expenses_indirect_salary", month)
-    fot_prev = _pnl(flat, "expenses_indirect_salary", prev)[1]
+    fot_plan, fot_fact = gp("expenses_indirect_salary", "plan"), gp("expenses_indirect_salary", "fact")
+    fot_prev = gp("expenses_indirect_salary", "prev")
     emp_rows = vozn["awards"]
     hours = sum(r.get("duration") or 0 for r in emp_rows)
     manager_hours = sum(r.get("duration") or 0 for r in emp_rows if r.get("employee_post") == "manager")
@@ -342,8 +401,8 @@ def build_report(
     _set(T[T_PERS].rows[6].cells[2], f"штатная норма {norm}, факт {actual}")
 
     # Раздел 5 (инвестиции) — только от управляющего
-    _set(T[T_INVEST].rows[1].cells[0], ans.get("invest", ASK))
-    _set(T[T_PAYOUT].rows[1].cells[0], ans.get("payouts_plan", ASK))
+    _fill_free_table(T[T_INVEST], ans.get("invest", ""), keep_last=True)
+    _fill_free_table(T[T_PAYOUT], ans.get("payouts_plan", ""))
 
     # Раздел 6
     fin = {r["name"]: r for r in manager.get("fin_result", [])}
@@ -379,8 +438,8 @@ def build_report(
             _set_ops_cells(T[T_OPS], label, fact or None, prev or None)
 
     # Разделы 7 и 8 — только от управляющего
-    _set(T[T_TASKS_PREV].rows[1].cells[0], ans.get("tasks_prev", ASK))
-    _set(T[T_TASKS_NEXT].rows[1].cells[0], ans.get("tasks_next", ASK))
+    _fill_free_table(T[T_TASKS_PREV], ans.get("tasks_prev", ""))
+    _fill_free_table(T[T_TASKS_NEXT], ans.get("tasks_next", ""))
 
     # Приложение: имена файлов пакета по шаблону (код точки и период в имени)
     ym = month.replace("-", "")

@@ -1,4 +1,4 @@
-from fp_report.build import _flatten, _hours, _money, _pnl, _prev_ym
+from fp_report.build import ASK, _flatten, _hours, _money, _pnl, _prev_ym
 
 
 def test_prev_ym_crosses_year():
@@ -16,5 +16,5 @@ def test_pnl_picks_month_plan_and_fact():
 
 def test_formatters_use_russian_separators_and_placeholder():
     assert _money(1234.5) == "1 234,50"
-    assert _money(None) == "[запросить у управляющего]"
+    assert _money(None) == ASK
     assert _hours(103.5) == "103,5"

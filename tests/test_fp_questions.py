@@ -48,7 +48,9 @@ def test_build_questions_follows_template_order_and_asks_only_gaps(monkeypatch):
     items = q.build_questions(_inputs(), _positions(), "2026-09")
     keys = [item["key"] for item in items]
     # K2 (300 ₽) ниже порога и не попадает в объяснения, пока есть позиция выше порога
-    assert keys == [
+    # пустой P&L — значит все пропуски спрашиваются первым вопросом
+    assert keys[0] == "gaps"
+    assert keys[1:] == [
         "manager_name", "comment_fin", "comment_cogs", "inv:K1", "comment_inv", "staff", "comment_staff",
         "comment_fot", "invest", "payouts_plan", "ops", "comment_ops", "tasks_prev", "tasks_next", "summary",
     ]

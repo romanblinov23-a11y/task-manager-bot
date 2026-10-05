@@ -9,7 +9,7 @@ import re
 from dataclasses import asdict, dataclass
 
 from fp_report.anomalies import find_suspicious
-from fp_report.build import MANUAL_OPS, OPS_FROM_MANAGER, _flatten, _pnl, _prev_ym, fin_period_keys
+from fp_report.build import MANUAL_OPS, OPS_FROM_MANAGER, _flatten, _pnl, _prev_ym, fin_period_keys, num_answer, pnl_value
 from fp_report.inventory import Position, summarize
 
 
@@ -80,6 +80,12 @@ def _ops_values(inputs: dict, month: str) -> dict[str, tuple]:
     return out
 
 
+# Показатели P&L, по которым в отчёте есть план/факт/прошлый месяц и которые могут быть пустыми в НИМБ
+_GAP_LABELS = {code: label for label, code, _ in _FIN_ROWS + _COST_ROWS}
+_GAP_LABELS.update({"expenses_indirect_salary": "ФОТ, ₽", "araar_count_receipts": "Количество гостей (чеки)"})
+_GAP_COLS = {"plan": "план", "fact": "факт", "prev": "прошлый месяц"}
+
+
 def build_questions(inputs: dict, positions: list[Position], month: str) -> list[dict]:
     """inputs — словарь из fp_report.collect.fetch_nimba_inputs, month — 'YYYY-MM'.
     Возвращает список dict (для хранения в сессии)."""
@@ -87,6 +93,21 @@ def build_questions(inputs: dict, positions: list[Position], month: str) -> list
 
     def add(key: str, text: str, fields: list[str]) -> None:
         questions.append(Question(key, text, fields))
+
+    flat = _flatten(inputs["pnl"]["fields"])
+    gaps = [
+        (code, col)
+        for code in _GAP_LABELS
+        for col in _GAP_COLS
+        if pnl_value(flat, code, col, month) is None
+    ]
+    if gaps:
+        add(
+            "gaps",
+            "В НИМБ нет этих значений. Пришли по одному числу в строке, в том же порядке:\n"
+            + "\n".join(f"{i}) {_GAP_LABELS[code]}, {_GAP_COLS[col]}" for i, (code, col) in enumerate(gaps, 1)),
+            [f"gap:{code}:{col}" for code, col in gaps],
+        )
 
     add(
         "manager_name",
@@ -155,13 +176,13 @@ def build_questions(inputs: dict, positions: list[Position], month: str) -> list
 
     add(
         "invest",
-        "Раздел 5. Выплаты инвесторам за месяц по факту. Колонки: дата | инвестор | тело, ₽ | проценты, ₽ | всего, ₽.\n"
-        "Строками или «нет», если выплат не было.",
+        "Раздел 5. Выплаты инвесторам за месяц по факту. Одна строка — одна выплата: дата, инвестор, тело, проценты, всего.\n"
+        "Или «нет», если выплат не было.",
         ["invest"],
     )
     add(
         "payouts_plan",
-        "План выплат на следующий месяц. Колонки: дата | инвестор | сумма, ₽ | основание.\n"
+        "План выплат на следующий месяц. Одна строка — одна выплата: дата, инвестор, сумма, основание.\n"
         "Если не планируются — напиши «выплаты не планируются» и причину.",
         ["payouts_plan"],
     )
@@ -218,3 +239,31 @@ def apply_answer(question: dict, text: str) -> dict[str, str]:
         return {fields[0]: value[:1].upper() + value[1:]}
     lines = [_NUMBERING.sub("", line).strip() for line in value.splitlines() if line.strip()]
     return {field: line for field, line in zip(fields, lines)}
+
+
+def missing_fields(question: dict, answers: dict) -> list[str]:
+    """Поля вопроса, по которым ответа ещё нет. Для пропусков НИМБ ответ должен быть числом."""
+    out = []
+    for field in question["fields"]:
+        value = answers.get(field)
+        if not value or (field.startswith("gap:") and num_answer(value) is None):
+            out.append(field)
+    return out
+
+
+def describe_field(field: str) -> str:
+    """Человеческая подпись поля — для сообщения «не хватает: …»."""
+    if field.startswith("inv_reason:"):
+        return "причина расхождения (инвентаризация)"
+    if field.startswith("inv_action:"):
+        return "что сделано (инвентаризация)"
+    if field.startswith("ops:"):
+        return field[len("ops:"):]
+    if field.startswith("gap:"):
+        _, code, col = field.split(":")
+        return f"{_GAP_LABELS.get(code, code)}, {_GAP_COLS.get(col, col)}"
+    return {
+        "hired_official": "официально трудоустроено",
+        "fired": "уволено за месяц",
+        "manager_name": "ФИО управляющего",
+    }.get(field, field)

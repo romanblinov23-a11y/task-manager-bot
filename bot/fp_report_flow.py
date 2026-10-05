@@ -20,10 +20,13 @@ from config.timeutil import now as tz_now
 from fp_report.build import _MONTH_RU, ASK, build_report, count_open_fields
 from fp_report.collect import fetch_nimba_inputs
 from fp_report.inventory import load_save_positions
-from fp_report.questions import apply_answer, build_questions
+from fp_report.questions import apply_answer, build_questions, describe_field, missing_fields
 from fp_report.session import delete_session, load_inputs, load_session, save_inputs, save_session, session_dir
 from monitoring.managers import get_markets_for_manager, has_fp_report_access, is_owner
 from monitoring.markets import get_market, list_markets
+
+# uid, для которых сбор из НИМБ идёт прямо сейчас в этом процессе
+_collecting: set[int] = set()
 
 _TEMPLATE_NAME = "template.docx"
 _INVENTORY_NAME = "inventory.xlsx"
@@ -60,7 +63,7 @@ async def on_fp_report_command(update: Update, context: ContextTypes.DEFAULT_TYP
     session = load_session(uid)
     if session:
         await message.reply_text("Отчёт для ФП уже собирается. Доделай его или напиши «отмена», чтобы начать заново.")
-        await _ask_waiting_step(message, session)
+        await _ask_waiting_step(message, uid, session)
         return
     markets = _available_markets(uid)
     if not markets:
@@ -143,6 +146,7 @@ def _collect_sync(uid: int, spot_key: str, month: str) -> tuple[dict, list[dict]
 
 async def _collect(message, context: ContextTypes.DEFAULT_TYPE, uid: int, session: dict) -> None:
     market = get_market(session["market_id"])
+    _collecting.add(uid)
     try:
         inputs, questions = await asyncio.to_thread(_collect_sync, uid, market["surf_spot_key"], session["month"])
     except Exception as exc:
@@ -152,6 +156,8 @@ async def _collect(message, context: ContextTypes.DEFAULT_TYPE, uid: int, sessio
             f"Не получилось собрать данные из НИМБ: {exc}\nКогда проблема уйдёт, напиши «повтор». Или «отмена»."
         )
         return
+    finally:
+        _collecting.discard(uid)
 
     save_inputs(uid, inputs)
     session.update({"stage": "questions", "questions": questions, "index": 0, "answers": {}})
@@ -166,12 +172,15 @@ async def _ask_current(message, session: dict) -> None:
     await message.reply_text(f"Вопрос {session['index'] + 1} из {total}.\n\n{question['text']}")
 
 
-async def _ask_waiting_step(message, session: dict) -> None:
+async def _ask_waiting_step(message, uid: int, session: dict) -> None:
     stage = session["stage"]
     if stage == "files":
         await message.reply_text("Жду два файла: шаблон отчёта (.docx) и инвентаризацию (.xlsx).")
     elif stage == "collecting":
-        await message.reply_text("Данные из НИМБ ещё собираются, подожди.")
+        if uid in _collecting:
+            await message.reply_text("Данные из НИМБ ещё собираются, подожди.")
+        else:
+            await message.reply_text("Сбор данных из НИМБ прервался, например при перезапуске бота. Напиши «повтор», и я соберу его заново. Файлы и ответы сохранились.")
     elif stage == "retry":
         await message.reply_text("Не вышло собрать данные из НИМБ. Напиши «повтор» или «отмена».")
     elif stage == "questions":
@@ -192,14 +201,14 @@ async def on_fp_report_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await message.reply_text("Сбор отчёта для ФП отменён.")
         return True
 
-    if session["stage"] == "retry" and text.lower() == "повтор":
+    if session["stage"] in ("retry", "collecting") and text.lower() == "повтор" and uid not in _collecting:
         session["stage"] = "collecting"
         save_session(uid, session)
         await _collect(message, context, uid, session)
         return True
 
     if session["stage"] != "questions":
-        await _ask_waiting_step(message, session)
+        await _ask_waiting_step(message, uid, session)
         return True
 
     if not text:
@@ -208,9 +217,27 @@ async def on_fp_report_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     question = session["questions"][session["index"]]
     session["answers"].update(apply_answer(question, text))
+    still = missing_fields(question, session["answers"])
+    if still:
+        save_session(uid, session)
+        await message.reply_text(
+            "Не хватает ответа: " + "; ".join(describe_field(f) for f in still)
+            + ".\nПришли все пункты, каждый с новой строки. Для цифр — только число."
+        )
+        return True
+
     session["index"] += 1
     if session["index"] < len(session["questions"]):
         save_session(uid, session)
+        await _ask_current(message, session)
+        return True
+
+    # Все вопросы пройдены, но что-то могло остаться незакрытым — возвращаем к первому такому
+    pending = next((i for i, q in enumerate(session["questions"]) if missing_fields(q, session["answers"])), None)
+    if pending is not None:
+        session["index"] = pending
+        save_session(uid, session)
+        await message.reply_text("Остались незакрытые вопросы, без них отчёт не соберу.")
         await _ask_current(message, session)
         return True
 
@@ -243,7 +270,7 @@ async def _finish(message, context: ContextTypes.DEFAULT_TYPE, uid: int, session
     open_fields = count_open_fields(path)
     caption = f"Отчёт для ФП: {market['name']}, {_month_label(month)}."
     if open_fields:
-        caption += f"\nОсталось пустых полей: {open_fields} (помечены «{ASK}»)."
+        caption += f"\nНезаполненных мест: {open_fields} (помечены «{ASK}»)."
 
     recipients = {uid} | {int(owner) for owner in OWNER_TELEGRAM_IDS if owner}
     for chat_id in recipients:
