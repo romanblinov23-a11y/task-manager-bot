@@ -97,6 +97,27 @@ def _sum(values):
     return sum(vals) if vals else None
 
 
+def _card(guests: dict, key: str):
+    for card in (guests or {}).get("guests", {}).get("cards", []):
+        if card.get("key") == key:
+            return card.get("value")
+    return None
+
+
+def _shifts_by_user(grafik: dict) -> tuple[dict, int]:
+    """Смены по сотрудникам (id) и общее число смен: день с непустым списком shift."""
+    by_user: dict = {}
+    for unit in grafik["spot_employees"].values():
+        for e in unit["unit_employees"]:
+            days = 0
+            for day in e["results"]["dates"]:
+                for v in day.values():
+                    if v.get("shift"):
+                        days += 1
+            by_user[e["id"]] = days
+    return by_user, sum(by_user.values())
+
+
 def build_report(
     month: str,
     template_path: str,
@@ -105,6 +126,9 @@ def build_report(
     vozn: dict,
     komanda: dict,
     shtat: dict,
+    grafik: dict,
+    guests: dict,
+    guests_prev: dict,
     inventory_positions: list,
     out_dir: str,
     manager_name: str = ASK,
@@ -139,9 +163,7 @@ def build_report(
         plan, fact = _pnl(flat, code, month)
         _, prev_fact = _pnl(flat, code, prev)
         _fill_row(T[T_SEC1], label, [plan, fact, prev_fact], fmt)
-    # Гости в шаблоне отдельной строкой; по договорённости совпадают с числом чеков.
-    guests_plan, guests_fact = _pnl(flat, "araar_count_receipts", month)
-    _fill_row(T[T_SEC1], "Количество гостей", [guests_plan, guests_fact, _pnl(flat, "araar_count_receipts", prev)[1]], _count)
+    _fill_row(T[T_SEC1], "Количество гостей", [None, _card(guests, "guest_count"), _card(guests_prev, "guest_count")], _count)
 
     # Раздел 2
     def pct_of_income(code):
@@ -202,7 +224,8 @@ def build_report(
     fot_pct = lambda fot, inc: fot / inc * 100 if fot is not None and inc else None  # noqa: E731
     _fill_row(T[T_FOT], "ФОТ всего, ₽", [fot_plan, fot_fact, fot_prev], _money)
     _fill_row(T[T_FOT], "ФОТ, % от выручки", [fot_pct(fot_plan, income[0]), fot_pct(fot_fact, income[1]), fot_pct(fot_prev, income_prev)], _pct)
-    _fill_row(T[T_FOT], "Количество смен за месяц", [None, None, None], _count)
+    shifts_by_user, shifts_total = _shifts_by_user(grafik)
+    _fill_row(T[T_FOT], "Количество смен за месяц", [None, shifts_total, None], _count)
     _fill_row(T[T_FOT], "Количество отработанных часов", [None, hours, None], _hours)
     _fill_row(T[T_FOT], "Стоимость часа, ₽", [None, fot_fact / hours if fot_fact and hours else None, None], _money)
     _fill_row(T[T_FOT], "Выручка на час работы, ₽", [None, fact_revenue / hours if fact_revenue and hours else None, None], _money)
@@ -216,7 +239,7 @@ def build_report(
         total_pay += accrued
         _set(row.cells[0], r.get("user_title", ""))
         _set(row.cells[1], r.get("user_job_title", ""))
-        _set(row.cells[2], ASK)
+        _set(row.cells[2], str(shifts_by_user.get(r.get("user_id"), 0)))
         _set(row.cells[3], f"{r.get('duration') or 0:g}".replace(".", ","))
         _set(row.cells[4], f"{r.get('rate') or 0:.2f}".replace(".", ","))
         _set(row.cells[5], _money(accrued))
@@ -225,7 +248,6 @@ def build_report(
 
     # Движение персонала
     team = komanda["employees"]
-    fired = sum(1 for r in emp_rows if "(уволен)" in (r.get("user_title") or ""))
     interns = sum(1 for e in team if e.get("job_title") == "Стажер")
     hired = sum(1 for e in team if str(e.get("first_working_day", "")).startswith(month))
     norm, actual = shtat["staff_norm_value"], shtat["staff_actual_value"]
@@ -234,8 +256,7 @@ def build_report(
     _set(T[T_PERS].rows[2].cells[1], ASK)
     _set(T[T_PERS].rows[3].cells[1], str(hired))
     _set(T[T_PERS].rows[3].cells[2], "первый рабочий день в месяце по НИМБ")
-    _set(T[T_PERS].rows[4].cells[1], str(fired))
-    _set(T[T_PERS].rows[4].cells[2], "по вознаграждениям НИМБ (метка «уволен»)")
+    _set(T[T_PERS].rows[4].cells[1], ASK)
     _set(T[T_PERS].rows[5].cells[1], str(interns))
     _set(T[T_PERS].rows[6].cells[1], str(max(norm - actual, 0)))
     _set(T[T_PERS].rows[6].cells[2], f"штатная норма {norm}, факт {actual}")
