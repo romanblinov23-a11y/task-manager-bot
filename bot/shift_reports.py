@@ -995,14 +995,38 @@ def _manual_market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"shrep_manualmarket:{m['id']}")] for m in markets])
 
 
+def _manual_date_keyboard(market_id: int) -> InlineKeyboardMarkup:
+    """Принудительный запуск регулярно путают по дню — менеджер открывает его на следующее утро,
+    и без явного вопроса отчёт улетает с датой запуска, а не датой смены (см. _start_manual_report)."""
+    today = tz_today()
+    yesterday = today - timedelta(days=1)
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(f"Вчера, {fmt_date(yesterday.isoformat())}", callback_data=f"shrep_manualdate:{market_id}:{yesterday.isoformat()}")],
+            [InlineKeyboardButton(f"Сегодня, {fmt_date(today.isoformat())}", callback_data=f"shrep_manualdate:{market_id}:{today.isoformat()}")],
+        ]
+    )
+
+
 async def _start_manual_report(message, market: dict) -> None:
-    date_iso = tz_today().isoformat()
+    await message.reply_text(f"«{market['name']}» — за какой день отчёт?", reply_markup=_manual_date_keyboard(market["id"]))
+
+
+async def on_shift_report_manual_date_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    _, market_id_str, date_iso = query.data.split(":", 2)
+    market = get_market(int(market_id_str))
+    if not market:
+        await query.edit_message_text("Рынок не найден.")
+        return
     existing = get_report_by_date(market["id"], date_iso)
     if existing and existing["status"] != "collecting":
         label = _STATUS_LABELS.get(existing["status"], "уже обработан")
-        await message.reply_text(f"Отчёт по «{market['name']}» за сегодня {label}.")
+        await query.edit_message_text(f"Отчёт по «{market['name']}» за {fmt_date(date_iso)} {label}.")
         return
-    await _offer_instructions(message, market, date_iso)
+    await query.edit_message_text(f"«{market['name']}», {fmt_date(date_iso)}")
+    await _offer_instructions(query.message, market, date_iso)
 
 
 async def on_shift_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

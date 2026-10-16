@@ -245,6 +245,7 @@ from bot.shift_reports import (
     on_shift_report_fill,
     on_shift_report_instruction_choice,
     on_shift_report_fix_field,
+    on_shift_report_manual_date_choice,
     on_shift_report_manual_market_choice,
     on_shift_report_more_info,
     on_shift_report_more_info_reply,
@@ -618,6 +619,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_report_chats_view, pattern=r"^shrc_view:"))
     app.add_handler(CallbackQueryHandler(on_report_chats_unbind, pattern=r"^shrc_unbind:"))
     app.add_handler(CallbackQueryHandler(on_shift_report_manual_market_choice, pattern=r"^shrep_manualmarket:"))
+    app.add_handler(CallbackQueryHandler(on_shift_report_manual_date_choice, pattern=r"^shrep_manualdate:"))
     app.add_handler(CallbackQueryHandler(on_reset_shift_report_market_choice, pattern=r"^shrep_resetmarket:"))
     app.add_handler(CallbackQueryHandler(on_reset_shift_report_confirm, pattern=r"^shrep_resetconfirm:"))
     app.add_handler(CallbackQueryHandler(on_reset_shift_report_cancel, pattern=r"^shrep_resetcancel$"))
