@@ -11,6 +11,7 @@
 """
 
 import asyncio
+import re
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -65,8 +66,8 @@ def _available_markets(uid: int) -> list[dict]:
     return [m for m in markets if m.get("fp_report_enabled") and m.get("surf_spot_key")]
 
 
-def _market_pick_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"fpr_market:{m['id']}")] for m in markets])
+def _market_pick_keyboard(markets: list[dict], month: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(m["name"], callback_data=f"fpr_market:{m['id']}:{month}")] for m in markets])
 
 
 def _missing_files(uid: int, session: dict) -> list[str]:
@@ -84,9 +85,27 @@ def _missing_files(uid: int, session: dict) -> list[str]:
 async def on_fp_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     uid = update.effective_user.id
     message = update.effective_message
+    args = context.args or []
+    month = args[0] if args else _previous_month()
+    if len(args) > 1 or not re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", month) or month.startswith("0000"):
+        await message.reply_text("Укажи месяц в формате /fp_report ГГГГ-ММ, например /fp_report 2026-10.")
+        return
     session = load_session(uid)
     if session:
-        await message.reply_text("Отчёт для ФП уже собирается. Доделай его или напиши «отмена», чтобы начать заново.")
+        if args and month != session["month"]:
+            if session["stage"] != "files":
+                await message.reply_text("Для смены месяца напиши «отмена», затем /fp_report " + month)
+                return
+            previous = session_dir(uid) / _PREVIOUS_NAME
+            if previous.exists() and month_label_of(str(previous)) != expected_label(_month_before(month)):
+                await message.reply_text("Сохранённый прошлый отчёт не подходит к новому месяцу. Напиши «отмена», затем /fp_report " + month + " и пришли файлы заново.")
+                return
+            session["month"] = month
+            save_session(uid, session)
+        await message.reply_text(
+            f"Продолжаем отчёт для ФП за {_month_label(session['month'])}. "
+            "Для другого месяца: /fp_report ГГГГ-ММ. Для начала заново — «отмена»."
+        )
         await _ask_waiting_step(message, uid, session)
         return
     markets = _available_markets(uid)
@@ -97,9 +116,9 @@ async def on_fp_report_command(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
     if len(markets) == 1:
-        await _start(message, uid, markets[0])
+        await _start(message, uid, markets[0], month)
         return
-    await message.reply_text("По какому проекту собираем отчёт для ФП?", reply_markup=_market_pick_keyboard(markets))
+    await message.reply_text("По какому проекту собираем отчёт для ФП?", reply_markup=_market_pick_keyboard(markets, month))
 
 
 async def on_fp_report_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -109,17 +128,18 @@ async def on_fp_report_market_choice(update: Update, context: ContextTypes.DEFAU
     if load_session(uid):
         await query.edit_message_text("Отчёт для ФП уже собирается. Доделай его или напиши «отмена».")
         return
-    market_id = int(query.data.split(":", 1)[1])
+    parts = query.data.split(":")
+    market_id = int(parts[1])
+    month = parts[2] if len(parts) > 2 else _previous_month()
     market = next((m for m in _available_markets(uid) if m["id"] == market_id), None)
     if not market:
         await query.edit_message_text("Этот проект недоступен для отчёта ФП.")
         return
     await query.edit_message_text(f"Проект: {market['name']}")
-    await _start(query.message, uid, market)
+    await _start(query.message, uid, market, month)
 
 
-async def _start(message, uid: int, market: dict) -> None:
-    month = _previous_month()
+async def _start(message, uid: int, market: dict, month: str) -> None:
     save_session(uid, {"market_id": market["id"], "month": month, "stage": "files", "questions": [], "index": 0, "answers": {}})
     await message.reply_text(
         f"Собираем отчёт для ФП за {_month_label(month)} по «{market['name']}».\n"
@@ -155,7 +175,9 @@ async def on_fp_report_document(update: Update, context: ContextTypes.DEFAULT_TY
             wanted = expected_label(_month_before(session["month"]))
             if found != wanted:
                 incoming.unlink(missing_ok=True)
-                await message.reply_text(f"Это отчёт за «{found}», а нужен за «{wanted}». Пришли нужный или пустой шаблон.")
+                await message.reply_text(f"Собираем отчёт за {_month_label(session['month'])}. "
+                    f"Это отчёт за «{found}», а прошлый нужен за «{wanted}». "
+                    "Для смены месяца укажи /fp_report ГГГГ-ММ.")
                 return True
             target, label = directory / _PREVIOUS_NAME, "отчёт за прошлый месяц"
             session["no_previous"] = False
