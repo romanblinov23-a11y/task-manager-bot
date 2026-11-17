@@ -44,7 +44,7 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) 
 
 
 def init_schema() -> None:
-    """Намеренно отдельная база от monitoring.db/tasks.db — свой файл, свой
+    """Намеренно отдельная база от monitoring.db — свой файл, свой
     путь через PERSONAL_DATA_DB_PATH — чтобы персональные данные стажёров
     (согласие, паспорт/СНИЛС/банковские реквизиты) можно было позже
     физически перенести на сервер в РФ (152-ФЗ, ст.18 ч.5) одной заменой

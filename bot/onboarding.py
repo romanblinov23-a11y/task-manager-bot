@@ -5,12 +5,10 @@ from pathlib import Path
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, User
 from telegram.ext import ContextTypes
 
-from config.chats import get_chats_for_project, get_project_for_chat
 from config.settings import OWNER_TELEGRAM_IDS, ROMAN_CHAT_NAME, ROMAN_TELEGRAM_ID
 from monitoring.constants import MANAGER_POSITIONS
 from monitoring.managers import get_manager, get_market_supervisor, is_owner, list_managers, register_manager
 from monitoring.markets import get_market, list_markets
-from tasks.tasks import get_all_tasks, update_task
 
 _STORE_PATH = Path(__file__).resolve().parent.parent / "data" / "known_users.json"
 
@@ -18,8 +16,6 @@ _STORE_PATH = Path(__file__).resolve().parent.parent / "data" / "known_users.jso
 _known_users: dict[str, dict] = {}
 # user_id (str) -> [chat_id, ...] — группы, где этот человек писал сообщения
 _seen_in_chats: dict[str, list[int]] = {}
-# "{project}|{normalized_assignee}" -> telegram_id — уже разрешённые сопоставления
-_resolved: dict[str, int] = {}
 # user_id (str), которым сейчас задан вопрос "как тебя зовут?"
 _awaiting_name: set[str] = set()
 # user_id (str) -> {"step": "project"|"name"|"role", "market_id", "market_name", "real_name"}
@@ -28,19 +24,18 @@ _pending_onboarding: dict[str, dict] = {}
 
 
 def _load() -> None:
-    global _known_users, _seen_in_chats, _resolved
+    global _known_users, _seen_in_chats
     if _STORE_PATH.exists():
         data = json.loads(_STORE_PATH.read_text())
         _known_users = data.get("known_users", {})
         _seen_in_chats = data.get("seen_in_chats", {})
-        _resolved = data.get("resolved", {})
 
 
 def _save() -> None:
     _STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
     _STORE_PATH.write_text(
         json.dumps(
-            {"known_users": _known_users, "seen_in_chats": _seen_in_chats, "resolved": _resolved},
+            {"known_users": _known_users, "seen_in_chats": _seen_in_chats},
             ensure_ascii=False,
             indent=2,
         )
@@ -48,140 +43,6 @@ def _save() -> None:
 
 
 _load()
-
-
-def _normalize(name: str) -> str:
-    return name.strip().lower()
-
-
-def _name_matches(candidate: str, user: dict) -> bool:
-    """Сравнивает имя assignee с известными данными о сотруднике. real_name
-    (то, как сотрудник сам назвался при онбординге) приоритетнее
-    full_name из Telegram-профиля — у многих там не настоящее имя."""
-    candidate_norm = _normalize(candidate)
-    if not candidate_norm:
-        return False
-
-    for field in ("real_name", "full_name"):
-        value_norm = _normalize(user.get(field) or "")
-        if not value_norm:
-            continue
-        if candidate_norm == value_norm:
-            return True
-        first_word = value_norm.split()[0] if value_norm else ""
-        if candidate_norm == first_word:
-            return True
-
-    username = user.get("username")
-    if username and candidate_norm == _normalize(username):
-        return True
-    return False
-
-
-def _manager_candidates_for_project(project: str, assignee_name: str) -> list[dict]:
-    """Активные менеджеры этого проекта (модуль мониторинга), чьё имя
-    совпадает с assignee_name — сотрудники, которые онбордились личным
-    диалогом с ботом (/start → проект → имя → роль → подтверждение
-    владельцем), никогда не попадают в _seen_in_chats (та запись пишется
-    только при сообщении в привязанной группе), поэтому find_homonyms без
-    этого источника их не находит, даже будучи полностью подтверждённым
-    менеджером с блоком «Задачи»."""
-    candidates = []
-    for manager in list_managers():
-        if manager["status"] != "active":
-            continue
-        if not any(m["name"] == project for m in manager["markets"]):
-            continue
-        uid = manager["telegram_user_id"]
-        synthetic_user = {"real_name": manager["name"], "username": get_username(uid) or ""}
-        if _name_matches(assignee_name, synthetic_user):
-            candidates.append(
-                {"user_id": uid, "full_name": manager["name"], "username": synthetic_user["username"]}
-            )
-    return candidates
-
-
-def find_homonyms(project: str, assignee_name: str) -> list[dict]:
-    """Все сотрудники этого проекта, чьё имя совпадает с assignee_name —
-    из двух источников: кто писал в привязанных группах (_seen_in_chats) и
-    активные менеджеры модуля мониторинга, привязанные к этому проекту
-    (см. _manager_candidates_for_project). Если кандидатов больше одного —
-    коллизия одинаковых имён, которую нельзя разрешать автоматически (см.
-    обсуждение раздела 9.1 в чате с Романом 2026-06-29)."""
-    project_chats = set(get_chats_for_project(project))
-    candidates = []
-    seen_ids: set[int] = set()
-    for user_id, chats in _seen_in_chats.items():
-        if not project_chats.intersection(chats):
-            continue
-        user = _known_users.get(user_id, {})
-        if not user.get("onboarded"):
-            continue
-        if _name_matches(assignee_name, user):
-            candidates.append(
-                {
-                    "user_id": int(user_id),
-                    "full_name": user.get("real_name") or user.get("full_name") or "",
-                    "username": user.get("username") or "",
-                }
-            )
-            seen_ids.add(int(user_id))
-
-    for candidate in _manager_candidates_for_project(project, assignee_name):
-        if candidate["user_id"] not in seen_ids:
-            candidates.append(candidate)
-            seen_ids.add(candidate["user_id"])
-
-    return candidates
-
-
-def _try_match_and_backfill(user_id: int) -> list[tuple[str, str]]:
-    """Сопоставляет онбордившегося сотрудника с именами assignee в задачах
-    проектов, где его видели в группе, и проставляет assignee_telegram_id
-    на уже существующих задачах (раздел 4, 9.1 PROJECT_SPEC.md). При
-    коллизии одинаковых имён автоматическое назначение пропускается — его
-    разрешит Роман явно при подтверждении следующей задачи на это имя."""
-    user = _known_users.get(str(user_id))
-    if not user:
-        return []
-
-    chats = _seen_in_chats.get(str(user_id), [])
-    projects = {get_project_for_chat(chat_id) for chat_id in chats}
-    projects.discard(None)
-
-    matched: list[tuple[str, str]] = []
-    for project in projects:
-        for task in get_all_tasks(project):
-            assignee = task.get("assignee", "")
-            if not assignee or task.get("assignee_telegram_id"):
-                continue
-            if not _name_matches(assignee, user):
-                continue
-            if len(find_homonyms(project, assignee)) > 1:
-                continue
-            update_task(project, task["task_id"], assignee_telegram_id=str(user_id))
-            matched.append((project, assignee))
-            _resolved[f"{project}|{_normalize(assignee)}"] = user_id
-    if matched:
-        _save()
-    return matched
-
-
-def find_telegram_id_for_assignee(project: str, assignee_name: str) -> int | None:
-    """Используется при создании новой задачи, чтобы сразу проставить
-    assignee_telegram_id, если сотрудник уже онбордился ранее. _resolved
-    заполняется только для тех, кого видели в привязанной группе — если
-    там пусто, дополнительно проверяем активных менеджеров проекта
-    (см. _manager_candidates_for_project) и резолвим, только если
-    кандидат ровно один — при коллизии имён вызывающий код (find_homonyms)
-    должен был перехватить это раньше и спросить владельца явно."""
-    resolved = _resolved.get(f"{project}|{_normalize(assignee_name)}")
-    if resolved:
-        return resolved
-    candidates = _manager_candidates_for_project(project, assignee_name)
-    if len(candidates) == 1:
-        return candidates[0]["user_id"]
-    return None
 
 
 def is_onboarded(user_id: int) -> bool:
@@ -224,16 +85,11 @@ def get_onboarded_employees() -> list[dict]:
 
 
 def record_group_member(chat_id: int, user: User | None) -> None:
-    """Пассивно запоминает, кто писал в группе — нужно для последующего
-    сопоставления Telegram-аккаунта с именем в задаче при онбординге.
-    Для Романа сразу ставим onboarded=True и real_name из ROMAN_CHAT_NAME,
-    чтобы задачи на него резолвились через нормальный механизм сопоставления
-    (а не через хардкод по вариантам имени, который путает однофамильцев)."""
+    """Запоминает сотрудников и рабочие чаты для регистрации и рассылок."""
     if user is None or user.is_bot:
         return
 
     user_id = str(user.id)
-    is_new_chat = chat_id not in _seen_in_chats.get(user_id, [])
 
     _known_users.setdefault(user_id, {})
     _known_users[user_id]["username"] = user.username
@@ -247,9 +103,6 @@ def record_group_member(chat_id: int, user: User | None) -> None:
     if chat_id not in chats:
         chats.append(chat_id)
     _save()
-
-    if _known_users[user_id].get("onboarded") and is_new_chat:
-        _try_match_and_backfill(user.id)
 
 
 def _project_choice_keyboard(markets: list[dict]) -> InlineKeyboardMarkup:
@@ -269,7 +122,7 @@ def _role_choice_keyboard() -> InlineKeyboardMarkup:
 async def _start_project_selection(message, user_id: str, *, intro: str | None = None) -> None:
     markets = list_markets()
     _pending_onboarding[user_id] = {"step": "project"}
-    text = intro or "Привет! Я Енисей — бот-менеджер задач и мониторинга конкурентов.\n\n"
+    text = intro or "Привет! Я Енисей — бот мониторинга и отчётности.\n\n"
     await message.reply_text(f"{text}В каком проекте ты трудишься?", reply_markup=_project_choice_keyboard(markets))
 
 
@@ -288,7 +141,7 @@ class _DirectMessenger:
 
 
 def list_legacy_employees() -> list[dict]:
-    """Сотрудники, которые уже онбордились для задач (известны боту, есть в
+    """Сотрудники, которые уже писали боту (известны боту, есть в
     known_users.json), но не завершили выбор проекта/роли для модуля
     мониторинга — у них нет записи в manager. Владелец видит их
     в /employees и может донбордить вручную, не дожидаясь, пока они сами
@@ -351,7 +204,6 @@ async def on_employee_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     _known_users.setdefault(user_id, {})
     _known_users[user_id]["username"] = user.username
     _known_users[user_id]["full_name"] = user.full_name
-    already_contacted = _known_users[user_id].get("onboarded", False)
     _known_users[user_id]["onboarded"] = True
     _save()
 
@@ -359,10 +211,6 @@ async def on_employee_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _start_project_selection(update.effective_message, user_id)
         return
 
-    if already_contacted:
-        return
-
-    await _greet_after_onboarding(update.effective_message, user.id)
 
 
 async def on_project_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -409,7 +257,6 @@ async def _handle_name_reply(update: Update) -> None:
         return
 
     await update.effective_message.reply_text(f"Спасибо! Записал тебя как «{real_name}».")
-    await _greet_after_onboarding(update.effective_message, int(user_id))
 
 
 async def on_role_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -522,19 +369,6 @@ async def notify_supervisor_of_pending(
         logging.getLogger(__name__).exception("Не удалось уведомить управляющего %s о новой заявке", supervisor_id)
 
 
-async def _greet_after_onboarding(message, user_id: int) -> None:
-    matched = _try_match_and_backfill(user_id)
-    if matched:
-        await message.reply_text(
-            "Вижу, что на тебя уже есть задача — буду писать сюда, если "
-            "понадобится спросить про статус или сроки."
-        )
-    else:
-        await message.reply_text(
-            "Как только появится задача на твоё имя, напишу сюда, чтобы спросить про статус."
-        )
-
-
 def find_user_id_by_username(username: str) -> int | None:
     """Ищет Telegram ID по username среди тех, кого бот уже где-то видел
     (писали в привязанной группе или в личку боту) — Telegram не отдаёт
@@ -577,25 +411,20 @@ async def on_force_onboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     _save()
 
     full_name = _known_users[user_id].get("real_name") or _known_users[user_id].get("full_name") or username
-    matched = _try_match_and_backfill(int(user_id))
-    if matched:
-        details = "; ".join(f"{project}: {name}" for project, name in matched)
-        await update.effective_message.reply_text(f"✅ {full_name} (@{username}) онбордён. Привязаны задачи — {details}.")
-    else:
-        await update.effective_message.reply_text(
-            f"✅ {full_name} (@{username}) онбордён. Подходящих задач пока не нашёл — "
-            "привяжутся автоматически, когда появятся."
-        )
+    await update.effective_message.reply_text(f"✅ {full_name} (@{username}) зарегистрирован.")
 
 
 _COMMANDS_TEXT = (
     "Доступные команды:\n"
-    "/task_work — работа с задачами: статус проекта, сотрудник, подвисшие, нужна помощь, дашборд, неделя\n"
     "/employees — сотрудники бота по проекту: роли, блоки\n"
     "/chats — чаты по проекту: рабочий и рассылки отчётов\n"
     "/add_project — добавить проект/точку Surf\n"
     "/market_settings — настройка рынка: ПДн, финпартнёры, чаты отчётов\n"
     "/dashboard_market — дашборд по рынку (или агрегированно по всем)\n"
+    "/view_reports — отчёты по сменам\n"
+    "/shift_dashboard — дашборд смен\n"
+    "/fp_report — ежемесячный отчёт для ФП\n"
+    "/revenue — выручка, план/факт и P&L\n"
     "/messaging — написать сотруднику, в чат или разослать группе\n"
     "/register_project <проект> — привязать текущую группу к проекту (вызывать внутри группы)\n"
     "/onboard <username> — принудительно онбордить сотрудника"
@@ -605,8 +434,7 @@ _COMMANDS_TEXT = (
 async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if str(update.effective_user.id) == str(ROMAN_TELEGRAM_ID):
         await update.effective_message.reply_text(
-            "Привет, Роман! Готов: пишите сюда задачи и протоколы встреч (текстом или "
-            "файлом), либо тегайте меня в рабочих чатах — соберу оттуда договорённости.\n\n"
+            "Привет, Роман! Выбери нужный раздел мониторинга и отчётности в меню.\n\n"
             + _COMMANDS_TEXT
         )
         return

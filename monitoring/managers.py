@@ -1,5 +1,5 @@
 from config.settings import OWNER_TELEGRAM_IDS
-from monitoring.constants import BLOCK_ACCOUNTING, BLOCK_FP_REPORT, BLOCK_HANDOVER, BLOCK_MEETINGS, BLOCK_MONITORING, BLOCK_REPORTS, DEFAULT_BLOCKS
+from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_ACCOUNTING, BLOCK_FP_REPORT, BLOCK_HANDOVER, BLOCK_MEETINGS, BLOCK_MONITORING, BLOCK_REPORTS, DEFAULT_BLOCKS
 from monitoring.db import get_connection
 
 
@@ -57,14 +57,14 @@ def get_manager_blocks(telegram_user_id: int) -> list[str]:
     manager = get_manager(telegram_user_id)
     if not manager or not manager.get("blocks"):
         return []
-    return [b for b in manager["blocks"].split(",") if b]
+    return [b for b in manager["blocks"].split(",") if b in AVAILABLE_BLOCKS]
 
 
 def set_manager_blocks(telegram_user_id: int, blocks: list[str]) -> None:
     conn = get_connection()
     try:
         conn.execute(
-            "UPDATE manager SET blocks = ? WHERE telegram_user_id = ?", (",".join(blocks), telegram_user_id)
+            "UPDATE manager SET blocks = ? WHERE telegram_user_id = ?", (",".join(b for b in blocks if b in AVAILABLE_BLOCKS), telegram_user_id)
         )
         conn.commit()
     finally:
@@ -78,10 +78,12 @@ def get_acknowledged_blocks(telegram_user_id: int) -> list[str]:
     manager = get_manager(telegram_user_id)
     if not manager or not manager.get("blocks_ack"):
         return []
-    return [b for b in manager["blocks_ack"].split(",") if b]
+    return [b for b in manager["blocks_ack"].split(",") if b in AVAILABLE_BLOCKS]
 
 
 def acknowledge_block(telegram_user_id: int, block_key: str) -> None:
+    if block_key not in AVAILABLE_BLOCKS:
+        return
     acked = set(get_acknowledged_blocks(telegram_user_id))
     acked.add(block_key)
     conn = get_connection()

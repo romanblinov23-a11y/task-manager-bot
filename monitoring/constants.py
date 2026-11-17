@@ -24,12 +24,11 @@ TRAINEE_ONBOARDING_STAGES = [
 ]
 
 # Блоки бота, доступ к которым владелец выдаёт/отзывает у сотрудника
-# независимо от роли. Первые три блока выдаются всем по умолчанию при
+# независимо от роли. Первые два блока выдаются всем по умолчанию при
 # подтверждении — владелец может сузить доступ вручную через /employees.
 # «Собрания» — единственное исключение: по умолчанию выключено всем и
 # везде, включается владельцем вручную по конкретному Управляющему
 # (см. DEFAULT_BLOCKS ниже — meetings туда сознательно не входит).
-BLOCK_TASKS = "tasks"
 BLOCK_MONITORING = "monitoring"
 BLOCK_REPORTS = "reports"
 BLOCK_MEETINGS = "meetings"
@@ -44,9 +43,8 @@ BLOCK_HANDOVER = "handover"
 # Ежемесячный отчёт для финпартнёров (см. bot.fp_report_flow) — как и "Пересменка",
 # не выдаётся по умолчанию: владелец включает управляющему вручную.
 BLOCK_FP_REPORT = "fp_report"
-AVAILABLE_BLOCKS = [BLOCK_TASKS, BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_MEETINGS, BLOCK_ACCOUNTING, BLOCK_HANDOVER, BLOCK_FP_REPORT]
+AVAILABLE_BLOCKS = [BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_MEETINGS, BLOCK_ACCOUNTING, BLOCK_HANDOVER, BLOCK_FP_REPORT]
 BLOCK_LABELS = {
-    BLOCK_TASKS: "Задачи (трекер)",
     BLOCK_MONITORING: "Мониторинг конкурентов",
     BLOCK_REPORTS: "Отчёты по смене",
     BLOCK_MEETINGS: "Собрания",
@@ -54,7 +52,7 @@ BLOCK_LABELS = {
     BLOCK_HANDOVER: "Пересменка",
     BLOCK_FP_REPORT: "Отчёт для ФП (ежемесячный)",
 }
-DEFAULT_BLOCKS = f"{BLOCK_TASKS},{BLOCK_MONITORING},{BLOCK_REPORTS}"
+DEFAULT_BLOCKS = f"{BLOCK_MONITORING},{BLOCK_REPORTS}"
 
 COMPETITOR_FORMATS = ["навынос", "посадка", "кофе+кухня с полноценной посадкой"]
 

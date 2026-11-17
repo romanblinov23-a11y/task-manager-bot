@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS manager (
     role TEXT NOT NULL CHECK (role IN ('manager', 'owner')),
     position TEXT,
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'removed')),
-    blocks TEXT NOT NULL DEFAULT 'tasks,monitoring',
+    blocks TEXT NOT NULL DEFAULT 'monitoring,reports',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -284,8 +284,19 @@ def init_schema() -> None:
             conn.execute("DROP TABLE report_chat_old")
         conn.executescript(_SCHEMA)
         _ensure_column(conn, "manager", "status", "status TEXT NOT NULL DEFAULT 'pending'")
-        _ensure_column(conn, "manager", "blocks", "blocks TEXT NOT NULL DEFAULT 'tasks,monitoring'")
+        _ensure_column(conn, "manager", "blocks", "blocks TEXT NOT NULL DEFAULT 'monitoring,reports'")
         _ensure_column(conn, "manager", "blocks_ack", "blocks_ack TEXT NOT NULL DEFAULT ''")
+        # Удалённый таск-менеджер больше не выдаётся и не требует регламента.
+        # Остальные доступы сотрудников сохраняются; архивная tasks.db не открывается.
+        for row in conn.execute("SELECT telegram_user_id, blocks, blocks_ack FROM manager").fetchall():
+            for column in ("blocks", "blocks_ack"):
+                old = row[column] or ""
+                cleaned = ",".join(block for block in old.split(",") if block and block != "tasks")
+                if old != cleaned:
+                    conn.execute(
+                        f"UPDATE manager SET {column} = ? WHERE telegram_user_id = ?",
+                        (cleaned, row["telegram_user_id"]),
+                    )
         _ensure_column(conn, "manager", "onboarding_stage", "onboarding_stage INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "competitor", "closed_at", "closed_at TEXT")
         # Реквизиты юрлица/ИП, которое юридически владеет точкой этого рынка —
@@ -328,7 +339,7 @@ def init_schema() -> None:
                 (_spot_key, _name),
             )
         # Разовая миграция данных: блок "Отчёты по смене" появился позже
-        # tasks/monitoring, у уже активных сотрудников его нет в списке —
+        # мониторинга, у уже активных сотрудников его нет в списке —
         # добавляем, чтобы функция сразу заработала без ручной правки
         # владельцем через /employees. Новые сотрудники получают его
         # автоматически через DEFAULT_BLOCKS (см. register_manager).

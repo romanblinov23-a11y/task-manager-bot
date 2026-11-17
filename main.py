@@ -32,13 +32,6 @@ from bot.competitors import (
     on_set_own_point_market_choice,
     on_set_own_point_pick,
 )
-from bot.confirmation import (
-    on_confirmation_callback,
-    on_edit_field_selected,
-    on_employee_disambiguation,
-    on_set_category,
-)
-from bot.daily_report import send_daily_report
 from bot.consent_flow import on_pdn_consent, on_request_consents_command, on_request_consents_market_choice
 from bot.dashboard_cmd import on_dashboard_aggregate_choice, on_dashboard_command, on_dashboard_market_choice
 from bot.data_export import (
@@ -48,7 +41,6 @@ from bot.data_export import (
     on_export_operator_data_delete_confirm,
     on_export_operator_data_market_choice,
 )
-from bot.dashboard_tasks_cmd import on_dashboard_tasks_command
 from bot.fix_reading import on_fix_reading_command, on_fix_reading_market_choice, on_fix_reading_pick
 from bot.handlers import on_group_message
 from bot.handover_reports import (
@@ -202,13 +194,8 @@ from bot.monthly_plan_flow import (
 )
 from bot.onboarding import on_force_onboard, on_help, on_project_choice, on_role_choice, on_start
 from bot.trainee_onboarding import on_trainee_advance, on_trainee_graduate
-from bot.private import on_private_document, on_private_text, on_project_selected
+from bot.private import on_private_document, on_private_text
 from bot.regulations import on_regulations_command, on_regulations_view
-from bot.mytasks_manage import on_mytasks_callback, on_mytasks_command
-from bot.queries import (
-    on_needhelp_command,
-    on_stuck_command,
-)
 from bot.report_chat_registration import (
     on_register_report_chat,
     on_register_report_chat_market,
@@ -281,10 +268,6 @@ from bot.shift_schedule_flow import (
     on_set_shift_schedule_reply,
     send_shift_schedule_requests,
 )
-from bot.status_cycle import on_status_button, run_status_check
-from bot.task_manage import on_employee_command, on_status_command, on_task_manage_callback
-from bot.task_work import on_task_work_choice, on_task_work_command
-from bot.weekly_report import on_weekly_command, send_weekly_report
 from bot.writeoff_plan_flow import (
     on_set_writeoff_plan_cancel,
     on_set_writeoff_plan_command,
@@ -292,7 +275,6 @@ from bot.writeoff_plan_flow import (
     on_set_writeoff_plan_market_choice,
 )
 from config.settings import (
-    DAILY_REPORT_TIME,
     DASHBOARD_PORT,
     MEETING_CONFIRM_TIME,
     MONITORING_REMINDER_TIME,
@@ -302,46 +284,23 @@ from config.settings import (
     SHIFT_REPORT_DISPATCH_TIME,
     SHIFT_REPORT_OWNER_ESCALATE_TIME,
     SHIFT_SCHEDULE_REMINDER_TIME,
-    STATUS_CHECK_TIME,
     TEAM_MORNING_REPORT_TIME,
     TELEGRAM_BOT_TOKEN,
     TZ,
-    WEEKLY_REPORT_DAY,
-    WEEKLY_REPORT_TIME,
 )
 from config.timeutil import today as tz_today
 from dashboard.server import start_dashboard_server
 from monitoring.db import init_schema as init_monitoring_schema
 from monitoring.managers import list_managers
 from personal_data.db import init_schema as init_personal_data_schema
-from tasks.db import init_schema as init_tasks_schema
-from tasks.retention import purge_closed_tasks
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 _WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
 
-async def _status_check_job(context) -> None:
-    await run_status_check(context.bot)
-
-
-async def _daily_report_job(context) -> None:
-    await send_daily_report(context.bot)
-
-
-async def _weekly_report_job(context) -> None:
-    await send_weekly_report(context.bot)
-
-
 async def _monitoring_reminder_job(context) -> None:
     await send_monitoring_reminders(context.bot)
-
-
-async def _task_retention_job(context) -> None:
-    purged = purge_closed_tasks()
-    if purged:
-        logging.getLogger(__name__).info("Retention: удалено %d задач, закрытых до этого месяца", purged)
 
 
 def _is_shift_schedule_request_day() -> bool:
@@ -410,7 +369,6 @@ def _parse_time(value: str, tzinfo) -> dt_time:
 
 
 _ROMAN_COMMANDS = [
-    BotCommand("task_work", "Работа с задачами: статус, сотрудник, подвисшие, дашборд, неделя"),
     BotCommand("employees", "Сотрудники бота — по проекту"),
     BotCommand("chats", "Чаты — по проекту: рабочий и рассылки отчётов"),
     BotCommand("monitor_chats", "Чаты под мониторингом триггерных слов"),
@@ -449,22 +407,14 @@ async def _set_bot_commands(app) -> None:
 
 def main() -> None:
     init_monitoring_schema()
-    init_tasks_schema()
     init_personal_data_schema()
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_set_bot_commands).build()
 
     app.add_handler(CommandHandler("start", on_start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("help", on_help, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("weekly", on_weekly_command, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("task_work", on_task_work_command, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("status", on_status_command, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("employee", on_employee_command, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("stuck", on_stuck_command, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("needhelp", on_needhelp_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("register_project", on_register_project, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("register_monitor_chat", on_register_monitor_chat, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("onboard", on_force_onboard, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("mytasks", on_mytasks_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("regulations", on_regulations_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("employees", on_employees_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("chats", on_chats_command, filters=filters.ChatType.PRIVATE))
@@ -478,7 +428,6 @@ def main() -> None:
     app.add_handler(CommandHandler("schedule", on_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("monitoring", on_monitoring_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("dashboard_market", on_dashboard_command, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("dashboard_tasks", on_dashboard_tasks_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_shift_schedule", on_set_shift_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_evening_report", on_set_evening_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_monthly_plan", on_set_monthly_plan_command, filters=filters.ChatType.PRIVATE))
@@ -512,12 +461,6 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Document.ALL, on_private_document))
     app.add_handler(CallbackQueryHandler(on_register_project_choice, pattern=r"^regchat:"))
     app.add_handler(CallbackQueryHandler(on_register_project_scope_choice, pattern=r"^regchatscope:"))
-    app.add_handler(CallbackQueryHandler(on_confirmation_callback, pattern=r"^confirm:"))
-    app.add_handler(CallbackQueryHandler(on_edit_field_selected, pattern=r"^edit_field:"))
-    app.add_handler(CallbackQueryHandler(on_set_category, pattern=r"^set_cat:"))
-    app.add_handler(CallbackQueryHandler(on_project_selected, pattern=r"^project:"))
-    app.add_handler(CallbackQueryHandler(on_employee_disambiguation, pattern=r"^employee:"))
-    app.add_handler(CallbackQueryHandler(on_status_button, pattern=r"^status:"))
     app.add_handler(CallbackQueryHandler(on_project_choice, pattern=r"^onb_project:"))
     app.add_handler(CallbackQueryHandler(on_role_choice, pattern=r"^onb_role:"))
     app.add_handler(CallbackQueryHandler(on_pdn_consent, pattern=r"^pdn_consent:"))
@@ -599,9 +542,6 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_monitoring_factor_confirm, pattern=r"^monf_factorconfirm:"))
     app.add_handler(CallbackQueryHandler(on_dashboard_market_choice, pattern=r"^dash_market:"))
     app.add_handler(CallbackQueryHandler(on_dashboard_aggregate_choice, pattern=r"^dash_all$"))
-    app.add_handler(CallbackQueryHandler(on_task_manage_callback, pattern=r"^tmg:"))
-    app.add_handler(CallbackQueryHandler(on_task_work_choice, pattern=r"^taskwork:"))
-    app.add_handler(CallbackQueryHandler(on_mytasks_callback, pattern=r"^myt:"))
     app.add_handler(CallbackQueryHandler(on_set_shift_schedule_market_choice, pattern=r"^shsched_market:"))
     app.add_handler(CallbackQueryHandler(on_set_shift_schedule_confirm, pattern=r"^shsched_confirm$"))
     app.add_handler(CallbackQueryHandler(on_set_shift_schedule_cancel, pattern=r"^shsched_cancel$"))
@@ -696,15 +636,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_meeting_postpone, pattern=r"^meet_postpone:"))
     app.add_handler(CallbackQueryHandler(on_meeting_invite_roman_choice, pattern=r"^meet_inviteroman:"))
 
-    app.job_queue.run_daily(_status_check_job, time=_parse_time(STATUS_CHECK_TIME, TZ))
-    app.job_queue.run_daily(_daily_report_job, time=_parse_time(DAILY_REPORT_TIME, TZ))
-    app.job_queue.run_daily(
-        _weekly_report_job,
-        time=_parse_time(WEEKLY_REPORT_TIME, TZ),
-        days=(_WEEKDAYS[WEEKLY_REPORT_DAY.lower()],),
-    )
     app.job_queue.run_daily(_monitoring_reminder_job, time=_parse_time(MONITORING_REMINDER_TIME, TZ))
-    app.job_queue.run_daily(_task_retention_job, time=_parse_time(STATUS_CHECK_TIME, TZ))
     app.job_queue.run_daily(_shift_schedule_reminder_job, time=_parse_time(SHIFT_SCHEDULE_REMINDER_TIME, TZ))
     # Каждая точка сама задаёт своё время сбора отчёта (/set_evening_report,
     # market.shift_report_time) — единого времени на всех больше нет, поэтому

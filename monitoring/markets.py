@@ -13,7 +13,7 @@ def list_markets() -> list[dict]:
 
 def list_market_names() -> list[str]:
     """Рынок и проект — одна и та же сущность (market 1:1 с проектом), это
-    единственный источник правды для списка проектов в трекере задач."""
+    единый список проектов для мониторинга, отчётов и регистрации."""
     return [m["name"] for m in list_markets()]
 
 
@@ -159,7 +159,7 @@ def set_market_city(market_id: int, city: str) -> None:
 def create_market(name: str, city: str = "", our_point_name: str | None = None) -> dict:
     """Добавляет новый рынок/проект — используется владельцем через /add_project.
     Рынок и проект в системе — одна сущность: как только он появляется здесь,
-    он сразу доступен и в трекере задач (см. monitoring.markets.list_market_names)."""
+    он доступен в меню регистрации, мониторинга и отчётов."""
     conn = get_connection()
     try:
         cursor = conn.execute(

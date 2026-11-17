@@ -12,8 +12,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 ROMAN_TELEGRAM_ID = os.getenv("ROMAN_TELEGRAM_ID")
-# Имя, которым Романа называют в рабочих чатах — отображается в буфере сообщений
-# и используется для сопоставления задач, назначенных на него самого.
+# Имя Романа для мониторинга упоминаний в рабочих чатах.
 # По умолчанию "Роман"; если команда обращается иначе (например "Рома") — задать здесь.
 ROMAN_CHAT_NAME = os.getenv("ROMAN_CHAT_NAME", "Роман")
 
@@ -28,9 +27,6 @@ OWNER_TELEGRAM_IDS = {
 
 # Путь к SQLite-базе модуля мониторинга конкурентов (рынки, конкуренты, снятия)
 MONITORING_DB_PATH = os.getenv("MONITORING_DB_PATH", "data/monitoring.db")
-# Путь к SQLite-базе трекера задач — отдельная база от мониторинга, общие
-# только пользователи (monitoring.manager, по telegram_user_id)
-TASKS_DB_PATH = os.getenv("TASKS_DB_PATH", "data/tasks.db")
 # Путь к базе персональных данных стажёров (согласие, паспорт/СНИЛС/реквизиты) —
 # физически отдельный файл/путь от остальных баз, чтобы можно было позже
 # перенести именно его на сервер в РФ (152-ФЗ, ст.18 ч.5) без переписывания
@@ -38,22 +34,6 @@ TASKS_DB_PATH = os.getenv("TASKS_DB_PATH", "data/tasks.db")
 PERSONAL_DATA_DB_PATH = os.getenv("PERSONAL_DATA_DB_PATH", "data/personal_data.db")
 # Раз в неделю бот шлёт напоминание-задание по рынкам, у которых сегодня день мониторинга
 MONITORING_REMINDER_TIME = os.getenv("MONITORING_REMINDER_TIME", "09:30")
-
-DAILY_REPORT_TIME = os.getenv("DAILY_REPORT_TIME", "20:00")
-WEEKLY_REPORT_DAY = os.getenv("WEEKLY_REPORT_DAY", "fri")
-WEEKLY_REPORT_TIME = os.getenv("WEEKLY_REPORT_TIME", "22:00")
-# Сколько дней без обновления статуса считается "застрявшей" задачей (раздел 8.3)
-STALE_DAYS = int(os.getenv("STALE_DAYS", "5"))
-
-# Когда раз в день проверять задачи с подошедшим/просроченным deadline_current (раздел 4)
-STATUS_CHECK_TIME = os.getenv("STATUS_CHECK_TIME", "10:00")
-# После скольких неясных ответов сотрудника подряд эскалировать Роману, а не уточнять дальше
-MAX_CLARIFYING_ROUNDS = int(os.getenv("MAX_CLARIFYING_ROUNDS", "2"))
-
-# Сколько часов сообщений хранить в скользящем буфере группового чата
-MESSAGE_BUFFER_HOURS = int(os.getenv("MESSAGE_BUFFER_HOURS", "3"))
-# Сколько часов контекста брать для экстракции задач при срабатывании триггера
-EXTRACTION_CONTEXT_HOURS = int(os.getenv("EXTRACTION_CONTEXT_HOURS", "2"))
 
 # Ежедневный отчёт по смене (раздел "shift report"): когда просить у
 # управляющего график смен (14-е и последний день месяца), когда начинать

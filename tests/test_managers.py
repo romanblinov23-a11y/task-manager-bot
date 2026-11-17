@@ -14,7 +14,7 @@ from monitoring.markets import create_market
 def test_register_manager_gets_all_blocks_by_default():
     market = create_market("Рынок блоков")
     register_manager(5001, "Тест", "Управляющий", market["id"])
-    assert set(get_manager_blocks(5001)) == {"tasks", "monitoring", "reports"}
+    assert set(get_manager_blocks(5001)) == {"monitoring", "reports"}
 
 
 def test_is_active_manager_requires_monitoring_block():
@@ -23,7 +23,7 @@ def test_is_active_manager_requires_monitoring_block():
     approve_manager(5002)
     assert is_active_manager(5002) is True
 
-    set_manager_blocks(5002, ["tasks"])
+    set_manager_blocks(5002, ["reports"])
     assert is_active_manager(5002) is False
 
 
@@ -36,7 +36,7 @@ def test_is_market_editor_requires_supervisor_position_and_monitoring_block():
     set_manager_position(5003, "Управляющий")
     assert is_market_editor(5003) is True
 
-    set_manager_blocks(5003, ["tasks"])
+    set_manager_blocks(5003, ["reports"])
     assert is_market_editor(5003) is False
 
 

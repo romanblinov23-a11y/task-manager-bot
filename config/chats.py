@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 
-# Базовая привязка chat_id -> проект из .env (раздел 1 PROJECT_SPEC.md).
+# Базовая привязка chat_id -> проект из .env.
 _raw = os.getenv("CHAT_PROJECT_MAP", "{}")
 try:
     _ENV_MAP: dict[int, str] = {int(chat_id): project for chat_id, project in json.loads(_raw).items()}

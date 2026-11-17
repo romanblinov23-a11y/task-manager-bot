@@ -24,7 +24,6 @@ from monitoring.constants import (
     BLOCK_MEETINGS,
     BLOCK_MONITORING,
     BLOCK_REPORTS,
-    BLOCK_TASKS,
     MANAGER_POSITIONS,
 )
 from monitoring.db import reset_market_players
@@ -96,8 +95,6 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
     uid = manager["telegram_user_id"]
     blocks = set(get_manager_blocks(uid)) & set(get_acknowledged_blocks(uid))
     commands: list[BotCommand] = []
-    if BLOCK_TASKS in blocks:
-        commands.append(BotCommand("mytasks", "Мои задачи в работе"))
     if BLOCK_MONITORING in blocks:
         if manager["position"] == "Управляющий":
             commands.append(BotCommand("add_competitor", "Добавить конкурента на рынок"))
@@ -325,8 +322,8 @@ async def on_manager_legacy_remove(update: Update, context: ContextTypes.DEFAULT
     user_id = int(query.data.split(":", 1)[1])
     await query.answer()
     await query.edit_message_text(
-        f"Удалить сотрудника (ID {user_id}) из списка? Он не потеряет доступ к трекеру задач — "
-        "просто сможет позже снова написать боту и пройти онбординг заново.",
+        f"Удалить сотрудника (ID {user_id}) из списка? Он "
+        "сможет позже снова написать боту и пройти онбординг заново.",
         reply_markup=InlineKeyboardMarkup(
             [
                 [
@@ -426,7 +423,7 @@ def _report_chats_keyboard(market_id: int) -> InlineKeyboardMarkup:
 
 async def on_chats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/chats — чаты по проекту: отдельно рабочий чат (куда бот собирает
-    задачи, /register_project) и чаты рассылок отчётов по смене
+    привязка рабочих чатов, /register_project) и чаты рассылок отчётов по смене
     (финпартнёры/команда точки, /register_report_chat)."""
     if not is_owner(update.effective_user.id):
         return
@@ -633,7 +630,7 @@ async def on_manager_chat_thread_unbind_confirm(update: Update, context: Context
 async def on_manager_onboarded(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """«📋 Все, кто писал боту» — читает то же, что раньше показывала
     упразднённая команда /onboarded: все, кого бот хоть раз видел в личке
-    (трекер задач), с их именем и проектом, определённым по чатам, где их
+    с их именем и проектом, определённым по чатам, где их
     видели."""
     query = update.callback_query
     if not is_owner(query.from_user.id):
@@ -943,6 +940,9 @@ async def on_manager_toggle_block(update: Update, context: ContextTypes.DEFAULT_
         await query.answer()
         return
     _, uid_str, block_key = query.data.split(":", 2)
+    if block_key not in AVAILABLE_BLOCKS:
+        await query.answer("Этот раздел больше недоступен", show_alert=True)
+        return
     uid = int(uid_str)
     owner_id = str(query.from_user.id)
     pending = _pending_blocks.get(owner_id)
@@ -1010,6 +1010,9 @@ async def on_regulation_ack(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     uid = query.from_user.id
     block_key = query.data.split(":", 1)[1]
+    if block_key not in AVAILABLE_BLOCKS:
+        await query.answer("Этот раздел больше недоступен", show_alert=True)
+        return
     await query.answer("Принято")
     try:
         await query.edit_message_reply_markup(reply_markup=None)

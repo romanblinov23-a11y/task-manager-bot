@@ -47,11 +47,10 @@ async def on_register_project(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def _finish_registration(query, context: ContextTypes.DEFAULT_TYPE, market: dict, message_thread_id: int | None) -> None:
     chat_id = query.message.chat.id
     register_chat(chat_id, market["name"], message_thread_id=message_thread_id)
-    bot_username = context.bot.username
     await query.edit_message_text(
         f"👋 Привет! Я бот Енисей, помогаю Роме в этом чате по проекту «{market['name']}».\n\n"
-        f"Тегните меня (@{bot_username}) или ответьте на моё сообщение — соберу из переписки "
-        "договорённости и пришлю задачи на подтверждение."
+        "Чат привязан к проекту для регистрации сотрудников и рассылок.\n"
+        "Чаты отчётов настраиваются через /register_report_chat, мониторинг упоминаний — через /register_monitor_chat."
     )
 
 
