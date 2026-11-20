@@ -47,6 +47,7 @@ _QUESTIONS = [
     {"key": "revenue_total", "kind": "money", "prompt": "💰 Общая выручка за день\nНапример: 324675,87"},
     {"key": "revenue_cash", "kind": "money", "prompt": "💵 Наличная выручка\nНапример: 324 675,87"},
     {"key": "revenue_noncash", "kind": "money", "prompt": "💳 Безналичная выручка\nНапример: 324675,87"},
+    {"key": "cash_balance", "kind": "money", "prompt": "Остаток наличных в кассе за сегодня\nНапример: 1 000,00"},
     {"key": "avg_check", "kind": "money", "prompt": "🧾 Средний чек за смену\nНапример: 789,87"},
     {"key": "guests", "kind": "guests", "prompt": "👥 Количество гостей\nНапример: 1 234"},
     {
@@ -73,7 +74,9 @@ _QUESTIONS = [
         "kind": "money",
         "prompt": "🍽 Списания «Питание сотрудников»\nЗа сегодня, себестоимость. Например: 7 189,87",
     },
-    {"key": "avg_service_time", "kind": "time", "prompt": "⏱ Среднее время выдачи и приготовления заказов\nНапример: 5:35"},
+    {"key": "writeoff_defects", "kind": "money", "prompt": "Порча, брак, ошибка за сегодня\nНапример: 1 000,00"},
+    {"key": "writeoff_development", "kind": "money", "prompt": "Проработка меню, пролив, помол за сегодня\nНапример: 1 000,00"},
+    {"key": "avg_service_time", "kind": "time", "prompt": "⏱ Среднее время отдачи за день\nФормат ЧЧ:ММ. Например: 00:05"},
     {
         "key": "comment_general",
         "kind": "text",
@@ -144,6 +147,9 @@ _QUESTIONS = [
 ]
 
 _FIELD_LABELS = {
+    "writeoff_development": "Проработка меню, пролив, помол",
+    "writeoff_defects": "Порча, брак, ошибка",
+    "cash_balance": "Остаток наличных в кассе",
     "revenue_total": "Выручка",
     "revenue_cash": "Наличные",
     "revenue_noncash": "Безнал",
@@ -285,8 +291,8 @@ def _validate(kind: str, text: str) -> tuple[str | None, str | None]:
             return None, "🤔 Не понял число часов. Попробуй ещё раз, например: 42,5"
         return text, None
     if kind == "time":
-        if not re.match(r"^\d{1,2}:\d{2}$", text):
-            return None, "🤔 Нужен формат М:СС. Попробуй ещё раз, например: 5:35"
+        if not re.fullmatch(r"\d{1,2}:[0-5]\d", text):
+            return None, "🤔 Нужен формат ЧЧ:ММ. Попробуй ещё раз, например: 00:05"
         return text, None
     if not text:
         return None, "🤔 Не может быть пустым — напиши хотя бы коротко:"
@@ -420,48 +426,64 @@ def _writeoff_compare_line(label: str, data: dict, key: str, plan_value: float |
     return f"{label}: {current_str} (норма {_format_money(plan_value)}{delta_part})"
 
 
+def _finance_previous_line(data: dict, key: str, *, count: bool = False) -> str:
+    parse = _parse_int if count else _parse_amount
+    formatter = _format_count if count else _format_money
+    previous = parse(data.get(f"{key}_prev", "") or "")
+    current = parse(data.get(key, "") or "")
+    if previous is None:
+        return "(—) — —"
+    prefix = f"({formatter(previous)})"
+    if current is None or previous == 0:
+        return f"{prefix} — —"
+    pct = (current - previous) / previous * 100
+    arrow = "↗️" if pct > 0 else ("↘️" if pct < 0 else "➡️")
+    percent = f"{abs(pct):.2f}".replace(".", ",")
+    return f"{prefix} {arrow} {percent}%"
+
+
 def render_finance_report(market: dict, report_date: str, data: dict) -> str:
-    """Форматирует отчёт строго по образцу Романа: заголовок, денежные
-    поля (у выручки/среднего чека/гостей — сравнение с той же датой на
-    прошлой неделе и % изменения), блок комментариев без разметки, состав
-    смены свободным текстом в конце. Это ВНЕШНИЙ вариант — именно его
-    видит Управляющий на своё согласование и именно он реально уходит в
-    чат финпартнёров (см. send_pending_reports); план (по любым полям,
-    включая списания) сюда сознательно не подмешиваем — новый формат с
-    планом ещё не согласован с партнёрами. Для Ромы — отдельная, более
-    подробная версия, см. render_owner_finance_report."""
+    """Ежедневный отчёт в чат ФП по формату партнёров."""
     weekday = _WEEKDAY_RU[_date.fromisoformat(report_date).weekday()].capitalize()
     lines = [
-        f"Отчет {fmt_date(report_date)} {weekday}",
+        f"{fmt_date(report_date)} {weekday}",
         "",
-        _money_compare_line("выручка", data, "revenue_total"),
+        f"выручка: {_money_field(data, 'revenue_total')}",
         f"наличные: {_money_field(data, 'revenue_cash')}",
         f"безнал: {_money_field(data, 'revenue_noncash')}",
+        _finance_previous_line(data, "revenue_total"),
         "",
-        _money_compare_line("средний чек", data, "avg_check"),
+        f"остаток наличных в кассе: {_money_field(data, 'cash_balance')}",
         "",
-        _count_compare_line("гости", data, "guests"),
+        f"средний чек: {_money_field(data, 'avg_check')}",
+        _finance_previous_line(data, "avg_check", count=False),
+        "",
+        f"гости: {_count_field(data, 'guests')}",
+        _finance_previous_line(data, "guests", count=True),
         "",
         f"срок годности: {_money_field(data, 'writeoff_expiry')}",
         f"комплимент: {_money_field(data, 'writeoff_compliment')}",
         f"питание: {_money_field(data, 'writeoff_staff_meals')}",
+        f"порча, брак, ошибка: {_money_field(data, 'writeoff_defects')}",
+        f"проработка меню, пролив, помол: {_money_field(data, 'writeoff_development')}",
         "",
-        f"Среднее время отдачи за день: {data.get('avg_service_time', '—')}",
+        f"среднее время отдачи за день: {data.get('avg_service_time', '—')}",
         "",
-        "Комментарий:",
+        "комментарий по смене:",
         "",
-        f"Общая работа точки: {data.get('comment_general', '—')}",
+        f"1. Общая работа точки\n{data.get('comment_general', '—')}",
         "",
-        f"Обслуживание гостей: {data.get('comment_service', '—')}",
+        f"2. Обслуживание гостей\n{data.get('comment_service', '—')}",
         "",
-        f"Конфликтные ситуации: {data.get('comment_conflicts', '—')}",
+        f"3. Конфликтные ситуации\n{data.get('comment_conflicts', '—')}",
         "",
-        f"Оборудование: {data.get('comment_equipment', '—')}",
+        f"4. Оборудование и технические\n{data.get('comment_equipment', '—')}",
         "",
-        f"Погода и поток гостей: {data.get('comment_weather_flow', '—')}",
+        f"5. Погода и поток гостей\n{data.get('comment_weather_flow', '—')}",
         "",
-        f"Значимые события: {data.get('comment_events', '—')}",
-        "Состав смены:",
+        f"6. Значимые события\n{data.get('comment_events', '—')}",
+        "",
+        "7. Сколько человек было на смене с разбивкой по должностям",
         data.get("shift_composition", "—"),
     ]
     return "\n".join(lines)
