@@ -1,6 +1,45 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
+MARKETER_REGULATION = """📗 Регламент маркетолога: мероприятия на споте
+
+1. Ответственность и период
+Веди актуальный список запланированных мероприятий отдельно по каждому своему проекту. Недельный план охватывает понедельник–воскресенье: название, дату, время начала и планируемое число участников. День недели бот определяет по дате.
+
+2. Сроки загрузки
+Каждое воскресенье в 09:00 по Москве бот запрашивает план на следующую неделю. Загрузи и подтверди его до 18:00. Если плана нет к 18:00, бот уведомит Управляющего; если нет к 21:00 — Рому. Управляющий также может внести план за тебя.
+Если план уже подтверждён заранее, повторного запроса и эскалаций не будет.
+
+3. Загрузка заранее — /spot_events
+Открой команду в личке бота, выбери проект и нажми «📅 Загрузить следующую неделю». Кнопка доступна в любой день — ждать воскресного запроса не нужно.
+Для другой недели выбери «📅 Заменить план недели» и укажи дату её понедельника.
+
+4. Формат списка
+Пришли текстом, по одному мероприятию на строку:
+ДД.ММ.ГГГГ | ЧЧ:ММ | Название | Планируемое число участников
+
+Пример:
+30.11.2026 | 18:00 | Каппинг | 15
+02.12.2026 | 19:30 | Лекция о кофе | 20
+
+Время начала указывай местное для спота, в формате 00:00–23:59. Участники — целое неотрицательное число. Все даты должны относиться к выбранной неделе. Название — до 100 символов, мероприятий — до 8 в день.
+Проверь проект, даты, дни недели, время и участников в предпросмотре и нажми «✅ Сохранить». Без подтверждения план не считается сданным. Кнопка «Отмена» оставляет сохранённый план без изменений.
+
+5. Если мероприятий нет
+В режиме загрузки или замены недели отправь «нет мероприятий» и подтверди сохранение. Это полноценный ответ: запросы и эскалации прекращаются. При замене прежний список этой недели очищается.
+
+6. Новые события в течение недели
+Открой /spot_events → проект → «➕ Добавить мероприятия». Укажи понедельник нужной недели и пришли только новые события в том же формате. Подтверди сохранение. Ранее загруженные мероприятия останутся; совпадения даты, времени и названия будут пропущены.
+
+7. Изменение или отмена события
+Выбери «📅 Заменить план недели» и пришли полный актуальный список этой недели. Замена удаляет прежний список выбранной недели целиком, поэтому включи все события, которые остаются в плане. Если отменены все события — отправь «нет мероприятий».
+
+8. Что увидит команда
+В утреннее мотивационное сообщение бот добавит мероприятия этого проекта на сегодня: время, название и ожидаемое число участников. Сообщение с мероприятиями отправляется и без плана продаж. Держи список актуальным до утренней рассылки: изменение после неё не переотправляет уже опубликованное сообщение.
+
+Повторно открыть инструкцию: /regulations → «Мероприятия на споте (Маркетолог)» или кнопка «📗 Регламент маркетолога» в /spot_events."""
+
+
 MONITORING_REGULATION_SUPERVISOR = """📗 Регламент 2: мониторинг конкурентов (Управляющий)
 
 Весь мониторинг рынка/проекта завязан на тебя — вот сквозной порядок действий.
@@ -253,6 +292,8 @@ def _shift_report_regulation_for_role(role: str | None, uid: int) -> str:
     return SHIFT_REPORT_REGULATION_SUPERVISOR
 
 
+
+
 FP_REPORT_REGULATION = """📘 Регламент: ежемесячный отчёт для ФП (Управляющий)
 
 Раз в месяц, до 5 числа, отчёт за прошлый месяц собираем через бота.
@@ -275,6 +316,7 @@ _REGULATION_BUILDERS = {
     "meetings": lambda role, uid: MEETINGS_REGULATION_SUPERVISOR,
     "handover": _handover_regulation_for_role,
     "fp_report": lambda role, uid: FP_REPORT_REGULATION,
+    "spot_events": lambda role, uid: MARKETER_REGULATION,
 }
 
 
@@ -298,17 +340,23 @@ async def _send_long_text(message, text: str, limit: int = 3500, final_reply_mar
         await message.reply_text(part, reply_markup=markup)
 
 
-def _available_regulation_blocks(blocks: list[str] | None) -> list[str]:
+def _available_regulation_blocks(blocks: list[str] | None, uid: int | None = None) -> list[str]:
     """Ключи блоков, регламент которых можно посмотреть — только те,
     что реально выданы сотруднику (или все — для владельца, у которого
     blocks=None), в порядке _REGULATION_BUILDERS."""
-    return [b for b in _REGULATION_BUILDERS if blocks is None or b in blocks]
+    from bot.spot_events import available_markets
+
+    result = [b for b in _REGULATION_BUILDERS if b != "spot_events" and (blocks is None or b in blocks)]
+    if uid is not None and available_markets(uid):
+        result.append("spot_events")
+    return result
 
 
 def _regulations_keyboard(block_keys: list[str]) -> InlineKeyboardMarkup:
     from monitoring.constants import BLOCK_LABELS
 
-    return InlineKeyboardMarkup([[InlineKeyboardButton(BLOCK_LABELS[b], callback_data=f"reg_view:{b}")] for b in block_keys])
+    labels = {**BLOCK_LABELS, "spot_events": "Мероприятия на споте (Маркетолог)"}
+    return InlineKeyboardMarkup([[InlineKeyboardButton(labels[b], callback_data=f"reg_view:{b}")] for b in block_keys])
 
 
 def _ack_keyboard(block_key: str) -> InlineKeyboardMarkup:
@@ -327,6 +375,11 @@ async def send_next_regulation(message, telegram_user_id: int) -> bool:
 
     manager = get_manager(telegram_user_id)
     role = manager["position"] if manager else None
+    from monitoring.spot_events import marketer_regulation_read
+
+    if manager and manager['status'] == 'active' and role == 'Маркетолог' and not marketer_regulation_read(telegram_user_id):
+        await _send_long_text(message, MARKETER_REGULATION, final_reply_markup=_ack_keyboard('spot_events'))
+        return True
     granted = get_manager_blocks(telegram_user_id)
     acknowledged = set(get_acknowledged_blocks(telegram_user_id))
     pending = [b for b in AVAILABLE_BLOCKS if b in granted and b not in acknowledged]
@@ -348,7 +401,7 @@ async def on_regulations_command(update, context) -> None:
 
     manager = get_manager(update.effective_user.id)
     blocks = get_manager_blocks(update.effective_user.id) if manager else None
-    block_keys = _available_regulation_blocks(blocks)
+    block_keys = _available_regulation_blocks(blocks, update.effective_user.id)
     if not block_keys:
         await update.effective_message.reply_text("Пока нет ни одного выданного блока — читать нечего.")
         return
@@ -367,9 +420,14 @@ async def on_regulations_view(update, context) -> None:
     manager = get_manager(query.from_user.id)
     role = manager["position"] if manager else None
     blocks = get_manager_blocks(query.from_user.id) if manager else None
-    if block_key not in _available_regulation_blocks(blocks):
+    if block_key not in _available_regulation_blocks(blocks, query.from_user.id):
         await query.answer("Этот блок вам не выдан", show_alert=True)
         return
 
     await query.answer()
-    await _send_long_text(query.message, _REGULATION_BUILDERS[block_key](role, query.from_user.id))
+    from monitoring.spot_events import marketer_regulation_read
+
+    markup = None
+    if block_key == 'spot_events' and role == 'Маркетолог' and not marketer_regulation_read(query.from_user.id):
+        markup = _ack_keyboard('spot_events')
+    await _send_long_text(query.message, _REGULATION_BUILDERS[block_key](role, query.from_user.id), final_reply_markup=markup)

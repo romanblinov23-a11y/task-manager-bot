@@ -92,3 +92,20 @@ def mark_notice_sent(market_id: int, week: str, stage: str, recipient: int) -> N
                          (market_id, week, stage, recipient))
     finally:
         conn.close()
+
+
+def marketer_regulation_read(uid: int) -> bool:
+    conn = get_connection()
+    try:
+        return conn.execute('SELECT 1 FROM spot_event_regulation_ack WHERE telegram_user_id=?', (uid,)).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def acknowledge_marketer_regulation(uid: int) -> None:
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute('INSERT OR IGNORE INTO spot_event_regulation_ack (telegram_user_id) VALUES (?)', (uid,))
+    finally:
+        conn.close()

@@ -76,6 +76,7 @@ async def _ask_mode(message, uid, market):
         [InlineKeyboardButton('📅 Загрузить следующую неделю', callback_data=f"events:next:{market['id']}")],
         [InlineKeyboardButton('➕ Добавить мероприятия', callback_data='events:mode:add')],
         [InlineKeyboardButton('📅 Заменить план недели', callback_data='events:mode:replace')],
+        [InlineKeyboardButton('📗 Регламент маркетолога', callback_data='reg_view:spot_events')],
         [InlineKeyboardButton('Отмена', callback_data='events:cancel')],
     ]))
 

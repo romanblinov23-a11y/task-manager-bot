@@ -1012,7 +1012,12 @@ async def on_regulation_ack(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     uid = query.from_user.id
     block_key = query.data.split(":", 1)[1]
-    if block_key not in AVAILABLE_BLOCKS:
+    if block_key == 'spot_events':
+        manager = get_manager(uid)
+        if not manager or manager['status'] != 'active' or manager['position'] != 'Маркетолог':
+            await query.answer('Регламент доступен подтверждённому Маркетологу', show_alert=True)
+            return
+    elif block_key not in AVAILABLE_BLOCKS:
         await query.answer("Этот раздел больше недоступен", show_alert=True)
         return
     await query.answer("Принято")
@@ -1021,7 +1026,11 @@ async def on_regulation_ack(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     except Exception:
         pass
 
-    acknowledge_block(uid, block_key)
+    if block_key == 'spot_events':
+        from monitoring.spot_events import acknowledge_marketer_regulation
+        acknowledge_marketer_regulation(uid)
+    else:
+        acknowledge_block(uid, block_key)
     await sync_employee_commands(context.bot, uid)
     sent_next = await send_next_regulation(_ChatMessenger(context.bot, uid), uid)
     if sent_next:

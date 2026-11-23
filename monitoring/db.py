@@ -86,6 +86,11 @@ CREATE TABLE IF NOT EXISTS monitoring_schedule (
     active INTEGER NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS spot_event_regulation_ack (
+    telegram_user_id INTEGER PRIMARY KEY REFERENCES manager(telegram_user_id) ON DELETE CASCADE,
+    acknowledged_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS spot_event_week (
     market_id INTEGER NOT NULL REFERENCES market(id),
     week_start TEXT NOT NULL,
