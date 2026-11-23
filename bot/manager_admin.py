@@ -95,6 +95,8 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
     uid = manager["telegram_user_id"]
     blocks = set(get_manager_blocks(uid)) & set(get_acknowledged_blocks(uid))
     commands: list[BotCommand] = []
+    if manager["status"] == "active" and manager["position"] in ("Маркетолог", "Управляющий"):
+        commands.append(BotCommand("spot_events", "Загрузить мероприятия проекта на неделю"))
     if BLOCK_MONITORING in blocks:
         if manager["position"] == "Управляющий":
             commands.append(BotCommand("add_competitor", "Добавить конкурента на рынок"))

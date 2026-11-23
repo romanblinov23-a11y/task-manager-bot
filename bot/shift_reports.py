@@ -34,6 +34,7 @@ from monitoring.shift_reports import (
     set_report_status,
     update_report_date,
 )
+from monitoring.spot_events import events_for_day
 from monitoring.shift_schedule import get_scheduled_manager, list_markets_with_shift
 from monitoring.writeoff_plan import get_writeoff_plan, writeoff_plan_amounts
 from revenue.daily_plan import fetch_daily_plan
@@ -723,23 +724,16 @@ def render_team_report(market: dict, report_date: str, data: dict, plan: dict | 
 
 
 def render_team_morning_message(market: dict, date_iso: str, plan: dict | None) -> str | None:
-    """Утреннее напоминание команде: план на сегодня (выручка/чеки/средний
-    чек — последний бот считает сам) плюс старт/стоп-лист, события и
-    пожелание, собранные вчера вечером на этот случай (см. _QUESTIONS —
-    tomorrow_*). Возвращает None, если плана на сегодня нет вообще —
-    тогда сообщение не отправляется (см. send_team_morning_messages). План
-    заберён вызывающим кодом заранее через revenue.daily_plan.fetch_daily_plan
-    (сетевой запрос к Surf Coffee, поэтому не здесь — эта функция синхронное
-    чистое форматирование). Норма списаний (% от выручки, см.
-    monitoring.writeoff_plan) здесь считается от ПЛАНОВОЙ выручки — факта
-    дня ещё нет, в отличие от вечернего отчёта (см. render_team_report),
-    где та же норма считается от фактической. Формат — тот же «френдли»
-    стиль, что и у вечернего отчёта команде."""
-    if not plan:
+    """План продаж, события маркетолога на сегодня и пожелания вечерней команды.
+
+    При наличии событий отправляется и без плана продаж.
+    """
+    events = events_for_day(market["id"], date_iso)
+    if not plan and not events:
         return None
-    revenue = plan["revenue_plan"]
-    checks = plan["checks_plan"]
-    avg_check = revenue / checks if checks else 0
+    revenue = plan["revenue_plan"] if plan else None
+    checks = plan["checks_plan"] if plan else None
+    avg_check = revenue / checks if checks and revenue is not None else 0
 
     yesterday = (_date.fromisoformat(date_iso) - timedelta(days=1)).isoformat()
     prev_report = get_report_by_date(market["id"], yesterday)
@@ -748,7 +742,7 @@ def render_team_morning_message(market: dict, date_iso: str, plan: dict | None) 
 
     writeoff_plan = get_writeoff_plan(market["id"])
     writeoff_lines = []
-    if writeoff_plan:
+    if writeoff_plan and revenue is not None:
         amounts = writeoff_plan_amounts(writeoff_plan, revenue)
         writeoff_lines = [
             "",
@@ -758,14 +752,25 @@ def render_team_morning_message(market: dict, date_iso: str, plan: dict | None) 
             f"🍽 Питание: {_format_money(amounts['staff_meals'])} ₽",
         ]
 
-    lines = [
-        f"Доброе утро, Серферы! ☀️ {weekday.capitalize()}, {fmt_date(date_iso)} — новый день, новая волна 🌊",
-        "",
+    event_lines = []
+    if events:
+        event_lines = ["", "<b>📍 Мероприятия на споте сегодня</b>"]
+        event_lines.extend(
+            f"{e['event_time']} — {html.escape(e['title'])}; ожидаем {e['participants']} чел."
+            for e in events
+        )
+    plan_lines = [
         "<b>🎯 План на сегодня</b>",
         f"💰 Выручка: {_format_money(revenue)} ₽",
         f"🧾 Чеков: {_format_count(checks) if checks is not None else '—'}",
         f"🎯 Средний чек: {_format_money(avg_check)} ₽",
+    ] if plan else ["План продаж на сегодня пока не загружен."]
+    lines = [
+        f"Доброе утро, Серферы! ☀️ {weekday.capitalize()}, {fmt_date(date_iso)} — новый день, новая волна 🌊",
+        "",
+        *plan_lines,
         *writeoff_lines,
+        *event_lines,
         "",
         "<b>🚀 Старт-лист</b>",
         _esc(prev_data.get("tomorrow_start_list")),
@@ -1892,8 +1897,8 @@ async def send_pending_reports(bot: Bot) -> None:
 async def send_team_morning_messages(bot: Bot) -> None:
     """Утреннее напоминание команде точки (см. main.py): план на сегодня +
     старт/стоп-лист, события, пожелание из вчерашнего вечернего отчёта.
-    Пропускает рынки без плана на сегодня (план ещё не загружен — тогда
-    просто не шлём, см. render_team_morning_message) и рынки с отключённым
+    Без плана продаж отправляет сообщение, если есть мероприятия на сегодня.
+    Пропускает рынки без плана и мероприятий и рынки с отключённым
     у Управляющего блоком «Отчёты по смене» (market_reports_enabled)."""
     date_iso = tz_today().isoformat()
     for market in list_markets():

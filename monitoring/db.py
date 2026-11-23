@@ -86,6 +86,32 @@ CREATE TABLE IF NOT EXISTS monitoring_schedule (
     active INTEGER NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS spot_event_week (
+    market_id INTEGER NOT NULL REFERENCES market(id),
+    week_start TEXT NOT NULL,
+    submitted_by INTEGER NOT NULL,
+    submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (market_id, week_start)
+);
+CREATE TABLE IF NOT EXISTS spot_event_notice (
+    market_id INTEGER NOT NULL REFERENCES market(id),
+    week_start TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    recipient INTEGER NOT NULL,
+    PRIMARY KEY (market_id, week_start, stage, recipient)
+);
+
+CREATE TABLE IF NOT EXISTS spot_event (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    market_id INTEGER NOT NULL REFERENCES market(id),
+    event_date TEXT NOT NULL,
+    event_time TEXT NOT NULL,
+    title TEXT NOT NULL,
+    participants INTEGER NOT NULL CHECK (participants >= 0),
+    created_by INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS spot_event_market_date ON spot_event (market_id, event_date);
+
 CREATE TABLE IF NOT EXISTS shift_schedule (
     market_id INTEGER NOT NULL REFERENCES market(id),
     shift_date TEXT NOT NULL,

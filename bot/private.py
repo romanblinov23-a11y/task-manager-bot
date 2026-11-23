@@ -1,3 +1,4 @@
+from bot.spot_events import on_events_reply
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -30,6 +31,9 @@ from config.settings import ROMAN_TELEGRAM_ID
 
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Ответы на активные диалоги отчётов, настроек и регистрации."""
+    if await on_events_reply(update, context):
+        return
+
     if await on_manager_admin_reply(update, context):
         return
 

@@ -5,6 +5,8 @@ from datetime import time as dt_time
 from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
+from bot.spot_event_schedule import send_event_schedule_notices
+from bot.spot_events import on_events_command, on_events_callback
 from bot.accounting_flow import (
     on_accounting_command,
     on_accounting_fact_choice,
@@ -332,6 +334,10 @@ async def _shift_report_dispatch_job(context) -> None:
     await send_pending_reports(context.bot)
 
 
+async def _spot_event_schedule_job(context) -> None:
+    await send_event_schedule_notices(context.bot)
+
+
 async def _team_morning_report_job(context) -> None:
     await send_team_morning_messages(context.bot)
 
@@ -369,6 +375,7 @@ def _parse_time(value: str, tzinfo) -> dt_time:
 
 
 _ROMAN_COMMANDS = [
+    BotCommand("spot_events", "Загрузить мероприятия проекта на неделю"),
     BotCommand("employees", "Сотрудники бота — по проекту"),
     BotCommand("chats", "Чаты — по проекту: рабочий и рассылки отчётов"),
     BotCommand("monitor_chats", "Чаты под мониторингом триггерных слов"),
@@ -410,6 +417,8 @@ def main() -> None:
     init_personal_data_schema()
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_set_bot_commands).build()
 
+    app.add_handler(CommandHandler("spot_events", on_events_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CallbackQueryHandler(on_events_callback, pattern=r"^events:"))
     app.add_handler(CommandHandler("start", on_start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("help", on_help, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("register_project", on_register_project, filters=filters.ChatType.GROUPS))
@@ -645,6 +654,7 @@ def main() -> None:
     app.job_queue.run_repeating(_shift_report_escalate_job, interval=60, first=0)
     app.job_queue.run_daily(_shift_report_owner_escalate_job, time=_parse_time(SHIFT_REPORT_OWNER_ESCALATE_TIME, TZ))
     app.job_queue.run_daily(_shift_report_dispatch_job, time=_parse_time(SHIFT_REPORT_DISPATCH_TIME, TZ))
+    app.job_queue.run_repeating(_spot_event_schedule_job, interval=60, first=5)
     app.job_queue.run_daily(_team_morning_report_job, time=_parse_time(TEAM_MORNING_REPORT_TIME, TZ))
     app.job_queue.run_daily(_handover_schedule_reminder_job, time=_parse_time(SHIFT_SCHEDULE_REMINDER_TIME, TZ))
     # Как и у вечернего отчёта, каждая точка задаёт своё время запроса
