@@ -31,3 +31,17 @@ def test_new_fields_can_be_collected_and_edited():
     for key in ('cash_balance', 'writeoff_defects', 'writeoff_development'):
         assert questions[key]['kind'] == 'money'
         assert key in _FIELD_LABELS
+
+
+def test_finance_service_time_normalizes_existing_reports():
+    text = render_finance_report({}, '2026-11-25', {'avg_service_time': '0:00'})
+    assert 'среднее время отдачи за день: 00:00' in text
+    text = render_finance_report({}, '2026-11-25', {'avg_service_time': '5:35'})
+    assert 'среднее время отдачи за день: 05:35' in text
+
+
+def test_service_time_input_is_normalized_and_validated():
+    from bot.shift_reports import _validate
+    assert _validate('time', '0:00') == ('00:00', None)
+    assert _validate('time', '05:35') == ('05:35', None)
+    assert _validate('time', '5:99')[1] is not None

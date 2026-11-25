@@ -48,7 +48,7 @@ _QUESTIONS = [
     {"key": "revenue_total", "kind": "money", "prompt": "💰 Общая выручка за день\nНапример: 324675,87"},
     {"key": "revenue_cash", "kind": "money", "prompt": "💵 Наличная выручка\nНапример: 324 675,87"},
     {"key": "revenue_noncash", "kind": "money", "prompt": "💳 Безналичная выручка\nНапример: 324675,87"},
-    {"key": "cash_balance", "kind": "money", "prompt": "Остаток наличных в кассе за сегодня\nНапример: 1 000,00"},
+    {"key": "cash_balance", "kind": "money", "prompt": "Остаток наличных в кассе на конец смены\nСколько наличных лежит в кассе после закрытия смены. Например: 1 000,00"},
     {"key": "avg_check", "kind": "money", "prompt": "🧾 Средний чек за смену\nНапример: 789,87"},
     {"key": "guests", "kind": "guests", "prompt": "👥 Количество гостей\nНапример: 1 234"},
     {
@@ -75,8 +75,8 @@ _QUESTIONS = [
         "kind": "money",
         "prompt": "🍽 Списания «Питание сотрудников»\nЗа сегодня, себестоимость. Например: 7 189,87",
     },
-    {"key": "writeoff_defects", "kind": "money", "prompt": "Порча, брак, ошибка за сегодня\nНапример: 1 000,00"},
-    {"key": "writeoff_development", "kind": "money", "prompt": "Проработка меню, пролив, помол за сегодня\nНапример: 1 000,00"},
+    {"key": "writeoff_defects", "kind": "money", "prompt": "Списания «Порча, брак, ошибка» за сегодня\nПорча, брак и ошибки сотрудников, по себестоимости. Истёкший срок годности сюда не включай — он отдельной строкой. Например: 1 000,00"},
+    {"key": "writeoff_development", "kind": "money", "prompt": "Списания «Проработка меню, пролив, помол» за сегодня\nПробы и проработка меню, пролив, настройка помола, по себестоимости. Например: 1 000,00"},
     {"key": "avg_service_time", "kind": "time", "prompt": "⏱ Среднее время отдачи за день\nФормат ЧЧ:ММ. Например: 00:05"},
     {
         "key": "comment_general",
@@ -122,7 +122,9 @@ _QUESTIONS = [
         "kind": "text",
         "prompt": (
             "👩‍🍳 Состав смены\n"
-            "Кто и в каком количестве работал — отдельно утро и вечер (менеджеры, бариста, клинеры, «уютные»)."
+            "Сколько всего человек было на смене и сколько по каждой должности. "
+            "Например: 5 человек, 2 бариста, 2 кассира, 1 управляющий. "
+            "Если состав утром и вечером различался — укажи отдельно."
         ),
     },
     {
@@ -294,7 +296,7 @@ def _validate(kind: str, text: str) -> tuple[str | None, str | None]:
     if kind == "time":
         if not re.fullmatch(r"\d{1,2}:[0-5]\d", text):
             return None, "🤔 Нужен формат ЧЧ:ММ. Попробуй ещё раз, например: 00:05"
-        return text, None
+        return text.zfill(5), None
     if not text:
         return None, "🤔 Не может быть пустым — напиши хотя бы коротко:"
     return text, None
@@ -427,6 +429,13 @@ def _writeoff_compare_line(label: str, data: dict, key: str, plan_value: float |
     return f"{label}: {current_str} (норма {_format_money(plan_value)}{delta_part})"
 
 
+def _finance_service_time(data: dict) -> str:
+    value = str(data.get("avg_service_time") or "").strip()
+    if re.fullmatch(r"\d{1,2}:[0-5]\d", value):
+        return value.zfill(5)
+    return value or "—"
+
+
 def _finance_previous_line(data: dict, key: str, *, count: bool = False) -> str:
     parse = _parse_int if count else _parse_amount
     formatter = _format_count if count else _format_money
@@ -468,7 +477,7 @@ def render_finance_report(market: dict, report_date: str, data: dict) -> str:
         f"порча, брак, ошибка: {_money_field(data, 'writeoff_defects')}",
         f"проработка меню, пролив, помол: {_money_field(data, 'writeoff_development')}",
         "",
-        f"среднее время отдачи за день: {data.get('avg_service_time', '—')}",
+        f"среднее время отдачи за день: {_finance_service_time(data)}",
         "",
         "комментарий по смене:",
         "",
