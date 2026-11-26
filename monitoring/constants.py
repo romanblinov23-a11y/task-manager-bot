@@ -40,17 +40,13 @@ BLOCK_ACCOUNTING = "accounting"
 # свой график, своё время, но без цепочки согласований. Как и "Собрания"/
 # "Работа с системой учёта" — не выдаётся по умолчанию.
 BLOCK_HANDOVER = "handover"
-# Ежемесячный отчёт для финпартнёров (см. bot.fp_report_flow) — как и "Пересменка",
-# не выдаётся по умолчанию: владелец включает управляющему вручную.
-BLOCK_FP_REPORT = "fp_report"
-AVAILABLE_BLOCKS = [BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_MEETINGS, BLOCK_ACCOUNTING, BLOCK_HANDOVER, BLOCK_FP_REPORT]
+AVAILABLE_BLOCKS = [BLOCK_MONITORING, BLOCK_REPORTS, BLOCK_MEETINGS, BLOCK_ACCOUNTING, BLOCK_HANDOVER]
 BLOCK_LABELS = {
     BLOCK_MONITORING: "Мониторинг конкурентов",
     BLOCK_REPORTS: "Отчёты по смене",
     BLOCK_MEETINGS: "Собрания",
     BLOCK_ACCOUNTING: "Работа с системой учёта",
     BLOCK_HANDOVER: "Пересменка",
-    BLOCK_FP_REPORT: "Отчёт для ФП (ежемесячный)",
 }
 DEFAULT_BLOCKS = f"{BLOCK_MONITORING},{BLOCK_REPORTS}"
 

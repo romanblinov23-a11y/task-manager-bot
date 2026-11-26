@@ -134,6 +134,8 @@ class SurfCoffeeClient:
         self._ensure_login()
         resp = self._with_retry(lambda: self._client.get(CHANGE_SPOT_URL, params={"spot_id": spot_id}))
         resp.raise_for_status()
+        if resp.json().get("success") is not True:
+            raise RuntimeError("НИМБ не подтвердил переключение точки")
         logger.info("Переключились на spot_id=%s", spot_id)
 
     def get_month_raw(self, month: str) -> dict:
@@ -337,3 +339,55 @@ class SurfCoffeeClient:
 
     def close(self):
         self._client.close()
+
+    def get_month_admission(self, spot_key: str, month: str) -> dict:
+        """Явный статус закрытия. Отсутствующий/небулев статус — не разрешение."""
+        self.switch_spot(SPOTS[spot_key]['id'])
+        resp = self._with_retry(lambda: self._client.get(
+            f'{BASE_URL}/api/v3/reports/pdr/get_months', params={'date': month}))
+        resp.raise_for_status()
+        body = resp.json()
+        if body.get('success') is not True or not isinstance(body.get('data'), list):
+            raise RuntimeError('Не получен статус закрытия месяца')
+        rows = [row for row in body['data'] if row.get('month') == month]
+        if len(rows) != 1 or type(rows[0].get('is_close')) is not bool:
+            raise RuntimeError('Статус выбранного месяца неизвестен')
+        return {'month': month, 'closed': rows[0]['is_close']}
+
+    def get_monthly_source(self, name: str, spot_key: str, month: str) -> dict:
+        """Только проверенные маршруты чтения нового отчета управляющего."""
+        routes = {
+            'rating': 'manager_rating', 'payroll': 'awards/new/get',
+            'bonuses': 'awards/new/bonus/get', 'bep': 'awards/new/bonus_bep/get',
+            'contracts': 'awards/new/contract/get', 'other': 'awards/new/other/get',
+            'holds': 'awards/new/other_hold/get', 'managers': 'awards/new/manager/get',
+            'expense_plan': 'monthly_planning/expenses/get',
+        }
+        route = routes[name]
+        self.switch_spot(SPOTS[spot_key]['id'])
+        resp = self._with_retry(lambda: self._client.get(
+            f'{BASE_URL}/api/v3/{route}', params={'date': month}))
+        resp.raise_for_status()
+        body = resp.json()
+        if body.get('success') is not True or not isinstance(body.get('data'), dict):
+            raise RuntimeError(f'Не получен источник {name}')
+        data = body['data']
+        period = data.get('period')
+        actual = period.get('date', period.get('period')) if isinstance(period, dict) else period
+        if isinstance(period, dict) and 'spot_id' in period and period['spot_id'] != SPOTS[spot_key]['id']:
+            raise RuntimeError(f'Источник {name} относится к другой точке')
+        if actual not in (month, month + '-01'):
+            raise RuntimeError(f'Источник {name} вернул другой период')
+        return data
+
+    def get_distribution_year(self, spot_key: str, year: int) -> list:
+        self.switch_spot(SPOTS[spot_key]['id'])
+        resp = self._with_retry(lambda: self._client.get(
+            f'{BASE_URL}/api/v3/reports/pdr/get', params={'date': str(year)}))
+        resp.raise_for_status()
+        body = resp.json()
+        if body.get('success') is not True or not isinstance(body.get('data'), list):
+            raise RuntimeError('Не получено распределение прибыли')
+        if any(row.get('spot_id') != SPOTS[spot_key]['id'] for row in body['data']):
+            raise RuntimeError('Распределение прибыли относится к другой точке')
+        return body['data']

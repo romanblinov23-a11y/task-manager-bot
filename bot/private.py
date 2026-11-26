@@ -2,6 +2,8 @@ from bot.spot_events import on_events_reply
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from bot.manager_report_flow import on_manager_report_reply
+from bot.manager_report_lifecycle import reply as on_manager_report_lifecycle_reply
 from bot.competitors import on_add_competitor_reply
 from bot.fix_reading import on_fix_reading_reply
 from bot.fp_report_flow import on_fp_report_document, on_fp_report_reply
@@ -31,10 +33,16 @@ from config.settings import ROMAN_TELEGRAM_ID
 
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Ответы на активные диалоги отчётов, настроек и регистрации."""
+    if await on_manager_report_lifecycle_reply(update, context):
+        return
+
     if await on_events_reply(update, context):
         return
 
     if await on_manager_admin_reply(update, context):
+        return
+
+    if await on_manager_report_reply(update, context):
         return
 
     if await on_fix_reading_reply(update, context):
@@ -123,6 +131,6 @@ async def message_help(update: Update) -> None:
 
 
 async def on_private_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Приём документов во время сбора отчёта ФП."""
+    """Приём документов во время сбора отчёта для учредителей."""
     if not await on_fp_report_document(update, context):
-        await update.effective_message.reply_text("Для загрузки файлов отчёта начни сбор командой /fp_report.")
+        await update.effective_message.reply_text("Для отчётов управляющих новый раздел пока готовится. Открой меню доступных команд.")

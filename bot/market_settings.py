@@ -1,3 +1,5 @@
+from bot.manager_report_flow import previous_month
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
@@ -21,7 +23,7 @@ def _actions_keyboard(market: dict) -> InlineKeyboardMarkup:
     finance_on = market.get("send_to_finance", 1)
     finance_label = "💰 Финпартнёры: включено (нажми, чтобы выключить)" if finance_on else "💰 Финпартнёры: выключено (нажми, чтобы включить)"
     fp_on = market.get("fp_report_enabled", 0)
-    fp_label = "📑 Месячный отчёт для ФП: включён (нажми, чтобы выключить)" if fp_on else "📑 Месячный отчёт для ФП: выключен (нажми, чтобы включить)"
+    fp_label = "📑 Отчёт для учредителей: включён (нажми, чтобы выключить)" if fp_on else "📑 Отчёт для учредителей: выключен (нажми, чтобы включить)"
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("🏷 Реквизиты оператора (ПДн)", callback_data=f"setop_market:{market_id}")],
@@ -32,6 +34,7 @@ def _actions_keyboard(market: dict) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(fp_label, callback_data=f"msett_togglefp:{market_id}")],
             [InlineKeyboardButton("💰 Чат финпартнёров", callback_data=f"shrc_view:{market_id}:finance")],
             [InlineKeyboardButton("👥 Чат команды точки", callback_data=f"shrc_view:{market_id}:team")],
+            [InlineKeyboardButton("📊 Планы гостевых KPI (Роман)", callback_data=f"mr:plan:{market_id}:{previous_month()}")],
             [InlineKeyboardButton("🗑 Нормы списаний", callback_data=f"writeoffplan_market:{market_id}")],
             [InlineKeyboardButton("↩️ Другой рынок", callback_data="msett_back")],
         ]

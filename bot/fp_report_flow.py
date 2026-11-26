@@ -1,9 +1,9 @@
-"""Ежемесячный отчёт для финпартнёров: сбор данных и диалог с управляющим.
+"""Ежемесячный отчёт для учредителей: сбор данных Романом.
 
-Поток: /fp_report → проект (только с включённым отчётом ФП) → три файла в чат: шаблон на этот месяц
+Поток: /founders_report → проект (только с включённым отчётом для учредителей) → три файла в чат: шаблон на этот месяц
 (.docx, пустой), итоги инвентаризации (.xlsx) и отчёт за прошлый месяц (.docx, заполненный; можно
 написать «без прошлого отчёта») → данные из НИМБ → вопросы по одному в порядке шаблона →
-готовый report_park_ГГГГММ.docx уходит тому, кто собирал, и владельцу.
+готовый report_park_ГГГГММ.docx уходит только Роману.
 
 Из отчёта за прошлый месяц бот берёт то, что нельзя вытащить из НИМБ: задачи, факты операционных
 показателей, план выплат, ФИО управляющего. Месяц всегда предыдущий. Состояние сессии хранится
@@ -18,7 +18,6 @@ from pathlib import Path
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from config.settings import OWNER_TELEGRAM_IDS
 from config.timeutil import now as tz_now
 from fp_report.build import _MONTH_RU, ASK, build_report, count_open_fields
 from fp_report.collect import fetch_nimba_inputs
@@ -26,7 +25,7 @@ from fp_report.inventory import load_save_positions
 from fp_report.previous import expected_label, is_blank_template, month_label_of, read_previous
 from fp_report.questions import apply_answer, build_questions, describe_field, missing_fields
 from fp_report.session import delete_session, load_inputs, load_session, save_inputs, save_session, session_dir
-from monitoring.managers import get_markets_for_manager, has_fp_report_access, is_owner
+from monitoring.managers import has_fp_report_access
 from monitoring.markets import get_market, list_markets
 
 # uid, для которых сбор из НИМБ идёт прямо сейчас в этом процессе
@@ -56,13 +55,10 @@ def _month_label(month: str) -> str:
 
 
 def _available_markets(uid: int) -> list[dict]:
-    """Владелец видит все рынки, управляющий — свои. Нужны включённый флаг и привязка к точке Surf."""
-    if is_owner(uid):
-        markets = list_markets()
-    elif has_fp_report_access(uid):
-        markets = get_markets_for_manager(uid)
-    else:
+    """Роману доступны включённые проекты с привязкой к НИМБу."""
+    if not has_fp_report_access(uid):
         return []
+    markets = list_markets()
     return [m for m in markets if m.get("fp_report_enabled") and m.get("surf_spot_key")]
 
 
@@ -85,55 +81,61 @@ def _missing_files(uid: int, session: dict) -> list[str]:
 async def on_fp_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     uid = update.effective_user.id
     message = update.effective_message
+    if not has_fp_report_access(uid):
+        await message.reply_text("Отчёт для учредителей доступен только Роману.")
+        return
     args = context.args or []
     month = args[0] if args else _previous_month()
     if len(args) > 1 or not re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", month) or month.startswith("0000"):
-        await message.reply_text("Укажи месяц в формате /fp_report ГГГГ-ММ, например /fp_report 2026-10.")
+        await message.reply_text("Укажи месяц в формате /founders_report ГГГГ-ММ, например /founders_report 2026-10.")
         return
     session = load_session(uid)
     if session:
         if args and month != session["month"]:
             if session["stage"] != "files":
-                await message.reply_text("Для смены месяца напиши «отмена», затем /fp_report " + month)
+                await message.reply_text("Для смены месяца напиши «отмена», затем /founders_report " + month)
                 return
             previous = session_dir(uid) / _PREVIOUS_NAME
             if previous.exists() and month_label_of(str(previous)) != expected_label(_month_before(month)):
-                await message.reply_text("Сохранённый прошлый отчёт не подходит к новому месяцу. Напиши «отмена», затем /fp_report " + month + " и пришли файлы заново.")
+                await message.reply_text("Сохранённый прошлый отчёт не подходит к новому месяцу. Напиши «отмена», затем /founders_report " + month + " и пришли файлы заново.")
                 return
             session["month"] = month
             save_session(uid, session)
         await message.reply_text(
-            f"Продолжаем отчёт для ФП за {_month_label(session['month'])}. "
-            "Для другого месяца: /fp_report ГГГГ-ММ. Для начала заново — «отмена»."
+            f"Продолжаем отчёт для учредителей за {_month_label(session['month'])}. "
+            "Для другого месяца: /founders_report ГГГГ-ММ. Для начала заново — «отмена»."
         )
         await _ask_waiting_step(message, uid, session)
         return
     markets = _available_markets(uid)
     if not markets:
         await message.reply_text(
-            "Ежемесячный отчёт для ФП пока не включён ни по одному проекту. Владелец включает его в "
+            "Ежемесячный отчёт для учредителей пока не включён ни по одному проекту. Владелец включает его в "
             "/market_settings — у проекта должна быть привязка к точке Surf Coffee."
         )
         return
     if len(markets) == 1:
         await _start(message, uid, markets[0], month)
         return
-    await message.reply_text("По какому проекту собираем отчёт для ФП?", reply_markup=_market_pick_keyboard(markets, month))
+    await message.reply_text("По какому проекту собираем отчёт для учредителей?", reply_markup=_market_pick_keyboard(markets, month))
 
 
 async def on_fp_report_market_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
     uid = query.from_user.id
+    if not has_fp_report_access(uid):
+        await query.answer("Отчёт для учредителей доступен только Роману.", show_alert=True)
+        return
+    await query.answer()
     if load_session(uid):
-        await query.edit_message_text("Отчёт для ФП уже собирается. Доделай его или напиши «отмена».")
+        await query.edit_message_text("Отчёт для учредителей уже собирается. Доделай его или напиши «отмена».")
         return
     parts = query.data.split(":")
     market_id = int(parts[1])
     month = parts[2] if len(parts) > 2 else _previous_month()
     market = next((m for m in _available_markets(uid) if m["id"] == market_id), None)
     if not market:
-        await query.edit_message_text("Этот проект недоступен для отчёта ФП.")
+        await query.edit_message_text("Этот проект недоступен для отчёта для учредителей.")
         return
     await query.edit_message_text(f"Проект: {market['name']}")
     await _start(query.message, uid, market, month)
@@ -142,9 +144,9 @@ async def on_fp_report_market_choice(update: Update, context: ContextTypes.DEFAU
 async def _start(message, uid: int, market: dict, month: str) -> None:
     save_session(uid, {"market_id": market["id"], "month": month, "stage": "files", "questions": [], "index": 0, "answers": {}})
     await message.reply_text(
-        f"Собираем отчёт для ФП за {_month_label(month)} по «{market['name']}».\n"
+        f"Собираем отчёт для учредителей за {_month_label(month)} по «{market['name']}».\n"
         "Пришли три файла, порядок любой:\n"
-        "1) шаблон отчёта ФП на этот месяц (.docx, пустой);\n"
+        "1) шаблон отчёта для учредителей на этот месяц (.docx, пустой);\n"
         "2) итоги инвентаризации (.xlsx), возьму только строки со статусом SAVE;\n"
         "3) отчёт за прошлый месяц (.docx, заполненный). Если его нет, напиши «без прошлого отчёта»."
     )
@@ -153,6 +155,8 @@ async def _start(message, uid: int, market: dict, month: str) -> None:
 async def on_fp_report_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Файл от управляющего/владельца в ходе сбора. False — если сбора сейчас нет, файл пойдёт дальше по старой логике."""
     uid = update.effective_user.id
+    if not has_fp_report_access(uid):
+        return False
     session = load_session(uid)
     if not session or session["stage"] != "files":
         return False
@@ -177,7 +181,7 @@ async def on_fp_report_document(update: Update, context: ContextTypes.DEFAULT_TY
                 incoming.unlink(missing_ok=True)
                 await message.reply_text(f"Собираем отчёт за {_month_label(session['month'])}. "
                     f"Это отчёт за «{found}», а прошлый нужен за «{wanted}». "
-                    "Для смены месяца укажи /fp_report ГГГГ-ММ.")
+                    "Для смены месяца укажи /founders_report ГГГГ-ММ.")
                 return True
             target, label = directory / _PREVIOUS_NAME, "отчёт за прошлый месяц"
             session["no_previous"] = False
@@ -267,8 +271,10 @@ async def _ask_waiting_step(message, uid: int, session: dict) -> None:
 
 
 async def on_fp_report_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Текстовый ответ в ходе сбора отчёта ФП. False — сбора нет, сообщение идёт дальше."""
+    """Текстовый ответ в ходе сбора отчёта для учредителей. False — сбора нет, сообщение идёт дальше."""
     uid = update.effective_user.id
+    if not has_fp_report_access(uid):
+        return False
     session = load_session(uid)
     if not session:
         return False
@@ -278,7 +284,7 @@ async def on_fp_report_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if lowered == "отмена":
         delete_session(uid)
-        await message.reply_text("Сбор отчёта для ФП отменён.")
+        await message.reply_text("Сбор отчёта для учредителей отменён.")
         return True
 
     if session["stage"] in ("retry", "collecting") and lowered == "повтор" and uid not in _collecting:
@@ -351,6 +357,8 @@ def _previous_defaults(uid: int) -> dict:
 
 
 async def _finish(message, context: ContextTypes.DEFAULT_TYPE, uid: int, session: dict) -> None:
+    if not has_fp_report_access(uid):
+        return
     market = get_market(session["market_id"])
     month = session["month"]
     directory = session_dir(uid)
@@ -373,11 +381,11 @@ async def _finish(message, context: ContextTypes.DEFAULT_TYPE, uid: int, session
         answers={**_previous_defaults(uid), **session["answers"]},
     )
     open_fields = count_open_fields(path)
-    caption = f"Отчёт для ФП: {market['name']}, {_month_label(month)}."
+    caption = f"Отчёт для учредителей: {market['name']}, {_month_label(month)}."
     if open_fields:
         caption += f"\nНезаполненных мест: {open_fields} (помечены «{ASK}»)."
 
-    recipients = {uid} | {int(owner) for owner in OWNER_TELEGRAM_IDS if owner}
+    recipients = {uid}
     for chat_id in recipients:
         with open(path, "rb") as fh:
             await context.bot.send_document(chat_id=chat_id, document=fh, filename=Path(path).name, caption=caption)

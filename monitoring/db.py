@@ -314,15 +314,19 @@ def init_schema() -> None:
             )
             conn.execute("DROP TABLE report_chat_old")
         conn.executescript(_SCHEMA)
+        from manager_report.storage import SCHEMA as manager_report_schema
+        conn.executescript(manager_report_schema)
+        from manager_report.lifecycle import SCHEMA as manager_report_lifecycle_schema
+        conn.executescript(manager_report_lifecycle_schema)
         _ensure_column(conn, "manager", "status", "status TEXT NOT NULL DEFAULT 'pending'")
         _ensure_column(conn, "manager", "blocks", "blocks TEXT NOT NULL DEFAULT 'monitoring,reports'")
         _ensure_column(conn, "manager", "blocks_ack", "blocks_ack TEXT NOT NULL DEFAULT ''")
-        # Удалённый таск-менеджер больше не выдаётся и не требует регламента.
+        # Таск-менеджер удалён, отчёт для учредителей больше не является блоком сотрудников.
         # Остальные доступы сотрудников сохраняются; архивная tasks.db не открывается.
         for row in conn.execute("SELECT telegram_user_id, blocks, blocks_ack FROM manager").fetchall():
             for column in ("blocks", "blocks_ack"):
                 old = row[column] or ""
-                cleaned = ",".join(block for block in old.split(",") if block and block != "tasks")
+                cleaned = ",".join(block for block in old.split(",") if block and block not in {"tasks", "fp_report"})
                 if old != cleaned:
                     conn.execute(
                         f"UPDATE manager SET {column} = ? WHERE telegram_user_id = ?",

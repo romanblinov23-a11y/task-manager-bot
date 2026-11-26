@@ -5,6 +5,11 @@ from datetime import time as dt_time
 from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
+from bot.manager_report_flow import (
+    on_manager_report_command, on_manager_kpi_plan_command, on_manager_report_callback,
+)
+from manager_report.storage import recover_deliveries
+from bot.manager_report_lifecycle import callback as on_manager_report_lifecycle_callback, schedule as schedule_manager_reports
 from bot.spot_event_schedule import send_event_schedule_notices
 from bot.spot_events import on_events_command, on_events_callback
 from bot.accounting_flow import (
@@ -293,7 +298,7 @@ from config.settings import (
 from config.timeutil import today as tz_today
 from dashboard.server import start_dashboard_server
 from monitoring.db import init_schema as init_monitoring_schema
-from monitoring.managers import list_managers
+from monitoring.managers import has_fp_report_access, list_managers
 from personal_data.db import init_schema as init_personal_data_schema
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -332,6 +337,10 @@ async def _shift_report_owner_escalate_job(context) -> None:
 
 async def _shift_report_dispatch_job(context) -> None:
     await send_pending_reports(context.bot)
+
+
+async def _manager_report_schedule_job(context) -> None:
+    await schedule_manager_reports(context.bot)
 
 
 async def _spot_event_schedule_job(context) -> None:
@@ -375,6 +384,8 @@ def _parse_time(value: str, tzinfo) -> dt_time:
 
 
 _ROMAN_COMMANDS = [
+    BotCommand("manager_report", "Ежемесячный отчет управляющего"),
+    BotCommand("manager_kpi_plan", "Планы гостевых KPI по спотам"),
     BotCommand("spot_events", "Загрузить мероприятия проекта на неделю"),
     BotCommand("employees", "Сотрудники бота — по проекту"),
     BotCommand("chats", "Чаты — по проекту: рабочий и рассылки отчётов"),
@@ -384,7 +395,7 @@ _ROMAN_COMMANDS = [
     BotCommand("dashboard_market", "Дашборд по рынку"),
     BotCommand("view_reports", "Посмотреть отчёт по смене за любой день"),
     BotCommand("shift_dashboard", "Живой дашборд по отчётам смен: цифры, погода, корреляции"),
-    BotCommand("fp_report", "Ежемесячный отчёт для ФП за прошлый месяц"),
+    BotCommand("founders_report", "Отчёт для учредителей"),
     BotCommand("revenue", "Выручка: отчёты, план/факт, P&L"),
     BotCommand("messaging", "Написать сотруднику, в чат или разослать группе"),
     BotCommand("regulations", "Регламенты работы с ботом"),
@@ -402,7 +413,7 @@ async def _set_bot_commands(app) -> None:
     # Для владельцев в личке — полный список
     for owner_id in OWNER_TELEGRAM_IDS:
         await app.bot.set_my_commands(
-            _ROMAN_COMMANDS,
+            [command for command in _ROMAN_COMMANDS if command.command not in ("founders_report", "manager_kpi_plan", "manager_report") or has_fp_report_access(int(owner_id))],
             scope=BotCommandScopeChat(chat_id=int(owner_id)),
         )
     # Уже подтверждённым сотрудникам восстанавливаем их персональное меню —
@@ -414,9 +425,14 @@ async def _set_bot_commands(app) -> None:
 
 def main() -> None:
     init_monitoring_schema()
+    recover_deliveries()
     init_personal_data_schema()
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_set_bot_commands).build()
 
+    app.add_handler(CommandHandler("manager_report", on_manager_report_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("manager_kpi_plan", on_manager_kpi_plan_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CallbackQueryHandler(on_manager_report_callback, pattern=r"^mr:"))
+    app.add_handler(CallbackQueryHandler(on_manager_report_lifecycle_callback, pattern=r"^ml:"))
     app.add_handler(CommandHandler("spot_events", on_events_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(on_events_callback, pattern=r"^events:"))
     app.add_handler(CommandHandler("start", on_start, filters=filters.ChatType.PRIVATE))
@@ -447,6 +463,8 @@ def main() -> None:
     app.add_handler(CommandHandler("reset_shift_report", on_reset_shift_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("view_reports", on_view_reports_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("shift_dashboard", on_shift_dashboard_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("founders_report", on_fp_report_command, filters=filters.ChatType.PRIVATE))
+    # Старое имя оставлено для сохранённых инструкций и привычных команд Романа.
     app.add_handler(CommandHandler("fp_report", on_fp_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_handover_schedule", on_set_handover_schedule_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("set_handover_report", on_set_handover_report_command, filters=filters.ChatType.PRIVATE))
@@ -655,6 +673,7 @@ def main() -> None:
     app.job_queue.run_daily(_shift_report_owner_escalate_job, time=_parse_time(SHIFT_REPORT_OWNER_ESCALATE_TIME, TZ))
     app.job_queue.run_daily(_shift_report_dispatch_job, time=_parse_time(SHIFT_REPORT_DISPATCH_TIME, TZ))
     app.job_queue.run_repeating(_spot_event_schedule_job, interval=60, first=5)
+    app.job_queue.run_repeating(_manager_report_schedule_job, interval=60, first=10)
     app.job_queue.run_daily(_team_morning_report_job, time=_parse_time(TEAM_MORNING_REPORT_TIME, TZ))
     app.job_queue.run_daily(_handover_schedule_reminder_job, time=_parse_time(SHIFT_SCHEDULE_REMINDER_TIME, TZ))
     # Как и у вечернего отчёта, каждая точка задаёт своё время запроса

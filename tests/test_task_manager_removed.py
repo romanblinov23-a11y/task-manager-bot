@@ -15,7 +15,7 @@ def test_migration_removes_only_task_access():
     try:
         conn.execute(
             "UPDATE manager SET blocks = ?, blocks_ack = ? WHERE telegram_user_id = ?",
-            ('tasks,monitoring,fp_report', 'monitoring,tasks', 88801),
+            ('tasks,monitoring,accounting', 'monitoring,tasks', 88801),
         )
         conn.commit()
     finally:
@@ -25,7 +25,7 @@ def test_migration_removes_only_task_access():
     conn = get_connection()
     try:
         row = conn.execute('SELECT blocks, blocks_ack FROM manager WHERE telegram_user_id = 88801').fetchone()
-        assert row['blocks'] == 'monitoring,fp_report'
+        assert row['blocks'] == 'monitoring,accounting'
         assert row['blocks_ack'] == 'monitoring'
     finally:
         conn.close()

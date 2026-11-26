@@ -1,5 +1,5 @@
-from config.settings import OWNER_TELEGRAM_IDS
-from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_ACCOUNTING, BLOCK_FP_REPORT, BLOCK_HANDOVER, BLOCK_MEETINGS, BLOCK_MONITORING, BLOCK_REPORTS, DEFAULT_BLOCKS
+from config.settings import OWNER_TELEGRAM_IDS, ROMAN_TELEGRAM_ID
+from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_ACCOUNTING, BLOCK_HANDOVER, BLOCK_MEETINGS, BLOCK_MONITORING, BLOCK_REPORTS, DEFAULT_BLOCKS
 from monitoring.db import get_connection
 
 
@@ -161,11 +161,8 @@ def market_reports_enabled(market_id: int) -> bool:
 
 
 def has_fp_report_access(telegram_user_id: int) -> bool:
-    """True для владельца и для активных сотрудников с выданным блоком «Отчёт для ФП»."""
-    if is_owner(telegram_user_id):
-        return True
-    manager = get_manager(telegram_user_id)
-    return bool(manager and manager["status"] == "active" and BLOCK_FP_REPORT in (manager.get("blocks") or "").split(","))
+    """Существующий отчёт для учредителей собирает только Роман."""
+    return bool(ROMAN_TELEGRAM_ID) and str(telegram_user_id) == str(ROMAN_TELEGRAM_ID)
 
 
 def _has_handover_block(manager: dict | None) -> bool:

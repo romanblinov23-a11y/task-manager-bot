@@ -18,7 +18,6 @@ from config.settings import OWNER_TELEGRAM_IDS
 from monitoring.constants import (
     AVAILABLE_BLOCKS,
     BLOCK_ACCOUNTING,
-    BLOCK_FP_REPORT,
     BLOCK_HANDOVER,
     BLOCK_LABELS,
     BLOCK_MEETINGS,
@@ -97,6 +96,8 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
     commands: list[BotCommand] = []
     if manager["status"] == "active" and manager["position"] in ("Маркетолог", "Управляющий"):
         commands.append(BotCommand("spot_events", "Загрузить мероприятия проекта на неделю"))
+    if manager['status'] == 'active' and manager['position'] == 'Управляющий':
+        commands.append(BotCommand('manager_report', 'Ежемесячный отчет управляющего'))
     if BLOCK_MONITORING in blocks:
         if manager["position"] == "Управляющий":
             commands.append(BotCommand("add_competitor", "Добавить конкурента на рынок"))
@@ -113,8 +114,6 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
             if any(not m.get("surf_spot_key") for m in get_markets_for_manager(uid)):
                 commands.append(BotCommand("set_monthly_plan", "Загрузить план по выручке/чекам на месяц"))
         commands.append(BotCommand("shift_report", "Внести отчёт по смене принудительно"))
-    if BLOCK_FP_REPORT in blocks:
-        commands.append(BotCommand("fp_report", "Ежемесячный отчёт для ФП за прошлый месяц"))
     if BLOCK_MEETINGS in blocks and manager["position"] == "Управляющий":
         commands.append(BotCommand("set_meeting_schedule", "Настроить ритм собраний"))
         commands.append(BotCommand("announce_meeting", "Собрать повестку и разослать ближайшее собрание"))
