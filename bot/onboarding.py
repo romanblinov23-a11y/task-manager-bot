@@ -449,7 +449,11 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def on_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    from bot.menu import allowed, show_menu
+    from bot.menu import is_roman, allowed, show_menu
+    if is_roman(update.effective_user.id):
+        from bot.menu_help import show_help
+        await show_help(update.effective_message, update.effective_user.id)
+        return
     if allowed(update.effective_user.id):
         await show_menu(update.effective_message, update.effective_user.id)
         return

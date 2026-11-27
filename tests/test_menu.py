@@ -131,3 +131,33 @@ def test_pending_unapproved_user_does_not_get_keyboard(monkeypatch):
     register_manager(99,'Ожидающий','Управляющий',list_markets()[0]['id'])
     assert menu.allowed(99)==set()
     assert isinstance(menu.reply_keyboard(99),ReplyKeyboardRemove)
+
+
+def test_help_documents_every_command_and_respects_telegram_message_limit(monkeypatch):
+    from bot import menu_help
+    monkeypatch.setattr(menu.settings,'ROMAN_TELEGRAM_ID','42')
+    assert set(menu_help.DESCRIPTIONS)==set(menu.CATALOG)
+    message=SimpleNamespace(reply_text=AsyncMock())
+    asyncio.run(menu_help.show_help(message,42,'all'))
+    messages=[c.args[0] for c in message.reply_text.call_args_list]
+    text='\n'.join(messages)
+    assert all(len(part)<=3500 for part in messages)
+    assert all('/'+key+' —' in text for key in menu.CATALOG)
+    assert '/menu' in text and '/help' in text and '/spravka' in text
+    assert menu.CATEGORIES['settings']+' → '+menu.CATEGORIES['monitoring'] in text
+
+
+def test_owner_help_available_by_button_word_and_help_command(monkeypatch):
+    from bot import onboarding,menu_help
+    monkeypatch.setattr(menu.settings,'ROMAN_TELEGRAM_ID','42')
+    assert '❓ Справка' in [button.text for row in menu.reply_keyboard(42).keyboard for button in row]
+    show=AsyncMock();monkeypatch.setattr(menu_help,'show_help',show)
+    async def run():
+        for text in ('❓ Справка','справка'):
+            assert await menu.on_menu_text(update(42,text),SimpleNamespace())
+        await onboarding.on_help(update(42),SimpleNamespace())
+        assert show.await_count==3
+        message=update(99,callback='nav:help:all')
+        await menu.on_menu_callback(message,SimpleNamespace())
+        assert show.await_count==3
+    asyncio.run(run())

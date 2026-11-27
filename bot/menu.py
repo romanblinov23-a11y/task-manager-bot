@@ -84,7 +84,7 @@ def reply_keyboard(uid):
     if not commands:return ReplyKeyboardRemove()
     if is_roman(uid):
         rows=[[CATEGORIES['reports'],CATEGORIES['finance']],[CATEGORIES['team'],CATEGORIES['projects']],
-              [CATEGORIES['messages'],CATEGORIES['settings']],[HOME]]
+              [CATEGORIES['messages'],CATEGORIES['settings']],[HOME,'❓ Справка']]
     else:
         labels=[label for label,command in SHORTCUTS.items() if command in commands]
         rows=[labels[i:i+2] for i in range(0,len(labels),2)]
@@ -108,8 +108,8 @@ async def sync_keyboard(bot,uid):
         if (row['signature'] if row else None)==new:return
         text='Добавил кнопки под полем ввода. Отчеты, команда и настройки теперь под рукой. Главное меню можно открыть командой /menu.' if new else 'Доступные разделы изменились. Меню обновлено.'
         try:await bot.send_message(chat_id=uid,text=text,reply_markup=reply_keyboard(uid))
-        except Exception:
-            logger.warning('Не удалось обновить панель команд пользователя %s',uid);return
+        except Exception as e:
+            logger.warning('Не удалось обновить панель команд пользователя %s (%s)',uid,type(e).__name__);return
         with c:
             if new:c.execute('INSERT INTO bot_menu_keyboard VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET signature=excluded.signature',(uid,new))
             else:c.execute('DELETE FROM bot_menu_keyboard WHERE user_id=?',(uid,))
@@ -159,6 +159,9 @@ async def run_command(update,context,command):
 
 async def on_menu_text(update,context):
     text=(update.effective_message.text or '').strip();uid=update.effective_user.id
+    if is_roman(uid) and text.lower() in ('справка','❓ справка'):
+        from bot.menu_help import show_help
+        await show_help(update.effective_message,uid);return True
     if text not in SHORTCUTS and text not in CATEGORIES.values() and text not in (HOME,ALL):return False
     if not allowed(uid):
         await update.effective_message.reply_text('Меню недоступно: проверь доступ у владельца.',reply_markup=ReplyKeyboardRemove());return True
@@ -176,6 +179,11 @@ async def on_menu_callback(update,context):
     if q.message.chat.type!='private':await q.answer('Открой меню в личке с ботом',show_alert=True);return
     if not allowed(uid):await q.answer('Нет доступа',show_alert=True);return
     parts=q.data.split(':');action=parts[1]
+    if action=='help':
+        if not is_roman(uid):await q.answer('Справка владельца недоступна',show_alert=True);return
+        await q.answer()
+        from bot.menu_help import show_help
+        await show_help(q.message,uid,parts[2] if len(parts)>2 else None);return
     if action=='cmd':
         command=parts[2]
         if command not in allowed(uid):await q.answer('Раздел недоступен',show_alert=True);return

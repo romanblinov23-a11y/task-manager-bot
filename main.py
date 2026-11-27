@@ -402,7 +402,7 @@ _ROMAN_COMMANDS = [
     BotCommand("revenue", "Выручка: отчёты, план/факт, P&L"),
     BotCommand("messaging", "Написать сотруднику, в чат или разослать группе"),
     BotCommand("regulations", "Регламенты работы с ботом"),
-    BotCommand("help", "Список команд"),
+    BotCommand("help", "Справка по кнопкам и командам"),
 ]
 
 _ONBOARDING_COMMANDS = [BotCommand("start", "Пройти онбординг")]
@@ -444,6 +444,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_events_callback, pattern=r"^events:"))
     app.add_handler(CommandHandler("start", on_start, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("help", on_help, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("spravka", on_help, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("register_project", on_register_project, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("register_monitor_chat", on_register_monitor_chat, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("onboard", on_force_onboard, filters=filters.ChatType.PRIVATE))
