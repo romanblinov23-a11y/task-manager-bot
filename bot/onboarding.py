@@ -435,6 +435,10 @@ _COMMANDS_TEXT = (
 
 
 async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from bot.menu import allowed, show_menu
+    if allowed(update.effective_user.id):
+        await show_menu(update.effective_message, update.effective_user.id)
+        return
     if str(update.effective_user.id) == str(ROMAN_TELEGRAM_ID):
         await update.effective_message.reply_text(
             "Привет, Роман! Выбери нужный раздел мониторинга и отчётности в меню.\n\n"
@@ -445,6 +449,10 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def on_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from bot.menu import allowed, show_menu
+    if allowed(update.effective_user.id):
+        await show_menu(update.effective_message, update.effective_user.id)
+        return
     if str(update.effective_user.id) != str(ROMAN_TELEGRAM_ID):
         return
     await update.effective_message.reply_text(_COMMANDS_TEXT)

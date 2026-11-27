@@ -34,7 +34,8 @@ def test_migration_removes_only_task_access():
 def test_startup_keeps_reports_and_monitoring_without_task_handlers(monkeypatch):
     import main
 
-    app = SimpleNamespace(add_handler=Mock(), job_queue=SimpleNamespace(run_daily=Mock(), run_repeating=Mock()), run_polling=Mock())
+    app = SimpleNamespace(handlers={0: []}, bot_data={}, add_handler=Mock(), job_queue=SimpleNamespace(run_daily=Mock(), run_repeating=Mock()), run_polling=Mock())
+    app.add_handler.side_effect = lambda handler: app.handlers[0].append(handler)
     builder = Mock()
     builder.token.return_value = builder
     builder.post_init.return_value = builder
@@ -44,6 +45,8 @@ def test_startup_keeps_reports_and_monitoring_without_task_handlers(monkeypatch)
     monkeypatch.setattr(main, 'start_dashboard_server', Mock())
     main.main()
 
+    from bot.menu import CATALOG
+    assert set(CATALOG) <= set(app.bot_data['menu_commands'])
     commands = set()
     for call in app.add_handler.call_args_list:
         handler = call.args[0]

@@ -98,6 +98,7 @@ def _commands_for_manager(manager: dict) -> list[BotCommand]:
         commands.append(BotCommand("spot_events", "Загрузить мероприятия проекта на неделю"))
     if manager['status'] == 'active' and manager['position'] == 'Управляющий':
         commands.append(BotCommand('manager_report', 'Ежемесячный отчет управляющего'))
+        commands.append(BotCommand('menu', 'Главное меню с кнопками'))
     if BLOCK_MONITORING in blocks:
         if manager["position"] == "Управляющий":
             commands.append(BotCommand("add_competitor", "Добавить конкурента на рынок"))
@@ -135,12 +136,17 @@ async def sync_employee_commands(bot, uid: int) -> None:
     текущие блоки/роль/статус. Если доступа нет (ещё не подтверждён или
     удалён) — персональное меню снимается, и он видит только дефолтное
     (/start, см. main.py), пока владелец не подтвердит доступ."""
+    from bot.menu import sync_keyboard, is_roman
+    if is_roman(uid):
+        await sync_keyboard(bot, uid)
+        return
     manager = get_manager(uid)
     if not manager or manager["status"] != "active":
         try:
             await bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=uid))
         except Exception:
             pass
+        await sync_keyboard(bot, uid)
         return
     commands = _commands_for_manager(manager)
     try:
@@ -150,6 +156,7 @@ async def sync_employee_commands(bot, uid: int) -> None:
             await bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=uid))
     except Exception:
         pass
+    await sync_keyboard(bot, uid)
 
 
 def _manager_list_keyboard(markets: list[dict], legacy: list[dict]) -> InlineKeyboardMarkup:

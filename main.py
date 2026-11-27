@@ -5,6 +5,7 @@ from datetime import time as dt_time
 from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
+from bot.menu import on_menu_command, on_menu_callback, sync_keyboard
 from bot.manager_report_flow import (
     on_manager_report_command, on_manager_kpi_plan_command, on_manager_report_callback,
 )
@@ -287,6 +288,7 @@ from config.settings import (
     MONITORING_REMINDER_TIME,
     MONTHLY_PLAN_REMINDER_TIME,
     OWNER_TELEGRAM_IDS,
+    ROMAN_TELEGRAM_ID,
     REVENUE_REPORT_TIME,
     SHIFT_REPORT_DISPATCH_TIME,
     SHIFT_REPORT_OWNER_ESCALATE_TIME,
@@ -384,6 +386,7 @@ def _parse_time(value: str, tzinfo) -> dt_time:
 
 
 _ROMAN_COMMANDS = [
+    BotCommand("menu", "Главное меню с кнопками"),
     BotCommand("manager_report", "Ежемесячный отчет управляющего"),
     BotCommand("manager_kpi_plan", "Планы гостевых KPI по спотам"),
     BotCommand("spot_events", "Загрузить мероприятия проекта на неделю"),
@@ -416,6 +419,8 @@ async def _set_bot_commands(app) -> None:
             [command for command in _ROMAN_COMMANDS if command.command not in ("founders_report", "manager_kpi_plan", "manager_report") or has_fp_report_access(int(owner_id))],
             scope=BotCommandScopeChat(chat_id=int(owner_id)),
         )
+    if ROMAN_TELEGRAM_ID:
+        await sync_keyboard(app.bot, int(ROMAN_TELEGRAM_ID))
     # Уже подтверждённым сотрудникам восстанавливаем их персональное меню —
     # иначе после смены дефолтного списка на /start они бы его потеряли.
     for manager in list_managers():
@@ -429,6 +434,8 @@ def main() -> None:
     init_personal_data_schema()
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_set_bot_commands).build()
 
+    app.add_handler(CommandHandler("menu", on_menu_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CallbackQueryHandler(on_menu_callback, pattern=r"^nav:"))
     app.add_handler(CommandHandler("manager_report", on_manager_report_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("manager_kpi_plan", on_manager_kpi_plan_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(on_manager_report_callback, pattern=r"^mr:"))
@@ -700,6 +707,7 @@ def main() -> None:
     # как Рома включит публичный домен в Railway (Settings → Networking),
     # порт просто никуда не смотрит наружу — команда /shift_dashboard сама
     # предупредит, если PUBLIC_BASE_URL ещё не задан.
+    app.bot_data["menu_commands"] = {command: handler.callback for handlers in app.handlers.values() for handler in handlers if isinstance(handler, CommandHandler) for command in handler.commands}
     start_dashboard_server(DASHBOARD_PORT)
 
     app.run_polling()

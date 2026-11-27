@@ -1,4 +1,5 @@
 from bot.spot_events import on_events_reply
+from bot.menu import on_menu_text
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -33,6 +34,9 @@ from config.settings import ROMAN_TELEGRAM_ID
 
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Ответы на активные диалоги отчётов, настроек и регистрации."""
+    if await on_menu_text(update, context):
+        return
+
     if await on_manager_report_lifecycle_reply(update, context):
         return
 
@@ -127,10 +131,10 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def message_help(update: Update) -> None:
-    await update.effective_message.reply_text("Выбери нужный раздел в меню команд или открой /help.")
+    await update.effective_message.reply_text("Открой /menu — нужные разделы доступны кнопками.")
 
 
 async def on_private_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Приём документов во время сбора отчёта для учредителей."""
     if not await on_fp_report_document(update, context):
-        await update.effective_message.reply_text("Для отчётов управляющих новый раздел пока готовится. Открой меню доступных команд.")
+        await update.effective_message.reply_text("Для отчета управляющего открой /manager_report или выбери его в /menu. Бот задаст вопросы; документы загружать не нужно.")
