@@ -1,8 +1,9 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity, Update
 from telegram.ext import ContextTypes
 
 from config.chats import get_all_bindings, get_all_thread_bindings
 from monitoring.constants import AVAILABLE_BLOCKS, BLOCK_LABELS
+from monitoring import broadcasts
 from monitoring.managers import get_manager_blocks, is_owner, list_managers
 from monitoring.markets import get_market
 from monitoring.shift_reports import list_report_chats
@@ -15,13 +16,6 @@ _awaiting_dm: dict[str, dict] = {}
 # ждём текст сообщения для конкретного зарегистрированного чата
 _awaiting_chat_message: dict[str, dict] = {}
 
-# telegram_user_id (str) владельца -> [{"telegram_user_id", "name"}, ...] —
-# аудитория выбрана, ждём текст рассылки
-_awaiting_broadcast_text: dict[str, list[dict]] = {}
-
-# telegram_user_id (str) владельца -> {"audience": [...], "text": str} —
-# текст рассылки набран, ждём подтверждения
-_pending_broadcast: dict[str, dict] = {}
 
 
 def _active_managers() -> list[dict]:
@@ -40,6 +34,7 @@ async def on_message_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     переписки в Telegram)."""
     if not is_owner(update.effective_user.id):
         return
+    broadcasts.pause(update.effective_user.id)
     managers = _active_managers()
     if not managers:
         await update.effective_message.reply_text("Пока нет ни одного активного сотрудника.")
@@ -122,6 +117,7 @@ async def on_message_chat_command(update: Update, context: ContextTypes.DEFAULT_
     чат проекта или чат команды точки) и пишет туда сообщение через бота."""
     if not is_owner(update.effective_user.id):
         return
+    broadcasts.pause(update.effective_user.id)
     chats = _registered_chats()
     if not chats:
         await update.effective_message.reply_text("Пока нет ни одного зарегистрированного чата.")
@@ -189,6 +185,14 @@ async def on_broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYP
     if not _active_managers():
         await update.effective_message.reply_text("Пока нет ни одного активного сотрудника.")
         return
+    draft=broadcasts.resume(update.effective_user.id)
+    if draft and draft['state'] in ('review','failed'):
+        await _preview_broadcast(update.effective_message,context,draft);return
+    if draft and draft['state']=='composing':
+        names=', '.join(m['name'] for m in draft['audience'])
+        await update.effective_message.reply_text('Продолжаем черновик. Получатели: '+names+'\nПришли текст и/или PDF; перед отправкой покажу предпросмотр.',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Отмена',callback_data='bcast_cancel:'+draft['token'])]]));return
+    if draft and draft['state']=='sending':
+        await update.effective_message.reply_text('Рассылка уже отправляется.');return
     await update.effective_message.reply_text("Кому шлём рассылку?", reply_markup=_scope_keyboard())
 
 
@@ -196,9 +200,13 @@ async def _start_broadcast_text(message, owner_id: str, audience: list[dict]) ->
     if not audience:
         await message.reply_text("По этому критерию не нашлось ни одного активного сотрудника.")
         return
-    _awaiting_broadcast_text[owner_id] = audience
+    _awaiting_dm.pop(owner_id,None)
+    _awaiting_chat_message.pop(owner_id,None)
+    draft=broadcasts.start(int(owner_id),[{'telegram_user_id':m['telegram_user_id'],'name':m['name']} for m in audience])
+    if draft is None:
+        await message.reply_text('Сначала заверши текущую отправку или отмени неотправленный остаток.');return
     names = ", ".join(m["name"] for m in audience)
-    await message.reply_text(f"Получатели ({len(audience)}): {names}\n\nНапиши текст рассылки:")
+    await message.reply_text(f"Получатели ({len(audience)}): {names}\n\nПришли текст и/или PDF. Можно одним сообщением с подписью или отдельно. Затем покажу предпросмотр. Пока ты не нажмешь «Отправить», получателям ничего не уйдет.",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Отменить рассылку',callback_data='bcast_cancel:'+draft['token'])]]))
 
 
 async def on_broadcast_scope_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -279,57 +287,128 @@ async def on_broadcast_block_choice(update: Update, context: ContextTypes.DEFAUL
     await _start_broadcast_text(query.message, str(query.from_user.id), audience)
 
 
-def _broadcast_confirm_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("✅ Отправить", callback_data="bcast_confirm"), InlineKeyboardButton("❌ Отмена", callback_data="bcast_cancel")]]
-    )
+def _broadcast_confirm_keyboard(draft):
+    token=draft['token']
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton('✅ Отправить' if draft['state']!='failed' else 'Повторить недоставленное',callback_data='bcast_confirm:'+token)],
+        [InlineKeyboardButton('❌ Отмена',callback_data='bcast_cancel:'+token)],
+    ])
 
 
-async def on_broadcast_text_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Забирает текст рассылки после того, как аудитория уже выбрана.
-    Возвращает True, если сообщение обработано — по конвенции остальных
-    claim-хендлеров в on_private_text."""
-    owner_id = str(update.effective_user.id)
-    audience = _awaiting_broadcast_text.pop(owner_id, None)
-    if audience is None:
-        return False
+def _parts(draft):
+    value=draft['content'];parts=[]
+    if value['text']:parts.append(('text',value))
+    parts.extend(('document',doc) for doc in value['documents'])
+    return parts
 
-    text = update.effective_message.text or ""
-    _pending_broadcast[owner_id] = {"audience": audience, "text": text}
-    names = ", ".join(m["name"] for m in audience)
-    await update.effective_message.reply_text(
-        f"Получатели ({len(audience)}): {names}\n\nТекст:\n{text}\n\nОтправляем?",
-        reply_markup=_broadcast_confirm_keyboard(),
-    )
+
+async def _send_part(bot,chat_id,part):
+    kind,value=part
+    if kind=='text':
+        entities=[MessageEntity.de_json(e,bot) for e in value['entities']]
+        return await bot.send_message(chat_id=chat_id,text=value['text'],entities=entities,parse_mode=None)
+    return await bot.send_document(chat_id=chat_id,document=value['file_id'],filename=value['file_name'])
+
+
+async def _preview_broadcast(message,context,draft):
+    names=', '.join(m['name'] for m in draft['audience'])
+    if draft['state']=='failed':
+        await message.reply_text('Предыдущая отправка завершилась частично. Уже доставленные части повторно не отправляем. Получатели: '+names,reply_markup=_broadcast_confirm_keyboard(draft));return
+    await message.reply_text(f"Предпросмотр рассылки. Получатели ({len(draft['audience'])}): {names}\nНиже текст и файлы — пока только тебе.")
+    for part in _parts(draft):await _send_part(context.bot,draft['owner_id'],part)
+    await message.reply_text('Можно дописать/заменить текст или прикрепить PDF отдельным сообщением. После изменения старая кнопка отправки перестанет действовать. Отправить текущую версию?',reply_markup=_broadcast_confirm_keyboard(draft))
+
+
+async def on_broadcast_text_reply(update,context):
+    return await _broadcast_content(update,context)
+
+
+async def on_broadcast_document(update,context):
+    return await _broadcast_content(update,context)
+
+
+async def _broadcast_content(update,context):
+    uid=update.effective_user.id
+    if not is_owner(uid):return False
+    draft=broadcasts.get(uid)
+    if not draft or draft['state'] not in ('composing','review','failed','sending'):return False
+    message=update.effective_message
+    if draft['state'] in ('failed','sending'):
+        await message.reply_text('Сначала заверши повторную доставку или отмени текущую рассылку. Текст и файлы не изменены.');return True
+    text=getattr(message,'text',None)
+    if text and text.strip().lower() in ('отмена','/cancel'):
+        broadcasts.cancel(uid,draft['token']);await message.reply_text('Рассылка отменена. Ничего нового не отправлено.');return True
+    value=dict(draft['content']);value['documents']=list(value['documents'])
+    document=getattr(message,'document',None)
+    caption=getattr(message,'caption',None)
+    if document:
+        if getattr(message,'media_group_id',None):
+            await message.reply_text('Пришли PDF отдельным файлом, не альбомом. Черновик сохранен.');return True
+        if len(value['documents'])>=10 and all(d['file_id']!=document.file_id for d in value['documents']):
+            await message.reply_text('В одной рассылке можно прикрепить до 10 документов.');return True
+        if all(d['file_id']!=document.file_id for d in value['documents']):value['documents'].append({'file_id':document.file_id,'file_name':document.file_name or 'document.pdf'})
+    if text is not None or caption is not None:
+        value['text']=text if text is not None else caption
+        if len(value['text'].encode('utf-16-le'))//2>4096:
+            await message.reply_text('Текст слишком длинный для одного сообщения Telegram. Сократи его до 4096 символов. Черновик не изменен.');return True
+        entities=getattr(message,'entities',None) if text is not None else getattr(message,'caption_entities',None)
+        value['entities']=[entity.to_dict() for entity in (entities or [])]
+    if not value['text'] and not value['documents']:return False
+    draft=broadcasts.content(uid,draft['token'],value)
+    if not draft:
+        await message.reply_text('Версия уже изменилась. Открой /broadcast.');return True
+    try:await _preview_broadcast(message,context,draft)
+    except Exception:
+        await message.reply_text('Черновик сохранен, но предпросмотр не доставлен. Открой /broadcast и проверь его перед отправкой.')
     return True
 
 
-async def on_broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    owner_id = str(query.from_user.id)
-    state = _pending_broadcast.pop(owner_id, None)
-    if not state:
-        await query.answer("Сессия неактуальна", show_alert=True)
-        return
+async def on_broadcast_confirm(update,context):
+    query=update.callback_query;uid=query.from_user.id
+    if not is_owner(uid):await query.answer('Нет доступа',show_alert=True);return
+    token=query.data.partition(':')[2]
+    draft=broadcasts.get(uid)
+    if not token or not draft or draft['token']!=token or draft['state'] not in ('review','failed'):
+        await query.answer('Предпросмотр устарел или уже отправлен',show_alert=True);return
+    current={m['telegram_user_id'] for m in _active_managers()}
+    removed=[m['name'] for m in draft['audience'] if m['telegram_user_id'] not in current]
+    if removed:
+        await query.answer()
+        await query.message.reply_text('Доступ получателей изменился: '+', '.join(removed)+'. Отмени эту рассылку и выбери получателей заново. Ничего не отправлено.',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('Отмена',callback_data='bcast_cancel:'+token)]]));return
+    if not broadcasts.claim(uid,token):await query.answer('Эта версия уже отправляется',show_alert=True);return
+    try:await query.answer('Рассылаю…')
+    except Exception:
+        broadcasts.finish(uid,token,'failed');return
+    done=broadcasts.delivered(token);parts=_parts(draft);failed=[]
+    for manager in draft['audience']:
+        target=manager['telegram_user_id']
+        for index,part in enumerate(parts):
+            if (target,index) in done:continue
+            try:
+                await _send_part(context.bot,target,part)
+                broadcasts.record(token,target,index);done.add((target,index))
+            except Exception:
+                failed.append(manager['name']);break
+    broadcasts.finish(uid,token,'failed' if failed else 'completed')
+    sent_count=len(draft['audience'])-len(failed)
+    result=f"✅ Полностью доставлено {sent_count} из {len(draft['audience'])}."
+    if failed:result+='\nНе все части доставлены: '+', '.join(failed)+'. Уже доставленное при повторе не дублируется.'
+    await query.edit_message_text(result,reply_markup=_broadcast_confirm_keyboard(broadcasts.get(uid)) if failed else None)
 
-    await query.answer("Рассылаю…")
-    text = f"На связи Havana Standart!\n\n{state['text']}"
-    failed = []
-    for manager in state["audience"]:
-        try:
-            await context.bot.send_message(chat_id=manager["telegram_user_id"], text=text)
-        except Exception:
-            failed.append(manager["name"])
 
-    sent_count = len(state["audience"]) - len(failed)
-    result = f"✅ Отправлено {sent_count} из {len(state['audience'])}."
-    if failed:
-        result += f"\nНе доставлено: {', '.join(failed)}."
-    await query.edit_message_text(result)
-
-
-async def on_broadcast_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    _pending_broadcast.pop(str(query.from_user.id), None)
+async def on_broadcast_cancel(update,context):
+    query=update.callback_query;uid=query.from_user.id
+    if not is_owner(uid):await query.answer('Нет доступа',show_alert=True);return
+    token=query.data.partition(':')[2]
+    if not token or not broadcasts.cancel(uid,token):
+        await query.answer('Версия устарела или уже отправляется',show_alert=True);return
     await query.answer()
-    await query.edit_message_text("Отменено, рассылка не отправлена.")
+    await query.edit_message_text('Отменено. Новых отправок не будет; если ранее была частичная доставка, доставленные сообщения у получателей сохраняются.')
+
+
+async def on_command_navigation(update,context):
+    """Новая команда не должна превращать ответы другого сценария в текст рассылки."""
+    text=(update.effective_message.text or '').split(maxsplit=1)[0]
+    command=text.split('@')[0].lower()
+    if command not in ('/broadcast','/cancel'):
+        broadcasts.pause(update.effective_user.id)

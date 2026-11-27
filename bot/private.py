@@ -14,7 +14,8 @@ from bot.handover_setup import on_set_handover_report_reply
 from bot.manager_admin import on_manager_admin_reply
 from bot.market_operator import on_set_consent_text_reply, on_set_operator_reply
 from bot.meetings import on_meeting_agenda_reply, on_meeting_postpone_reply, on_meeting_schedule_reply
-from bot.messaging import on_broadcast_text_reply, on_message_chat_reply, on_message_reply
+from bot.messaging import on_broadcast_document, on_broadcast_text_reply, on_message_chat_reply, on_message_reply
+from monitoring.managers import is_owner
 from bot.monitor_chats import on_register_monitor_chat_triggers_reply
 from bot.monitoring_flow import on_monitoring_reply
 from bot.monthly_plan_flow import on_set_monthly_plan_reply
@@ -35,6 +36,9 @@ from config.settings import ROMAN_TELEGRAM_ID
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Ответы на активные диалоги отчётов, настроек и регистрации."""
     if await on_menu_text(update, context):
+        return
+
+    if await on_broadcast_text_reply(update, context):
         return
 
     if await on_manager_report_lifecycle_reply(update, context):
@@ -103,9 +107,6 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if await on_message_chat_reply(update, context):
         return
 
-    if await on_broadcast_text_reply(update, context):
-        return
-
     if await on_set_operator_reply(update, context):
         return
 
@@ -135,6 +136,12 @@ async def message_help(update: Update) -> None:
 
 
 async def on_private_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Приём документов во время сбора отчёта для учредителей."""
+    """Файлы активной рассылки или отчета для учредителей."""
+    if await on_broadcast_document(update, context):
+        return
+    if is_owner(update.effective_user.id):
+        if await on_fp_report_document(update, context):return
+        await update.effective_message.reply_text("Для рассылки открой /broadcast, выбери получателей и пришли текст и/или PDF. Перед отправкой будет предпросмотр. Этот файл никому не отправлен.")
+        return
     if not await on_fp_report_document(update, context):
         await update.effective_message.reply_text("Для отчета управляющего открой /manager_report или выбери его в /menu. Бот задаст вопросы; документы загружать не нужно.")

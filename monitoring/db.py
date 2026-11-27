@@ -314,6 +314,8 @@ def init_schema() -> None:
             )
             conn.execute("DROP TABLE report_chat_old")
         conn.executescript(_SCHEMA)
+        from monitoring.broadcasts import SCHEMA as broadcast_schema
+        conn.executescript(broadcast_schema)
         conn.execute("CREATE TABLE IF NOT EXISTS bot_menu_keyboard (user_id INTEGER PRIMARY KEY, signature TEXT NOT NULL)")
         from manager_report.storage import SCHEMA as manager_report_schema
         conn.executescript(manager_report_schema)

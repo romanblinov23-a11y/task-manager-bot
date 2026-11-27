@@ -10,6 +10,7 @@ from bot.manager_report_flow import (
     on_manager_report_command, on_manager_kpi_plan_command, on_manager_report_callback,
 )
 from manager_report.storage import recover_deliveries
+from monitoring.broadcasts import recover as recover_broadcasts
 from bot.manager_report_lifecycle import callback as on_manager_report_lifecycle_callback, schedule as schedule_manager_reports
 from bot.spot_event_schedule import send_event_schedule_notices
 from bot.spot_events import on_events_command, on_events_callback
@@ -132,6 +133,7 @@ from bot.meetings import (
     send_meeting_confirmations,
 )
 from bot.messaging import (
+    on_command_navigation,
     on_broadcast_block_choice,
     on_broadcast_cancel,
     on_broadcast_command,
@@ -431,9 +433,11 @@ async def _set_bot_commands(app) -> None:
 def main() -> None:
     init_monitoring_schema()
     recover_deliveries()
+    recover_broadcasts()
     init_personal_data_schema()
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_set_bot_commands).build()
 
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.COMMAND, on_command_navigation), group=-1)
     app.add_handler(CommandHandler("menu", on_menu_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(on_menu_callback, pattern=r"^nav:"))
     app.add_handler(CommandHandler("manager_report", on_manager_report_command, filters=filters.ChatType.PRIVATE))
@@ -645,8 +649,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(on_broadcast_market_choice, pattern=r"^bcast_market:"))
     app.add_handler(CallbackQueryHandler(on_broadcast_position_choice, pattern=r"^bcast_position:"))
     app.add_handler(CallbackQueryHandler(on_broadcast_block_choice, pattern=r"^bcast_block:"))
-    app.add_handler(CallbackQueryHandler(on_broadcast_confirm, pattern=r"^bcast_confirm$"))
-    app.add_handler(CallbackQueryHandler(on_broadcast_cancel, pattern=r"^bcast_cancel$"))
+    app.add_handler(CallbackQueryHandler(on_broadcast_confirm, pattern=r"^bcast_confirm(?::[0-9a-f]{12})?$"))
+    app.add_handler(CallbackQueryHandler(on_broadcast_cancel, pattern=r"^bcast_cancel(?::[0-9a-f]{12})?$"))
     app.add_handler(CallbackQueryHandler(on_market_settings_market_choice, pattern=r"^msett_market:"))
     app.add_handler(CallbackQueryHandler(on_market_settings_toggle_finance, pattern=r"^msett_togglefinance:"))
     app.add_handler(CallbackQueryHandler(on_market_settings_toggle_fp, pattern=r"^msett_togglefp:"))

@@ -151,6 +151,9 @@ async def run_command(update,context,command):
     uid=update.effective_user.id
     if command not in allowed(uid):
         await update.effective_message.reply_text('Этот раздел больше недоступен. Открой /menu, чтобы обновить кнопки.',reply_markup=reply_keyboard(uid));return
+    if command!='broadcast':
+        from monitoring.broadcasts import pause
+        pause(uid)
     handler=context.application.bot_data.get('menu_commands',{}).get(command)
     if handler is None:
         await update.effective_message.reply_text('Открой раздел командой /'+command);return
@@ -161,10 +164,14 @@ async def on_menu_text(update,context):
     text=(update.effective_message.text or '').strip();uid=update.effective_user.id
     if is_roman(uid) and text.lower() in ('справка','❓ справка'):
         from bot.menu_help import show_help
+        from monitoring.broadcasts import pause
+        pause(uid)
         await show_help(update.effective_message,uid);return True
     if text not in SHORTCUTS and text not in CATEGORIES.values() and text not in (HOME,ALL):return False
     if not allowed(uid):
         await update.effective_message.reply_text('Меню недоступно: проверь доступ у владельца.',reply_markup=ReplyKeyboardRemove());return True
+    from monitoring.broadcasts import pause
+    pause(uid)
     if text==HOME:await show_menu(update.effective_message,uid)
     elif text==ALL:await update.effective_message.reply_text('Все доступные команды:',reply_markup=inline_menu(uid))
     elif text in CATEGORIES.values():
@@ -179,6 +186,9 @@ async def on_menu_callback(update,context):
     if q.message.chat.type!='private':await q.answer('Открой меню в личке с ботом',show_alert=True);return
     if not allowed(uid):await q.answer('Нет доступа',show_alert=True);return
     parts=q.data.split(':');action=parts[1]
+    if action in ('help','cat','home'):
+        from monitoring.broadcasts import pause
+        pause(uid)
     if action=='help':
         if not is_roman(uid):await q.answer('Справка владельца недоступна',show_alert=True);return
         await q.answer()
