@@ -1,5 +1,6 @@
 from bot.spot_events import on_events_reply
 from bot.menu import on_menu_text
+from bot.portfolio import on_portfolio_reply
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -39,6 +40,9 @@ async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if await on_broadcast_text_reply(update, context):
+        return
+
+    if await on_portfolio_reply(update, context):
         return
 
     if await on_manager_report_lifecycle_reply(update, context):

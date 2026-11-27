@@ -6,6 +6,7 @@ from telegram import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from bot.menu import on_menu_command, on_menu_callback, sync_keyboard
+from bot.portfolio import on_portfolio_command, on_portfolio_callback
 from bot.manager_report_flow import (
     on_manager_report_command, on_manager_kpi_plan_command, on_manager_report_callback,
 )
@@ -388,6 +389,7 @@ def _parse_time(value: str, tzinfo) -> dt_time:
 
 
 _ROMAN_COMMANDS = [
+    BotCommand("portfolio", "Живые финансы проектов и дивиденды УК"),
     BotCommand("menu", "Главное меню с кнопками"),
     BotCommand("manager_report", "Ежемесячный отчет управляющего"),
     BotCommand("manager_kpi_plan", "Планы гостевых KPI по спотам"),
@@ -418,7 +420,7 @@ async def _set_bot_commands(app) -> None:
     # Для владельцев в личке — полный список
     for owner_id in OWNER_TELEGRAM_IDS:
         await app.bot.set_my_commands(
-            [command for command in _ROMAN_COMMANDS if command.command not in ("founders_report", "manager_kpi_plan", "manager_report") or has_fp_report_access(int(owner_id))],
+            [command for command in _ROMAN_COMMANDS if command.command not in ("founders_report", "manager_kpi_plan", "manager_report", "portfolio") or has_fp_report_access(int(owner_id))],
             scope=BotCommandScopeChat(chat_id=int(owner_id)),
         )
     if ROMAN_TELEGRAM_ID:
@@ -438,6 +440,8 @@ def main() -> None:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(_set_bot_commands).build()
 
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.COMMAND, on_command_navigation), group=-1)
+    app.add_handler(CommandHandler("portfolio", on_portfolio_command, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CallbackQueryHandler(on_portfolio_callback, pattern=r"^pf:"))
     app.add_handler(CommandHandler("menu", on_menu_command, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(on_menu_callback, pattern=r"^nav:"))
     app.add_handler(CommandHandler("manager_report", on_manager_report_command, filters=filters.ChatType.PRIVATE))

@@ -11,6 +11,9 @@ import threading
 from pathlib import Path
 
 from aiohttp import web
+from portfolio import storage as portfolio_storage
+from portfolio import service as portfolio_service
+from config.timeutil import today as tz_today
 
 from dashboard.commentary import generate_commentary
 from dashboard.data import PERIODS, build_correlation_matrix, fetch_dashboard_series, resolve_period
@@ -71,9 +74,60 @@ async def _handle_dashboard(request: web.Request) -> web.Response:
     return web.Response(text=html, content_type="text/html")
 
 
+
+async def _portfolio_authorized(request):
+    token=request.headers.get('Authorization','').removeprefix('Bearer ') or request.query.get('token','')
+    expected=await asyncio.to_thread(portfolio_storage.token)
+    return bool(token and secrets.compare_digest(token,expected))
+
+
+def _private_headers():
+    return {'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff',
+            'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"}
+
+
+async def _handle_portfolio(request):
+    if not await _portfolio_authorized(request):return web.Response(text=render_forbidden_page(),content_type='text/html',status=403,headers=_private_headers())
+    html=await asyncio.to_thread((_STATIC_DIR/'portfolio.html').read_text,encoding='utf-8')
+    return web.Response(text=html,content_type='text/html',headers=_private_headers())
+
+
+async def _handle_portfolio_api(request):
+    if not await _portfolio_authorized(request):return web.json_response({'error':'Ссылка недействительна. Открой портфель через бота.'},status=403,headers=_private_headers())
+    month=request.query.get('month',tz_today().strftime('%Y-%m'))
+    if not portfolio_service.valid_month(month) or month>tz_today().strftime('%Y-%m'):
+        return web.json_response({'error':'Выбери существующий месяц, не позднее текущего.'},status=400,headers=_private_headers())
+    refresh=request.query.get('refresh')=='1'
+    try:
+        mid=request.query.get('market_id')
+        if mid:
+            if not mid.isdigit():raise ValueError('Проект не найден')
+            market=next((m for m in await asyncio.to_thread(list_markets) if m['id']==int(mid) and m.get('surf_spot_key')),None)
+            if not market:raise ValueError('Проект не найден')
+            value=await asyncio.to_thread(portfolio_service.request_project,market,month,refresh)
+        else:value=await asyncio.to_thread(portfolio_service.request_portfolio,month,refresh)
+        return web.json_response(value,headers=_private_headers())
+    except ValueError as e:return web.json_response({'error':str(e)},status=400,headers=_private_headers())
+    except Exception:
+        logger.exception('Не удалось обновить портфель')
+        return web.json_response({'error':'Данные временно недоступны. Попробуй обновить позже.'},status=503,headers=_private_headers())
+
+
+async def _handle_portfolio_meta(request):
+    if not await _portfolio_authorized(request):return web.json_response({'error':'Нет доступа'},status=403,headers=_private_headers())
+    markets=await asyncio.to_thread(list_markets)
+    result=[]
+    for m in markets:
+        if m.get('surf_spot_key'):result.append({'id':m['id'],'name':m['name'],'share':await asyncio.to_thread(portfolio_storage.ownership,m)})
+    return web.json_response({'projects':result,'current_month':tz_today().strftime('%Y-%m')},headers=_private_headers())
+
+
 def _build_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/dashboard", _handle_dashboard)
+    app.router.add_get("/portfolio", _handle_portfolio)
+    app.router.add_get("/portfolio/api", _handle_portfolio_api)
+    app.router.add_get("/portfolio/meta", _handle_portfolio_meta)
     app.router.add_static("/dashboard/static/", _STATIC_DIR)
     return app
 
@@ -90,7 +144,7 @@ def start_dashboard_server(port: int) -> None:
         asyncio.set_event_loop(loop)
         try:
             app = _build_app()
-            runner = web.AppRunner(app)
+            runner = web.AppRunner(app, access_log=None)
             loop.run_until_complete(runner.setup())
             site = web.TCPSite(runner, "0.0.0.0", port)
             loop.run_until_complete(site.start())

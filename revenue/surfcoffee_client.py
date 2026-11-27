@@ -391,3 +391,45 @@ class SurfCoffeeClient:
         if any(row.get('spot_id') != SPOTS[spot_key]['id'] for row in body['data']):
             raise RuntimeError('Распределение прибыли относится к другой точке')
         return body['data']
+
+    def get_dividend_payments(self, spot_key: str, year: int) -> list:
+        """Утвержденные операции «Дивиденды Партнерам», с датой операции, без реквизитов."""
+        self.switch_spot(SPOTS[spot_key]['id'])
+        response=self._with_retry(lambda:self._client.get(f'{BASE_URL}/api/v3/directories/money_transactions/cash_flow_articles'))
+        response.raise_for_status();body=response.json()
+        if body.get('success') is not True or not isinstance(body.get('data'),list):
+            raise RuntimeError('Не получен справочник дивидендных операций')
+        articles=[r['id'] for r in body['data'] if r.get('code')=='dividendy_partneram' and not r.get('deleted_at')]
+        if len(articles)!=1:raise RuntimeError('Статья дивидендов не определена однозначно')
+        article=articles[0];result=[];seen=set();page=1
+        while True:
+            payload={'page':page,'per_page':100,'dds_articles':[article],'status':[2],
+                     'date_from':f'{year}-01-01','date_to':f'{year}-12-31'}
+            response=self._with_retry(lambda:self._client.post(f'{BASE_URL}/api/v3/money_transactions/list',json=payload))
+            response.raise_for_status();body=response.json()
+            data=body.get('data') or {}
+            if body.get('success') is not True or not isinstance(data,dict) or not isinstance(data.get('data'),list):
+                raise RuntimeError('Не получен реестр дивидендных операций')
+            for row in data['data']:
+                if row.get('spot_id')!=SPOTS[spot_key]['id']:raise RuntimeError('Операция относится к другой точке')
+                if row.get('status_id')!=2 or row.get('deleted_at'):continue
+                if row.get('cash_flow_article_id')!=article or row.get('pay_type_id')!=1:
+                    raise RuntimeError('Состав дивидендной операции требует сверки')
+                if row.get('id') is None:raise RuntimeError('У платежа отсутствует идентификатор')
+                if row['id'] in seen:continue
+                seen.add(row['id'])
+                # Создание записи не является датой перечисления. Отсутствующая дата остается неизвестной.
+                actual=row.get('date')
+                if actual is not None:
+                    try:actual=date.fromisoformat(actual).isoformat()
+                    except (TypeError,ValueError):raise RuntimeError('Неверная дата платежа') from None
+                    if not actual.startswith(str(year)+'-'):continue
+                from manager_report.model import number
+                amount=number(row.get('amount'))
+                if amount is None or amount<0:raise RuntimeError('Неверная сумма дивидендного платежа')
+                result.append({'id':str(row['id']),'date':actual,'amount':amount})
+            meta=data.get('meta') or {};last=meta.get('last_page')
+            if type(last) is not int or meta.get('current_page')!=page or last<page or last>500:raise RuntimeError('Неизвестна полнота реестра выплат')
+            if page==last:break
+            page+=1
+        return sorted(result,key=lambda r:(r['date'] or '',r['id']))

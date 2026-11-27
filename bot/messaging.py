@@ -410,5 +410,7 @@ async def on_command_navigation(update,context):
     """Новая команда не должна превращать ответы другого сценария в текст рассылки."""
     text=(update.effective_message.text or '').split(maxsplit=1)[0]
     command=text.split('@')[0].lower()
+    from portfolio.storage import dialog as portfolio_dialog
+    portfolio_dialog(update.effective_user.id,None)
     if command not in ('/broadcast','/cancel'):
         broadcasts.pause(update.effective_user.id)

@@ -13,6 +13,7 @@ logger=logging.getLogger(__name__)
 
 # command -> (подпись кнопки, раздел). Обработчики берутся из реальных CommandHandler.
 CATALOG={
+    'portfolio':('🏛 Финансовый портфель и дивиденды','reports'),
     'manager_report':('📄 Отчет управляющего за месяц','reports'),
     'view_reports':('🗂 Отчеты по сменам','reports'),
     'shift_dashboard':('📈 Дашборд смен','reports'),
@@ -151,6 +152,8 @@ async def run_command(update,context,command):
     uid=update.effective_user.id
     if command not in allowed(uid):
         await update.effective_message.reply_text('Этот раздел больше недоступен. Открой /menu, чтобы обновить кнопки.',reply_markup=reply_keyboard(uid));return
+    from portfolio.storage import dialog as portfolio_dialog
+    portfolio_dialog(uid,None)
     if command!='broadcast':
         from monitoring.broadcasts import pause
         pause(uid)

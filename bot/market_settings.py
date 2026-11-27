@@ -1,4 +1,5 @@
 from bot.manager_report_flow import previous_month
+from portfolio.storage import ownership
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
@@ -35,6 +36,7 @@ def _actions_keyboard(market: dict) -> InlineKeyboardMarkup:
             [InlineKeyboardButton("💰 Чат финпартнёров", callback_data=f"shrc_view:{market_id}:finance")],
             [InlineKeyboardButton("👥 Чат команды точки", callback_data=f"shrc_view:{market_id}:team")],
             [InlineKeyboardButton("📊 Планы гостевых KPI (Роман)", callback_data=f"mr:plan:{market_id}:{previous_month()}")],
+            [InlineKeyboardButton(f"🏛 Доля УК Havana Standart: {ownership(market):g}%", callback_data=f"pf:share:{market_id}")],
             [InlineKeyboardButton("🗑 Нормы списаний", callback_data=f"writeoffplan_market:{market_id}")],
             [InlineKeyboardButton("↩️ Другой рынок", callback_data="msett_back")],
         ]
